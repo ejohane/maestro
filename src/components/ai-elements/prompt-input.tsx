@@ -198,7 +198,9 @@ export function PromptInputProvider({
 
   // Keep a ref to attachments for cleanup on unmount (avoids stale closure)
   const attachmentsRef = useRef(attachmentFiles);
-  attachmentsRef.current = attachmentFiles;
+  useEffect(() => {
+    attachmentsRef.current = attachmentFiles;
+  }, [attachmentFiles]);
 
   // Cleanup blob URLs on unmount to prevent memory leaks
   useEffect(() => {
@@ -726,7 +728,7 @@ export const PromptInput = ({
 
     // Convert blob URLs to data URLs asynchronously
     Promise.all(
-      files.map(async ({ id, ...item }) => {
+      files.map(async ({ id: _id, ...item }) => {
         if (item.url && item.url.startsWith("blob:")) {
           const dataUrl = await convertBlobUrlToDataUrl(item.url);
           // If conversion failed, keep the original blob URL
