@@ -12,7 +12,20 @@ import {
   MessageActions,
   MessageAction,
 } from "@/components/ai-elements/message";
-import { toAIElementsMessages } from "@/lib/utils/message-adapter";
+import { toAIElementsMessages, type TextPart, type ReasoningPart, type ToolPart } from "@/lib/utils/message-adapter";
+import {
+  Reasoning,
+  ReasoningTrigger,
+  ReasoningContent,
+} from "@/components/ai-elements/reasoning";
+import {
+  Tool,
+  ToolHeader,
+  ToolContent,
+  ToolInput,
+  ToolOutput,
+} from "@/components/ai-elements/tool";
+import type { ToolUIPart } from "ai";
 import { Button } from "@/components/ui/button";
 import {
   ChevronLeft,
@@ -25,6 +38,7 @@ import {
   MessageSquare,
   CopyIcon,
   CheckIcon,
+  RotateCcw,
 } from "lucide-react";
 import { SaveSummaryModal } from "@/components/save-summary-modal";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -82,6 +96,22 @@ function formatDate(dateString: string): string {
   }
 }
 
+// Map OpenCode tool states to AI SDK UI states
+function mapToolState(state: ToolPart["state"]): ToolUIPart["state"] {
+  switch (state.status) {
+    case "pending":
+      return "input-streaming";
+    case "running":
+      return "input-available";
+    case "completed":
+      return "output-available";
+    case "error":
+      return "output-error";
+    default:
+      return "input-streaming";
+  }
+}
+
 export default function IssueViewPage() {
   const params = useParams();
   const projectId = params.id as string;
@@ -126,6 +156,7 @@ export default function IssueViewPage() {
     sendMessage,
     retrySession,
     clearError,
+    startNewSession,
   } = useChatSession({
     projectId,
     issueNumber,
@@ -134,6 +165,10 @@ export default function IssueViewPage() {
       if (activeTabRef.current === "details") {
         setHasUnread(true);
       }
+    },
+    onIssueUpdated: () => {
+      // Auto-refresh issue when agent modifies it via gh CLI
+      fetchIssue();
     },
   });
   
@@ -320,8 +355,17 @@ export default function IssueViewPage() {
                 <ExternalLink className="h-4 w-4 text-muted-foreground" />
               </a>
             )}
-            <Button variant="ghost" size="icon-sm" onClick={fetchIssue}>
+            <Button variant="ghost" size="icon-sm" onClick={fetchIssue} title="Refresh issue">
               <RefreshCw className="h-4 w-4" />
+            </Button>
+            <Button 
+              variant="ghost" 
+              size="icon-sm" 
+              onClick={startNewSession}
+              disabled={isSending || isStreaming}
+              title="Start new session"
+            >
+              <RotateCcw className="h-4 w-4" />
             </Button>
             <Button variant="ghost" size="icon-sm">
               <MoreHorizontal className="h-4 w-4" />
@@ -473,18 +517,71 @@ export default function IssueViewPage() {
               ) : messages.length === 0 || sessionError ? null : (
                 toAIElementsMessages(messages).map((message, index) => (
                   <Message key={message.id} from={message.role}>
-                    <MessageContent className={message.role === "user" ? "!bg-primary !text-primary-foreground" : ""}>
-                      {message.parts.map((part, partIndex) => {
-                        if (part.type === "text") {
-                          return (
-                            <MessageResponse key={partIndex}>
-                              {part.text}
-                            </MessageResponse>
-                          );
-                        }
-                        return null;
-                      })}
-                    </MessageContent>
+                    {/* For assistant messages, render parts in order */}
+                    {message.role === "assistant" ? (
+                      <>
+                        {/* Reasoning parts first */}
+                        {message.parts
+                          .filter((p): p is ReasoningPart => p.type === "reasoning")
+                          .map((part) => (
+                            <Reasoning
+                              key={part.partId}
+                              isStreaming={part.isStreaming}
+                              duration={
+                                part.time?.start && part.time?.end
+                                  ? Math.ceil((part.time.end - part.time.start) / 1000)
+                                  : undefined
+                              }
+                            >
+                              <ReasoningTrigger />
+                              <ReasoningContent>{part.text}</ReasoningContent>
+                            </Reasoning>
+                          ))}
+                        
+                        {/* Tool parts */}
+                        {message.parts
+                          .filter((p): p is ToolPart => p.type === "tool")
+                          .map((part) => (
+                            <Tool key={part.partId} defaultOpen={part.state.status === "running"}>
+                              <ToolHeader
+                                title={part.state.title || part.tool}
+                                type="tool-invocation"
+                                state={mapToolState(part.state)}
+                              />
+                              <ToolContent>
+                                {part.state.input && (
+                                  <ToolInput input={part.state.input} />
+                                )}
+                                {(part.state.output || part.state.error) && (
+                                  <ToolOutput
+                                    output={part.state.output}
+                                    errorText={part.state.error}
+                                  />
+                                )}
+                              </ToolContent>
+                            </Tool>
+                          ))}
+                        
+                        {/* Text parts */}
+                        {message.parts
+                          .filter((p): p is TextPart => p.type === "text")
+                          .map((part) => (
+                            <MessageContent key={part.partId}>
+                              <MessageResponse>{part.text}</MessageResponse>
+                            </MessageContent>
+                          ))}
+                      </>
+                    ) : (
+                      /* User messages - just render text */
+                      <MessageContent className="!bg-primary !text-primary-foreground">
+                        {message.parts
+                          .filter((p): p is TextPart => p.type === "text")
+                          .map((part) => (
+                            <MessageResponse key={part.partId}>{part.text}</MessageResponse>
+                          ))}
+                      </MessageContent>
+                    )}
+                    
                     {/* Copy action for assistant messages only */}
                     {message.role === "assistant" && messages[index].content && (
                       <MessageActions>
@@ -510,8 +607,8 @@ export default function IssueViewPage() {
                   </Message>
                 ))
               )}
-              {/* Typing indicator - show when streaming and last assistant message is empty */}
-              {isStreaming && messages.length > 0 && messages[messages.length - 1]?.role === "assistant" && messages[messages.length - 1]?.content === "" && (
+              {/* Typing indicator - show when streaming and last assistant message has no parts yet */}
+              {isStreaming && messages.length > 0 && messages[messages.length - 1]?.role === "assistant" && messages[messages.length - 1]?.parts.length === 0 && (
                 <div className="flex justify-start">
                   <div className="bg-secondary rounded-md px-3 py-2">
                     <Loader size={20} className="text-muted-foreground" />

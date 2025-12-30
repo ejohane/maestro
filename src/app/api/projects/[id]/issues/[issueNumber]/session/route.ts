@@ -115,9 +115,71 @@ export async function GET(
     );
 
     if (isAlive) {
-      // Touch session timestamp and return
+      // Touch session timestamp
       await sessionStorage.touchSession(id, issueNum);
-      return NextResponse.json({ sessionId: mapping.sessionId });
+      
+      // Fetch message history from OpenCode
+      const rawMessages = await openCodeService.getSessionMessages(
+        project.path,
+        mapping.sessionId
+      );
+      
+      // Transform OpenCode messages to our format
+      const messages = rawMessages
+        .filter((msg) => {
+          // Skip synthetic context injection messages
+          const hasSyntheticPart = msg.parts.some(
+            (p) => p.type === "text" && "synthetic" in p && p.synthetic
+          );
+          return !hasSyntheticPart;
+        })
+        .map((msg) => ({
+          id: msg.info.id,
+          role: msg.info.role,
+          timestamp: new Date(msg.info.time.created).toLocaleTimeString([], {
+            hour: "2-digit",
+            minute: "2-digit",
+          }),
+          parts: msg.parts.map((p) => {
+            if (p.type === "text") {
+              return {
+                type: "text" as const,
+                partId: p.id,
+                text: p.text,
+              };
+            }
+            if (p.type === "reasoning") {
+              return {
+                type: "reasoning" as const,
+                partId: p.id,
+                text: "text" in p ? (p as { text: string }).text : "",
+                isStreaming: false,
+              };
+            }
+            if (p.type === "tool") {
+              return {
+                type: "tool" as const,
+                partId: p.id,
+                tool: "tool" in p ? (p as { tool: string }).tool : "",
+                callID: "callID" in p ? (p as { callID: string }).callID : "",
+                state: "state" in p ? (p as { state: unknown }).state : { status: "completed" },
+              };
+            }
+            // Default fallback for unknown types
+            return {
+              type: "text" as const,
+              partId: "id" in p ? (p as { id: string }).id : "unknown",
+              text: "",
+            };
+          }),
+          // Compute content from text parts for backwards compatibility
+          content: msg.parts
+            .filter((p) => p.type === "text")
+            .map((p) => (p as { text: string }).text)
+            .join(""),
+        }));
+      
+      return NextResponse.json({ sessionId: mapping.sessionId, messages });
     }
 
     // Session is dead, remove stale mapping
@@ -235,6 +297,48 @@ export async function POST(
 
     return NextResponse.json(
       { error: "Failed to create session" },
+      { status: 500 }
+    );
+  }
+}
+
+// DELETE /api/projects/[id]/issues/[issueNumber]/session - Delete existing session
+export async function DELETE(
+  request: Request,
+  { params }: { params: Promise<{ id: string; issueNumber: string }> }
+) {
+  try {
+    const { id, issueNumber } = await params;
+
+    // Validate issue number
+    const issueNum = parseInt(issueNumber, 10);
+    if (isNaN(issueNum) || issueNum <= 0) {
+      return NextResponse.json(
+        { error: "Invalid issue number" },
+        { status: 400 }
+      );
+    }
+
+    // Get project to find path
+    const project = await configService.getProject(id);
+    if (!project) {
+      return NextResponse.json({ error: "Project not found" }, { status: 404 });
+    }
+
+    // Check for existing session
+    const mapping = await sessionStorage.getSession(id, issueNum);
+    if (mapping) {
+      // Delete the OpenCode session
+      await openCodeService.deleteSession(project.path, mapping.sessionId);
+      // Remove from session storage
+      await sessionStorage.removeSession(id, issueNum);
+    }
+
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    console.error("Failed to delete session:", error);
+    return NextResponse.json(
+      { error: "Failed to delete session" },
       { status: 500 }
     );
   }

@@ -2,6 +2,28 @@ import { openCodeService } from "@/lib/services/opencode";
 import { configService } from "@/lib/services/config";
 import { NextResponse } from "next/server";
 
+interface ToolState {
+  status: "pending" | "running" | "completed" | "error";
+  input?: Record<string, unknown>;
+  output?: string;
+  error?: string;
+  title?: string;
+  metadata?: Record<string, unknown>;
+  time?: { start?: number; end?: number };
+}
+
+interface OpenCodePart {
+  id?: string;
+  sessionID?: string;
+  messageID?: string;
+  type?: string;
+  text?: string;
+  tool?: string;
+  callID?: string;
+  state?: ToolState;
+  time?: { start?: number; end?: number };
+}
+
 interface OpenCodeEventPayload {
   type: string;
   properties?: {
@@ -9,12 +31,7 @@ interface OpenCodeEventPayload {
     status?: string | { type?: string };
     error?: string;
     sessionID?: string;
-    part?: {
-      id?: string;
-      sessionID?: string;
-      messageID?: string;
-      type?: string;
-    };
+    part?: OpenCodePart;
   };
 }
 
@@ -81,7 +98,8 @@ export async function POST(
 
       try {
         // Start async prompt (returns immediately without waiting for response)
-        await openCodeService.sendReadOnlyMessageAsync(
+        // Use bash-enabled mode to allow gh CLI commands for issue management
+        await openCodeService.sendMessageWithBashAsync(
           project.path,
           sessionId,
           message
@@ -90,8 +108,8 @@ export async function POST(
         // Subscribe to events
         const events = await openCodeService.subscribeToEvents(project.path);
         
-        // Track which part ID we're streaming to avoid duplicates from multiple parts
-        let trackedPartId: string | null = null;
+        // Track parts by ID to avoid duplicate streaming
+        const trackedParts = new Map<string, string>(); // partId -> partType
 
         for await (const rawEvent of events) {
           // Events may come wrapped in GlobalEvent with directory and payload
@@ -101,34 +119,56 @@ export async function POST(
           
           if (!event || !event.type) continue;
 
-          // Handle text delta updates - filter by sessionId and partId
-          if (
-            event.type === "message.part.updated" &&
-            event.properties?.delta
-          ) {
+          // Handle part updates
+          if (event.type === "message.part.updated") {
+            const part = event.properties?.part;
+            if (!part) continue;
+            
             // Only process events for our specific session
-            const eventSessionId = event.properties?.part?.sessionID;
+            const eventSessionId = part.sessionID;
             if (eventSessionId && eventSessionId !== sessionId) {
               continue; // Skip events from other sessions
             }
             
-            // Only process text parts (ignore reasoning, tool, etc.)
-            if (event.properties?.part?.type !== "text") {
-              continue;
+            const partId = part.id;
+            const partType = part.type;
+            
+            if (!partId || !partType) continue;
+            
+            // Track this part
+            if (!trackedParts.has(partId)) {
+              trackedParts.set(partId, partType);
             }
             
-            // Track the first text part we see and only stream that one
-            const partId = event.properties?.part?.id;
-            if (!trackedPartId && partId) {
-              trackedPartId = partId;
+            // Handle text parts - stream delta
+            if (partType === "text" && event.properties?.delta) {
+              sendData({ 
+                type: "text",
+                partId,
+                delta: event.properties.delta 
+              });
             }
             
-            // Only stream deltas from the tracked part to avoid duplicates
-            if (partId && trackedPartId && partId !== trackedPartId) {
-              continue;
+            // Handle reasoning parts - stream delta
+            if (partType === "reasoning" && event.properties?.delta) {
+              sendData({ 
+                type: "reasoning",
+                partId,
+                delta: event.properties.delta,
+                time: part.time
+              });
             }
             
-            sendData({ delta: event.properties.delta });
+            // Handle tool parts - send full state updates
+            if (partType === "tool" && part.state) {
+              sendData({ 
+                type: "tool",
+                partId,
+                tool: part.tool,
+                callID: part.callID,
+                state: part.state
+              });
+            }
           }
 
           // Session returned to idle = response complete

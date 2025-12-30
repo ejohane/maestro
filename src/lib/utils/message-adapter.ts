@@ -1,13 +1,17 @@
-import type { ChatMessage } from "@/lib/hooks/useChatSession";
+import type { ChatMessage, MessagePart, TextPart, ReasoningPart, ToolPart } from "@/lib/hooks/useChatSession";
 
 /**
  * AI Elements message format with parts array structure
+ * Now supports text, reasoning, and tool parts
  */
 export interface AIElementsMessage {
   id: string;
   role: "user" | "assistant";
-  parts: Array<{ type: "text"; text: string }>;
+  parts: MessagePart[];
 }
+
+// Re-export part types for convenience
+export type { MessagePart, TextPart, ReasoningPart, ToolPart };
 
 /**
  * Convert a single ChatMessage to AI Elements format
@@ -16,7 +20,7 @@ export function toAIElementsMessage(msg: ChatMessage): AIElementsMessage {
   return {
     id: msg.id,
     role: msg.role,
-    parts: [{ type: "text", text: msg.content }],
+    parts: msg.parts,
   };
 }
 

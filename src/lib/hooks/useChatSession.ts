@@ -1,9 +1,43 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
+
+// Part types for assistant messages
+export interface TextPart {
+  type: "text";
+  partId: string;
+  text: string;
+}
+
+export interface ReasoningPart {
+  type: "reasoning";
+  partId: string;
+  text: string;
+  isStreaming: boolean;
+  time?: { start?: number; end?: number };
+}
+
+export interface ToolState {
+  status: "pending" | "running" | "completed" | "error";
+  input?: Record<string, unknown>;
+  output?: string;
+  error?: string;
+  title?: string;
+}
+
+export interface ToolPart {
+  type: "tool";
+  partId: string;
+  tool: string;
+  callID: string;
+  state: ToolState;
+}
+
+export type MessagePart = TextPart | ReasoningPart | ToolPart;
 
 export interface ChatMessage {
   id: string;
   role: "user" | "assistant";
-  content: string;
+  content: string; // For backwards compatibility - concatenated text content
+  parts: MessagePart[]; // Structured parts for rich rendering
   timestamp: string;
 }
 
@@ -12,6 +46,8 @@ export interface UseChatSessionOptions {
   issueNumber: string;
   /** Called when streaming content arrives (useful for unread indicators) */
   onStreamChunk?: () => void;
+  /** Called when the agent modifies the GitHub issue (e.g., via gh issue edit) */
+  onIssueUpdated?: () => void;
 }
 
 export interface UseChatSessionReturn {
@@ -34,12 +70,13 @@ export interface UseChatSessionReturn {
   sendMessage: () => Promise<void>;
   retrySession: () => Promise<void>;
   clearError: () => void;
+  startNewSession: () => Promise<void>;
 }
 
 export function useChatSession(
   options: UseChatSessionOptions
 ): UseChatSessionReturn {
-  const { projectId, issueNumber, onStreamChunk } = options;
+  const { projectId, issueNumber, onStreamChunk, onIssueUpdated } = options;
 
   // State
   const [input, setInput] = useState("");
@@ -53,9 +90,11 @@ export function useChatSession(
   const [isReconnecting, setIsReconnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Use ref for onStreamChunk to avoid stale closures
+  // Use ref for callbacks to avoid stale closures
   const onStreamChunkRef = useRef(onStreamChunk);
   onStreamChunkRef.current = onStreamChunk;
+  const onIssueUpdatedRef = useRef(onIssueUpdated);
+  onIssueUpdatedRef.current = onIssueUpdated;
 
   // Clear error
   const clearError = useCallback(() => {
@@ -73,9 +112,16 @@ export function useChatSession(
         `/api/projects/${projectId}/issues/${issueNumber}/session`
       );
       if (getRes.ok) {
-        const { sessionId: existingSessionId } = await getRes.json();
+        const data = await getRes.json();
+        const { sessionId: existingSessionId, messages: existingMessages } = data;
         if (existingSessionId) {
           setSessionId(existingSessionId);
+          
+          // Hydrate messages if we have history
+          if (existingMessages && Array.isArray(existingMessages) && existingMessages.length > 0) {
+            setMessages(existingMessages as ChatMessage[]);
+          }
+          
           return existingSessionId;
         }
       }
@@ -108,6 +154,13 @@ export function useChatSession(
     }
   }, [projectId, issueNumber]);
 
+  // Load existing session and messages on mount
+  useEffect(() => {
+    getOrCreateSession().catch(() => {
+      // Error is already set by getOrCreateSession
+    });
+  }, [getOrCreateSession]);
+
   // Retry session creation
   const retrySession = useCallback(async () => {
     setError(null);
@@ -118,6 +171,46 @@ export function useChatSession(
     }
   }, [getOrCreateSession]);
 
+  // Start a new session (delete existing and create fresh)
+  const startNewSession = useCallback(async () => {
+    setError(null);
+    setIsLoading(true);
+    
+    try {
+      // Delete existing session
+      await fetch(
+        `/api/projects/${projectId}/issues/${issueNumber}/session`,
+        { method: "DELETE" }
+      );
+      
+      // Clear local state
+      setSessionId(null);
+      setMessages([]);
+      
+      // Create new session
+      const postRes = await fetch(
+        `/api/projects/${projectId}/issues/${issueNumber}/session`,
+        { method: "POST" }
+      );
+      
+      if (!postRes.ok) {
+        const data = await postRes.json();
+        throw new Error(data.error || "Failed to create session");
+      }
+      
+      const { sessionId: newSessionId } = await postRes.json();
+      setSessionId(newSessionId);
+    } catch (err) {
+      const errorMessage =
+        err instanceof Error
+          ? err.message
+          : "Could not start new session. Please try again.";
+      setError(errorMessage);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [projectId, issueNumber]);
+
   // Send a message
   const sendMessage = useCallback(async () => {
     if (!input.trim() || isSending || isStreaming) return;
@@ -126,6 +219,7 @@ export function useChatSession(
       id: `msg-${Date.now()}`,
       role: "user",
       content: input.trim(),
+      parts: [{ type: "text", partId: `user-${Date.now()}`, text: input.trim() }],
       timestamp: new Date().toLocaleTimeString([], {
         hour: "2-digit",
         minute: "2-digit",
@@ -217,6 +311,7 @@ export function useChatSession(
           id: assistantMessageId,
           role: "assistant" as const,
           content: "",
+          parts: [],
           timestamp: new Date().toLocaleTimeString([], {
             hour: "2-digit",
             minute: "2-digit",
@@ -249,24 +344,138 @@ export function useChatSession(
               continue;
             }
             try {
-              const { delta, error: streamError } = JSON.parse(data);
-              if (delta) {
-                // Append delta to the last message - create new object to avoid mutation issues
+              const parsed = JSON.parse(data);
+              const { type, partId, delta, tool, callID, state, time, error: streamError } = parsed;
+              
+              if (type === "text" && delta) {
+                // Append text delta to the last message
                 setMessages((prev) => {
                   if (prev.length === 0) return prev;
                   const lastMsg = prev[prev.length - 1];
                   if (lastMsg && lastMsg.role === "assistant") {
-                    // Create new array with new message object (immutable update)
+                    // Find or create text part
+                    const existingPartIndex = lastMsg.parts.findIndex(
+                      (p) => p.type === "text" && p.partId === partId
+                    );
+                    
+                    let newParts: MessagePart[];
+                    if (existingPartIndex >= 0) {
+                      // Update existing part
+                      newParts = [...lastMsg.parts];
+                      const existingPart = newParts[existingPartIndex] as TextPart;
+                      newParts[existingPartIndex] = {
+                        ...existingPart,
+                        text: existingPart.text + delta
+                      };
+                    } else {
+                      // Add new text part
+                      newParts = [...lastMsg.parts, { type: "text", partId, text: delta }];
+                    }
+                    
+                    // Update content for backwards compatibility
+                    const newContent = newParts
+                      .filter((p): p is TextPart => p.type === "text")
+                      .map(p => p.text)
+                      .join("");
+                    
                     return [
                       ...prev.slice(0, -1),
-                      { ...lastMsg, content: lastMsg.content + delta }
+                      { ...lastMsg, content: newContent, parts: newParts }
                     ];
                   }
                   return prev;
                 });
-                // Notify parent of streaming activity
                 onStreamChunkRef.current?.();
               }
+              
+              if (type === "reasoning" && delta) {
+                // Append reasoning delta
+                setMessages((prev) => {
+                  if (prev.length === 0) return prev;
+                  const lastMsg = prev[prev.length - 1];
+                  if (lastMsg && lastMsg.role === "assistant") {
+                    const existingPartIndex = lastMsg.parts.findIndex(
+                      (p) => p.type === "reasoning" && p.partId === partId
+                    );
+                    
+                    let newParts: MessagePart[];
+                    if (existingPartIndex >= 0) {
+                      newParts = [...lastMsg.parts];
+                      const existingPart = newParts[existingPartIndex] as ReasoningPart;
+                      newParts[existingPartIndex] = {
+                        ...existingPart,
+                        text: existingPart.text + delta,
+                        isStreaming: true,
+                        time
+                      };
+                    } else {
+                      newParts = [...lastMsg.parts, { 
+                        type: "reasoning", 
+                        partId, 
+                        text: delta, 
+                        isStreaming: true,
+                        time 
+                      }];
+                    }
+                    
+                    return [
+                      ...prev.slice(0, -1),
+                      { ...lastMsg, parts: newParts }
+                    ];
+                  }
+                  return prev;
+                });
+                onStreamChunkRef.current?.();
+              }
+              
+              if (type === "tool" && state) {
+                // Update tool state
+                setMessages((prev) => {
+                  if (prev.length === 0) return prev;
+                  const lastMsg = prev[prev.length - 1];
+                  if (lastMsg && lastMsg.role === "assistant") {
+                    const existingPartIndex = lastMsg.parts.findIndex(
+                      (p) => p.type === "tool" && p.partId === partId
+                    );
+                    
+                    const toolPart: ToolPart = {
+                      type: "tool",
+                      partId,
+                      tool,
+                      callID,
+                      state
+                    };
+                    
+                    let newParts: MessagePart[];
+                    if (existingPartIndex >= 0) {
+                      newParts = [...lastMsg.parts];
+                      newParts[existingPartIndex] = toolPart;
+                    } else {
+                      newParts = [...lastMsg.parts, toolPart];
+                    }
+                    
+                    return [
+                      ...prev.slice(0, -1),
+                      { ...lastMsg, parts: newParts }
+                    ];
+                  }
+                  return prev;
+                });
+                onStreamChunkRef.current?.();
+                
+                // Detect GitHub issue modifications and trigger refresh
+                if (tool === "bash" && state.status === "completed") {
+                  const command = state.input?.command as string | undefined;
+                  if (command && (
+                    command.includes("gh issue edit") ||
+                    command.includes("gh issue close") ||
+                    command.includes("gh issue reopen")
+                  )) {
+                    onIssueUpdatedRef.current?.();
+                  }
+                }
+              }
+              
               if (streamError) {
                 console.error("Stream error:", streamError);
                 setMessages((prev) => {
@@ -278,6 +487,7 @@ export function useChatSession(
                     !lastMsg.content
                   ) {
                     lastMsg.content = `Error: ${streamError}`;
+                    lastMsg.parts = [{ type: "text", partId: "error", text: `Error: ${streamError}` }];
                   }
                   return newMessages;
                 });
@@ -301,11 +511,12 @@ export function useChatSession(
           newMessages.pop();
         }
         // Add error message as assistant response
+        const errorContent = "Sorry, I encountered an error. Your message has been restored - please try again.";
         newMessages.push({
           id: `msg-error-${Date.now()}`,
           role: "assistant" as const,
-          content:
-            "Sorry, I encountered an error. Your message has been restored - please try again.",
+          content: errorContent,
+          parts: [{ type: "text", partId: `error-${Date.now()}`, text: errorContent }],
           timestamp: new Date().toLocaleTimeString([], {
             hour: "2-digit",
             minute: "2-digit",
@@ -317,6 +528,30 @@ export function useChatSession(
       setIsSending(false);
       setIsStreaming(false);
       setIsReconnecting(false);
+      
+      // Mark all reasoning parts as done streaming
+      setMessages((prev) => {
+        if (prev.length === 0) return prev;
+        const lastMsg = prev[prev.length - 1];
+        if (lastMsg && lastMsg.role === "assistant") {
+          const hasStreamingReasoning = lastMsg.parts.some(
+            (p) => p.type === "reasoning" && (p as ReasoningPart).isStreaming
+          );
+          if (hasStreamingReasoning) {
+            const newParts = lastMsg.parts.map((p) => {
+              if (p.type === "reasoning") {
+                return { ...p, isStreaming: false };
+              }
+              return p;
+            });
+            return [
+              ...prev.slice(0, -1),
+              { ...lastMsg, parts: newParts }
+            ];
+          }
+        }
+        return prev;
+      });
     }
   }, [
     input,
@@ -348,5 +583,6 @@ export function useChatSession(
     sendMessage,
     retrySession,
     clearError,
+    startNewSession,
   };
 }

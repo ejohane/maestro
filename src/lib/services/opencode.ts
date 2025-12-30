@@ -111,6 +111,34 @@ export class OpenCodeService {
   }
 
   /**
+   * Send a message with bash enabled but file editing disabled
+   * Allows running CLI commands (like gh) but prevents code changes
+   * Uses promptAsync for non-blocking execution
+   * @param projectPath - Absolute path to the project directory
+   * @param sessionId - Target session ID
+   * @param message - Message to send
+   */
+  async sendMessageWithBashAsync(
+    projectPath: string,
+    sessionId: string,
+    message: string
+  ): Promise<void> {
+    await this.client.session.promptAsync({
+      path: { id: sessionId },
+      query: { directory: projectPath },
+      body: {
+        model: DEFAULT_MODEL,
+        tools: {
+          bash: true,
+          write: false,
+          edit: false,
+        },
+        parts: [{ type: "text", text: message }],
+      },
+    });
+  }
+
+  /**
    * Request a conversation summary from the AI
    * @param projectPath - Absolute path to the project directory
    * @param sessionId - Target session ID
@@ -211,6 +239,24 @@ export class OpenCodeService {
       return true;
     } catch {
       return false;
+    }
+  }
+
+  /**
+   * Get all messages for a session
+   * @param projectPath - Absolute path to the project directory
+   * @param sessionId - Session ID to retrieve messages for
+   * @returns Array of messages with their parts, or empty array if not found
+   */
+  async getSessionMessages(projectPath: string, sessionId: string) {
+    try {
+      const result = await this.client.session.messages({
+        path: { id: sessionId },
+        query: { directory: projectPath },
+      });
+      return result.data || [];
+    } catch {
+      return [];
     }
   }
 }

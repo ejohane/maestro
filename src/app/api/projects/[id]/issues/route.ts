@@ -101,37 +101,32 @@ export async function POST(
     const cwd = project.path;
 
     // Create issue using gh CLI
-    // We use --json to get the created issue details back
+    // gh issue create doesn't support --json, so we create first then fetch
     const escapedTitle = title.replace(/"/g, '\\"');
-    const { stdout, stderr } = await execAsync(
-      `gh issue create --title "${escapedTitle}" --body "" --json number,title,body,state,url,createdAt,author,labels`,
+    const { stdout: createStdout, stderr: createStderr } = await execAsync(
+      `gh issue create --title "${escapedTitle}" --body ""`,
       { cwd }
     );
 
-    if (stderr && !stderr.includes("Creating issue")) {
-      console.error("gh issue create stderr:", stderr);
+    // gh issue create outputs the URL to stdout on success
+    // Format: https://github.com/owner/repo/issues/123
+    const output = createStdout || createStderr;
+    const urlMatch = output.match(/issues\/(\d+)/);
+    
+    if (!urlMatch) {
+      console.error("Failed to extract issue number from output:", output);
+      throw new Error("Failed to parse created issue URL");
     }
 
-    // Parse the created issue from stdout
-    // gh issue create with --json returns the issue data
-    let issue: GitHubIssue;
-    try {
-      issue = JSON.parse(stdout);
-    } catch {
-      // If JSON parsing fails, the issue was likely created but we need to fetch it
-      // Extract issue number from stderr (format: "https://github.com/owner/repo/issues/123")
-      const urlMatch = stderr.match(/issues\/(\d+)/);
-      if (urlMatch) {
-        const issueNumber = urlMatch[1];
-        const { stdout: issueStdout } = await execAsync(
-          `gh issue view ${issueNumber} --json number,title,body,state,url,createdAt,author,labels`,
-          { cwd }
-        );
-        issue = JSON.parse(issueStdout);
-      } else {
-        throw new Error("Failed to parse created issue");
-      }
-    }
+    const issueNumber = urlMatch[1];
+
+    // Fetch the created issue details
+    const { stdout: issueStdout } = await execAsync(
+      `gh issue view ${issueNumber} --json number,title,body,state,url,createdAt,author,labels`,
+      { cwd }
+    );
+    
+    const issue: GitHubIssue = JSON.parse(issueStdout);
 
     return NextResponse.json(issue, { status: 201 });
   } catch (error) {

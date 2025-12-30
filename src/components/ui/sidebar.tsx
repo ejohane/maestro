@@ -1,25 +1,22 @@
 "use client";
 
 import Link from "next/link";
-import { useParams, usePathname } from "next/navigation";
+import { useParams, usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
-import { mockEpics, mockSoloSessions } from "@/lib/data/mock";
-import { useProjects } from "@/lib/hooks/useProjects";
+import { useProjects, useProjectIssues } from "@/lib/hooks/useProjects";
 import { FolderBrowserModal } from "@/components/folder-browser";
+import type { Project } from "@/lib/types/api";
 import {
   ChevronDown,
   ChevronRight,
   Folder,
   Zap,
-  Circle,
-  Lightbulb,
-  CheckCircle,
-  MessageSquare,
-  Clock,
+  CircleDot,
   FolderOpen,
   Plus,
   Search,
   Command,
+  MessageSquare,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -32,6 +29,9 @@ interface TreeItemProps {
   defaultOpen?: boolean;
   count?: number;
   statusIndicator?: "active" | "warning" | "info";
+  onClick?: () => void;
+  isOpen?: boolean;
+  onToggle?: () => void;
 }
 
 function TreeItem({
@@ -43,22 +43,47 @@ function TreeItem({
   defaultOpen = false,
   count,
   statusIndicator,
+  onClick,
+  isOpen: controlledIsOpen,
+  onToggle,
 }: TreeItemProps) {
-  const [isOpen, setIsOpen] = useState(defaultOpen);
+  const [internalIsOpen, setInternalIsOpen] = useState(defaultOpen);
   const hasChildren = !!children;
+  
+  // Use controlled state if provided, otherwise use internal state
+  const isOpen = controlledIsOpen !== undefined ? controlledIsOpen : internalIsOpen;
+  const handleToggle = onToggle || (() => setInternalIsOpen(!internalIsOpen));
+
+  const handleChevronClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (hasChildren) {
+      handleToggle();
+    }
+  };
+
+  const handleContentClick = () => {
+    if (onClick) {
+      onClick();
+    } else if (hasChildren) {
+      handleToggle();
+    }
+  };
 
   const content = (
     <div
       className={cn(
         "flex items-center gap-2 px-2 py-1.5 rounded-md text-sm cursor-pointer transition-colors",
         active
-          ? "bg-secondary text-foreground"
+          ? "bg-primary/15 text-primary border border-primary/30 font-medium"
           : "text-muted-foreground hover:bg-secondary/50 hover:text-foreground"
       )}
-      onClick={() => hasChildren && setIsOpen(!isOpen)}
+      onClick={handleContentClick}
     >
       {hasChildren ? (
-        <span className="w-4 h-4 flex items-center justify-center">
+        <span 
+          className="w-4 h-4 flex items-center justify-center hover:bg-secondary rounded"
+          onClick={handleChevronClick}
+        >
           {isOpen ? (
             <ChevronDown className="h-3 w-3" />
           ) : (
@@ -79,10 +104,10 @@ function TreeItem({
         </span>
       )}
       {statusIndicator === "warning" && (
-        <Circle className="h-2 w-2 fill-[hsl(var(--warning))] text-[hsl(var(--warning))]" />
+        <span className="h-2 w-2 rounded-full bg-[hsl(var(--warning))]" />
       )}
       {statusIndicator === "info" && (
-        <Circle className="h-2 w-2 fill-[hsl(var(--info))] text-[hsl(var(--info))]" />
+        <span className="h-2 w-2 rounded-full bg-[hsl(var(--info))]" />
       )}
       {count !== undefined && (
         <span className="text-xs text-muted-foreground">{count}</span>
@@ -92,29 +117,83 @@ function TreeItem({
 
   return (
     <div>
-      {href ? <Link href={href}>{content}</Link> : content}
+      {href && !hasChildren ? <Link href={href}>{content}</Link> : content}
       {hasChildren && isOpen && <div className="ml-4">{children}</div>}
     </div>
+  );
+}
+
+// Component to fetch and display issues for a project
+function ProjectIssuesSection({ project, pathname }: { project: Project; pathname: string }) {
+  const { data: issues = [], isLoading } = useProjectIssues(project.id);
+  
+  // Filter to only open issues
+  const openIssues = issues.filter((issue) => issue.state === "OPEN" || issue.state === "open");
+  
+  if (isLoading) {
+    return (
+      <TreeItem
+        icon={<CircleDot className="h-3.5 w-3.5 text-[hsl(var(--success))]" />}
+        label="Open Issues"
+        count={0}
+      >
+        <div className="px-4 py-1 text-xs text-muted-foreground">Loading...</div>
+      </TreeItem>
+    );
+  }
+  
+  if (openIssues.length === 0) {
+    return null;
+  }
+  
+  return (
+    <TreeItem
+      icon={<CircleDot className="h-3.5 w-3.5 text-[hsl(var(--success))]" />}
+      label="Open Issues"
+      count={openIssues.length}
+      defaultOpen={true}
+    >
+      {openIssues.map((issue) => (
+        <TreeItem
+          key={issue.number}
+          icon={<CircleDot className="h-2.5 w-2.5 text-[hsl(var(--success))]" />}
+          label={issue.title}
+          href={`/project/${project.id}/issue/${issue.number}`}
+          active={pathname.includes(`/issue/${issue.number}`)}
+        />
+      ))}
+    </TreeItem>
   );
 }
 
 export function Sidebar() {
   const params = useParams();
   const pathname = usePathname();
+  const router = useRouter();
   const currentProjectId = params.id as string;
   const { data: projects, isLoading } = useProjects();
   const [folderBrowserOpen, setFolderBrowserOpen] = useState(false);
+  // Track which projects are expanded - initialize with current project expanded
+  const [expandedProjects, setExpandedProjects] = useState<Set<string>>(() => {
+    return currentProjectId ? new Set([currentProjectId]) : new Set();
+  });
 
-  // Categorize epics
-  const activeSwarms = mockEpics.filter(
-    (e) => e.state === "in_progress" && e.subtasks.some((t) => t.assignedAgent)
-  );
-  const inProgress = mockEpics.filter(
-    (e) => e.state === "in_progress" && !e.subtasks.some((t) => t.assignedAgent)
-  );
-  const readyToSwarm = mockEpics.filter((e) => e.state === "planned");
-  const ideas = mockEpics.filter((e) => e.state === "ideating");
-  const completed = mockEpics.filter((e) => e.state === "closed");
+  const handleProjectClick = (projectId: string, isMissing: boolean) => {
+    if (isMissing) return;
+    router.push(`/project/${projectId}`);
+  };
+
+  const toggleProjectExpanded = (projectId: string) => {
+    setExpandedProjects((prev) => {
+      const next = new Set(prev);
+      if (next.has(projectId)) {
+        next.delete(projectId);
+      } else {
+        next.add(projectId);
+      }
+      return next;
+    });
+  };
 
   return (
     <div className="w-64 h-screen flex flex-col border-r border-border bg-card">
@@ -163,141 +242,26 @@ export function Sidebar() {
           projects.map((project) => {
             const isCurrentProject = project.id === currentProjectId;
             const isMissing = project.status === "missing";
+            const isExpanded = expandedProjects.has(project.id);
 
             return (
               <TreeItem
                 key={project.id}
                 icon={
-                  isCurrentProject ? (
-                    <FolderOpen className="h-4 w-4 text-primary" />
+                  isExpanded ? (
+                    <FolderOpen className={cn("h-4 w-4", isCurrentProject ? "text-primary" : "text-muted-foreground")} />
                   ) : (
                     <Folder className={cn("h-4 w-4", isMissing && "text-yellow-600")} />
                   )
                 }
                 label={project.displayName}
-                href={isMissing ? undefined : undefined}
-                defaultOpen={isCurrentProject}
+                active={isCurrentProject}
+                isOpen={isExpanded}
+                onToggle={() => toggleProjectExpanded(project.id)}
                 statusIndicator={isMissing ? "warning" : undefined}
+                onClick={() => handleProjectClick(project.id, isMissing)}
               >
-                {isCurrentProject && (
-                  <>
-                    {/* Active Swarms */}
-                    {activeSwarms.length > 0 && (
-                      <TreeItem
-                        icon={<Zap className="h-3.5 w-3.5 text-[hsl(var(--success))]" />}
-                        label="Active Swarms"
-                        count={activeSwarms.length}
-                        defaultOpen={true}
-                      >
-                        {activeSwarms.map((epic) => (
-                          <TreeItem
-                            key={epic.id}
-                            icon={<Circle className="h-2 w-2 fill-[hsl(var(--success))] text-[hsl(var(--success))]" />}
-                            label={epic.title}
-                            href={`/project/${project.id}/swarm/${epic.id}`}
-                            active={pathname.includes(`/swarm/${epic.id}`)}
-                            statusIndicator="active"
-                          />
-                        ))}
-                      </TreeItem>
-                    )}
-
-                    {/* In Progress */}
-                    {inProgress.length > 0 && (
-                      <TreeItem
-                        icon={<Clock className="h-3.5 w-3.5 text-[hsl(var(--warning))]" />}
-                        label="In Progress"
-                        count={inProgress.length}
-                        defaultOpen={true}
-                      >
-                        {inProgress.map((epic) => (
-                          <TreeItem
-                            key={epic.id}
-                            icon={<Circle className="h-2 w-2" />}
-                            label={epic.title}
-                            href={`/project/${project.id}/epic/${epic.id}`}
-                            active={pathname.includes(`/epic/${epic.id}`)}
-                            statusIndicator="warning"
-                          />
-                        ))}
-                      </TreeItem>
-                    )}
-
-                    {/* Ready */}
-                    {readyToSwarm.length > 0 && (
-                      <TreeItem
-                        icon={<Circle className="h-3.5 w-3.5 text-[hsl(var(--info))]" />}
-                        label="Ready"
-                        count={readyToSwarm.length}
-                      >
-                        {readyToSwarm.map((epic) => (
-                          <TreeItem
-                            key={epic.id}
-                            icon={<Circle className="h-2 w-2" />}
-                            label={epic.title}
-                            href={`/project/${project.id}/epic/${epic.id}`}
-                            active={pathname.includes(`/epic/${epic.id}`)}
-                          />
-                        ))}
-                      </TreeItem>
-                    )}
-
-                    {/* Ideas */}
-                    {ideas.length > 0 && (
-                      <TreeItem
-                        icon={<Lightbulb className="h-3.5 w-3.5 text-[hsl(var(--orange))]" />}
-                        label="Ideas"
-                        count={ideas.length}
-                      >
-                        {ideas.map((epic) => (
-                          <TreeItem
-                            key={epic.id}
-                            icon={<Lightbulb className="h-2.5 w-2.5" />}
-                            label={epic.title}
-                            href={`/project/${project.id}/ideate?epic=${epic.id}`}
-                            active={pathname.includes("/ideate") && pathname.includes(epic.id)}
-                          />
-                        ))}
-                      </TreeItem>
-                    )}
-
-                    {/* Completed */}
-                    {completed.length > 0 && (
-                      <TreeItem
-                        icon={<CheckCircle className="h-3.5 w-3.5 text-muted-foreground" />}
-                        label="Completed"
-                        count={completed.length}
-                      >
-                        {completed.map((epic) => (
-                          <TreeItem
-                            key={epic.id}
-                            icon={<CheckCircle className="h-2.5 w-2.5 text-[hsl(var(--success))]" />}
-                            label={epic.title}
-                            href={`/project/${project.id}/epic/${epic.id}`}
-                            active={pathname.includes(`/epic/${epic.id}`)}
-                          />
-                        ))}
-                      </TreeItem>
-                    )}
-
-                    {/* Solo Sessions */}
-                    <TreeItem
-                      icon={<MessageSquare className="h-3.5 w-3.5 text-muted-foreground" />}
-                      label="Solo Sessions"
-                      count={mockSoloSessions.length}
-                    >
-                      {mockSoloSessions.map((session) => (
-                        <TreeItem
-                          key={session.id}
-                          icon={<MessageSquare className="h-2.5 w-2.5" />}
-                          label={session.title}
-                          href={`/project/${project.id}/solo/${session.id}`}
-                          active={pathname.includes(`/solo/${session.id}`)}
-                        />
-                      ))}
-                    </TreeItem>
-                  </>
-                )}
+                <ProjectIssuesSection project={project} pathname={pathname} />
               </TreeItem>
             );
           })
