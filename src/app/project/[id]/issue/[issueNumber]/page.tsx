@@ -5,10 +5,17 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import {
+  Message,
+  MessageContent,
+  MessageResponse,
+  MessageActions,
+  MessageAction,
+} from "@/components/ai-elements/message";
+import { toAIElementsMessages } from "@/lib/utils/message-adapter";
 import { Button } from "@/components/ui/button";
 import {
   ChevronLeft,
-  Send,
   MoreHorizontal,
   ExternalLink,
   RefreshCw,
@@ -16,10 +23,29 @@ import {
   AlertCircle,
   FileText,
   MessageSquare,
+  CopyIcon,
+  CheckIcon,
 } from "lucide-react";
 import { SaveSummaryModal } from "@/components/save-summary-modal";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Loader } from "@/components/ai-elements/loader";
+import {
+  Conversation,
+  ConversationContent,
+  ConversationScrollButton,
+} from "@/components/ai-elements/conversation";
+import {
+  PromptInput,
+  PromptInputBody,
+  PromptInputTextarea,
+  PromptInputFooter,
+  PromptInputTools,
+  PromptInputButton,
+  PromptInputSubmit,
+  type PromptInputMessage,
+} from "@/components/ai-elements/prompt-input";
 import { cn } from "@/lib/utils";
+import { useChatSession } from "@/lib/hooks/useChatSession";
 
 interface GitHubIssue {
   number: number;
@@ -56,31 +82,20 @@ function formatDate(dateString: string): string {
   }
 }
 
-interface ChatMessage {
-  id: string;
-  role: "user" | "assistant";
-  content: string;
-  timestamp: string;
-}
-
 export default function IssueViewPage() {
   const params = useParams();
   const projectId = params.id as string;
   const issueNumber = params.issueNumber as string;
   
+  // Issue state
   const [issue, setIssue] = useState<GitHubIssue | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoadingIssue, setIsLoadingIssue] = useState(true);
   const [issueError, setIssueError] = useState<string | null>(null);
-  const [sessionError, setSessionError] = useState<string | null>(null);
-  const [message, setMessage] = useState("");
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [isSending, setIsSending] = useState(false);
-  const [isStreaming, setIsStreaming] = useState(false);
-  const [sessionId, setSessionId] = useState<string | null>(null);
+  
+  // UI state
   const [activeTab, setActiveTab] = useState<"details" | "chat">("chat");
-  const [reconnecting, setReconnecting] = useState(false);
   const [showSaveModal, setShowSaveModal] = useState(false);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   
   // Panel resizing state
   const [panelWidth, setPanelWidth] = useState(() => {
@@ -98,6 +113,30 @@ export default function IssueViewPage() {
     activeTabRef.current = activeTab
   }, [activeTab])
   
+  // Chat session hook
+  const {
+    messages,
+    input,
+    setInput,
+    isSending,
+    isStreaming,
+    isReconnecting,
+    error: sessionError,
+    sessionId,
+    sendMessage,
+    retrySession,
+    clearError,
+  } = useChatSession({
+    projectId,
+    issueNumber,
+    onStreamChunk: () => {
+      // Set unread indicator if user is on details tab (mobile)
+      if (activeTabRef.current === "details") {
+        setHasUnread(true);
+      }
+    },
+  });
+  
   // Handle tab change with unread clearing
   const handleTabChange = (tab: "details" | "chat") => {
     setActiveTab(tab)
@@ -106,14 +145,22 @@ export default function IssueViewPage() {
     }
   }
 
-  // Auto-scroll to bottom when messages change
-  const scrollToBottom = useCallback(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  // Handle copy message to clipboard
+  const handleCopyMessage = useCallback((messageId: string, content: string) => {
+    navigator.clipboard.writeText(content);
+    setCopiedMessageId(messageId);
+    setTimeout(() => setCopiedMessageId(null), 2000);
   }, []);
 
-  useEffect(() => {
-    scrollToBottom();
-  }, [messages, scrollToBottom]);
+  // Handle PromptInput submission
+  const handlePromptSubmit = async (msg: PromptInputMessage) => {
+    if (!msg.text?.trim()) return;
+    // The sendMessage from useChatSession expects input to be set
+    // We need to set it then call sendMessage
+    setInput(msg.text);
+    // Use setTimeout to ensure state is updated before sending
+    setTimeout(() => sendMessage(), 0);
+  };
 
   // Panel resize handlers
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
@@ -145,7 +192,7 @@ export default function IssueViewPage() {
 
   // Fetch issue details
   const fetchIssue = useCallback(async () => {
-    setIsLoading(true);
+    setIsLoadingIssue(true);
     setIssueError(null);
     
     try {
@@ -163,7 +210,7 @@ export default function IssueViewPage() {
     } catch {
       setIssueError("Failed to load issue. Check your connection.");
     } finally {
-      setIsLoading(false);
+      setIsLoadingIssue(false);
     }
   }, [projectId, issueNumber]);
 
@@ -171,228 +218,7 @@ export default function IssueViewPage() {
     fetchIssue();
   }, [fetchIssue]);
 
-  // Get or create OpenCode session
-  const getOrCreateSession = async (): Promise<string> => {
-    setSessionError(null);
-    
-    try {
-      // Try to get existing session
-      const getRes = await fetch(`/api/projects/${projectId}/issues/${issueNumber}/session`);
-      if (getRes.ok) {
-        const { sessionId: existingSessionId } = await getRes.json();
-        if (existingSessionId) {
-          setSessionId(existingSessionId);
-          return existingSessionId;
-        }
-      }
-      
-      // Create new session
-      const postRes = await fetch(`/api/projects/${projectId}/issues/${issueNumber}/session`, {
-        method: "POST",
-      });
-      
-      if (!postRes.ok) {
-        const data = await postRes.json();
-        throw new Error(data.error || "Failed to create session");
-      }
-      
-      const { sessionId: newSessionId } = await postRes.json();
-      setSessionId(newSessionId);
-      return newSessionId;
-    } catch (error) {
-      const errorMessage = error instanceof Error 
-        ? error.message 
-        : "Could not connect to AI. Please try again.";
-      setSessionError(errorMessage);
-      throw error;
-    }
-  };
-  
-  // Retry session creation
-  const retrySession = async () => {
-    setSessionError(null);
-    try {
-      await getOrCreateSession();
-    } catch {
-      // Error already set by getOrCreateSession
-    }
-  };
-
-  const handleSend = async () => {
-    if (!message.trim() || isSending || isStreaming) return;
-
-    const userMessage: ChatMessage = {
-      id: `msg-${Date.now()}`,
-      role: "user",
-      content: message.trim(),
-      timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-    };
-    
-    setMessages((prev) => [...prev, userMessage]);
-    const userInput = message.trim();
-    // Store the message in case we need to restore it on error
-    const savedMessage = message.trim();
-    setMessage("");
-    setIsSending(true);
-    setIsStreaming(true);
-
-    let currentSessionId = sessionId;
-    let retried = false;
-
-    const attemptSend = async (sid: string): Promise<Response> => {
-      const response = await fetch(`/api/projects/${projectId}/issues/${issueNumber}/chat`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: userInput, sessionId: sid }),
-      });
-      
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        
-        // Check if this is a session error (dead session) and we haven't retried yet
-        const isSessionError = 
-          response.status === 404 || 
-          errorData.code === "SESSION_NOT_FOUND" ||
-          errorData.error?.toLowerCase().includes("session") ||
-          errorData.error?.toLowerCase().includes("not found");
-        
-        if (isSessionError && !retried) {
-          retried = true;
-          setReconnecting(true);
-          
-          try {
-            // Create new session (which auto-injects context)
-            const postRes = await fetch(`/api/projects/${projectId}/issues/${issueNumber}/session`, {
-              method: "POST",
-            });
-            
-            if (!postRes.ok) {
-              const sessionError = await postRes.json().catch(() => ({}));
-              throw new Error(sessionError.error || "Failed to create new session");
-            }
-            
-            const { sessionId: newSessionId } = await postRes.json();
-            setSessionId(newSessionId);
-            currentSessionId = newSessionId;
-            
-            setReconnecting(false);
-            
-            // Retry with new session
-            return attemptSend(newSessionId);
-          } catch (reconnectError) {
-            setReconnecting(false);
-            throw reconnectError;
-          }
-        }
-        
-        throw new Error(errorData.error || "Chat request failed");
-      }
-      
-      return response;
-    };
-
-    try {
-      // Get or create session if we don't have one
-      if (!currentSessionId) {
-        currentSessionId = await getOrCreateSession();
-      }
-      
-      // Add placeholder for assistant response
-      const assistantMessageId = `msg-${Date.now() + 1}`;
-      setMessages((prev) => [...prev, {
-        id: assistantMessageId,
-        role: "assistant" as const,
-        content: "",
-        timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-      }]);
-      
-      // Attempt to send with automatic reconnection on session errors
-      const response = await attemptSend(currentSessionId);
-      
-      const reader = response.body!.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n\n");
-        
-        // Keep the last potentially incomplete chunk in the buffer
-        buffer = lines.pop() || "";
-        
-        for (const line of lines) {
-          if (line.startsWith("data: ")) {
-            const data = line.slice(6);
-            if (data === "[DONE]") {
-              // Response complete
-              continue;
-            }
-            try {
-              const { delta, error: streamError } = JSON.parse(data);
-              if (delta) {
-                // Append delta to the last message
-                setMessages((prev) => {
-                  const newMessages = [...prev];
-                  const lastMsg = newMessages[newMessages.length - 1];
-                  if (lastMsg && lastMsg.role === "assistant") {
-                    lastMsg.content += delta;
-                  }
-                  return newMessages;
-                });
-                // Set unread indicator if user is on details tab (mobile)
-                if (activeTabRef.current === "details") {
-                  setHasUnread(true);
-                }
-              }
-              if (streamError) {
-                console.error("Stream error:", streamError);
-                setMessages((prev) => {
-                  const newMessages = [...prev];
-                  const lastMsg = newMessages[newMessages.length - 1];
-                  if (lastMsg && lastMsg.role === "assistant" && !lastMsg.content) {
-                    lastMsg.content = `Error: ${streamError}`;
-                  }
-                  return newMessages;
-                });
-              }
-            } catch {
-              // Ignore parse errors for partial chunks
-            }
-          }
-        }
-      }
-    } catch (err) {
-      console.error("Failed to send message:", err);
-      // Restore the user's message so they can retry
-      setMessage(savedMessage);
-      // Remove the empty assistant placeholder and add error message
-      setMessages((prev) => {
-        const newMessages = [...prev];
-        // Remove empty assistant message if it exists
-        const lastMsg = newMessages[newMessages.length - 1];
-        if (lastMsg && lastMsg.role === "assistant" && !lastMsg.content) {
-          newMessages.pop();
-        }
-        // Add error message as assistant response
-        newMessages.push({
-          id: `msg-error-${Date.now()}`,
-          role: "assistant" as const,
-          content: "Sorry, I encountered an error. Your message has been restored - please try again.",
-          timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-        });
-        return newMessages;
-      });
-    } finally {
-      setIsSending(false);
-      setIsStreaming(false);
-      setReconnecting(false);
-    }
-  };
-
-  if (isLoading) {
+  if (isLoadingIssue) {
     return (
       <div className="flex flex-col h-screen bg-background">
         <header className="sticky top-0 z-50 border-b border-border bg-card">
@@ -620,8 +446,8 @@ export default function IssueViewPage() {
           } md:flex flex-col flex-1 overflow-hidden`}
         >
           {/* Messages */}
-          <div className="flex-1 overflow-y-auto">
-            <div className="max-w-3xl mx-auto p-4 space-y-4">
+          <Conversation className="flex-1">
+            <ConversationContent className="max-w-3xl mx-auto gap-4">
               {/* Session Error Display */}
               {sessionError && (
                 <div className="flex flex-col items-center justify-center flex-1 p-8 text-center">
@@ -629,7 +455,7 @@ export default function IssueViewPage() {
                   <h3 className="font-medium">Could not start conversation</h3>
                   <p className="text-sm text-muted-foreground mt-1">{sessionError}</p>
                   <Button className="mt-4" onClick={() => {
-                    setSessionError(null);
+                    clearError();
                     retrySession();
                   }}>
                     Try again
@@ -645,41 +471,50 @@ export default function IssueViewPage() {
                   </p>
                 </div>
               ) : messages.length === 0 || sessionError ? null : (
-                messages.map((msg) => (
-                  <div
-                    key={msg.id}
-                    className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
-                  >
-                    <div className={`max-w-[85%] ${msg.role === "user" ? "order-1" : ""}`}>
-                      <div
-                        className={`rounded-md px-3 py-2 text-sm ${
-                          msg.role === "user"
-                            ? "bg-primary text-primary-foreground"
-                            : "bg-secondary"
-                        }`}
-                      >
-                        <p className="whitespace-pre-wrap">{msg.content}</p>
-                      </div>
-                      <p
-                        className={`text-[10px] text-muted-foreground mt-1 ${
-                          msg.role === "user" ? "text-right" : ""
-                        }`}
-                      >
-                        {msg.timestamp}
-                      </p>
-                    </div>
-                  </div>
+                toAIElementsMessages(messages).map((message, index) => (
+                  <Message key={message.id} from={message.role}>
+                    <MessageContent className={message.role === "user" ? "!bg-primary !text-primary-foreground" : ""}>
+                      {message.parts.map((part, partIndex) => {
+                        if (part.type === "text") {
+                          return (
+                            <MessageResponse key={partIndex}>
+                              {part.text}
+                            </MessageResponse>
+                          );
+                        }
+                        return null;
+                      })}
+                    </MessageContent>
+                    {/* Copy action for assistant messages only */}
+                    {message.role === "assistant" && messages[index].content && (
+                      <MessageActions>
+                        <MessageAction
+                          tooltip={copiedMessageId === message.id ? "Copied!" : "Copy message"}
+                          onClick={() => handleCopyMessage(message.id, messages[index].content)}
+                        >
+                          {copiedMessageId === message.id ? (
+                            <CheckIcon className="size-3" />
+                          ) : (
+                            <CopyIcon className="size-3" />
+                          )}
+                        </MessageAction>
+                      </MessageActions>
+                    )}
+                    <p
+                      className={`text-[10px] text-muted-foreground mt-1 ${
+                        message.role === "user" ? "text-right" : ""
+                      }`}
+                    >
+                      {messages[index].timestamp}
+                    </p>
+                  </Message>
                 ))
               )}
               {/* Typing indicator - show when streaming and last assistant message is empty */}
               {isStreaming && messages.length > 0 && messages[messages.length - 1]?.role === "assistant" && messages[messages.length - 1]?.content === "" && (
                 <div className="flex justify-start">
                   <div className="bg-secondary rounded-md px-3 py-2">
-                    <div className="flex gap-1 items-center">
-                      <span className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
-                      <span className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
-                      <span className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
-                    </div>
+                    <Loader size={20} className="text-muted-foreground" />
                   </div>
                 </div>
               )}
@@ -687,17 +522,13 @@ export default function IssueViewPage() {
               {isSending && !messages.some(m => m.role === "assistant") && (
                 <div className="flex justify-start">
                   <div className="bg-secondary rounded-md px-3 py-2">
-                    <div className="flex gap-1 items-center">
-                      <span className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
-                      <span className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
-                      <span className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
-                    </div>
+                    <Loader size={20} className="text-muted-foreground" />
                   </div>
                 </div>
               )}
-              <div ref={messagesEndRef} />
-            </div>
-          </div>
+            </ConversationContent>
+            <ConversationScrollButton />
+          </Conversation>
 
           {/* Session Error Banner */}
           {sessionError && (
@@ -716,32 +547,34 @@ export default function IssueViewPage() {
           )}
 
           {/* Input */}
-          <div className="border-t border-border bg-card px-4 py-3">
-            <div className="max-w-3xl mx-auto flex gap-2">
-              <input
-                type="text"
-                value={message}
-                onChange={(e) => setMessage(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && handleSend()}
-                placeholder={isStreaming ? "Waiting for response..." : "Ask the agent about this issue..."}
-                className="flex-1 h-9 px-3 rounded-md border border-border bg-background text-sm focus-ring disabled:opacity-50"
-                disabled={isSending || isStreaming}
-              />
-              <Button
-                variant="outline"
-                onClick={() => setShowSaveModal(true)}
-                disabled={!sessionId || messages.length < 2}
-                title="Save Summary"
-              >
-                <FileText className="h-4 w-4" />
-              </Button>
-              <Button onClick={handleSend} disabled={!message.trim() || isSending || isStreaming}>
-                {isStreaming ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Send className="h-4 w-4" />
-                )}
-              </Button>
+          <div className="border-t border-border bg-card">
+            <div className="max-w-3xl mx-auto">
+              <PromptInput onSubmit={handlePromptSubmit}>
+                <PromptInputBody>
+                  <PromptInputTextarea
+                    value={input}
+                    onChange={(e) => setInput(e.target.value)}
+                    placeholder={isStreaming ? "Waiting for response..." : "Ask the agent about this issue..."}
+                    disabled={isSending || isStreaming}
+                  />
+                </PromptInputBody>
+                <PromptInputFooter>
+                  <PromptInputTools>
+                    <PromptInputButton
+                      onClick={() => setShowSaveModal(true)}
+                      disabled={!sessionId || messages.length < 2}
+                      title="Save Summary"
+                    >
+                      <FileText className="h-4 w-4" />
+                      <span className="sr-only">Save Summary</span>
+                    </PromptInputButton>
+                  </PromptInputTools>
+                  <PromptInputSubmit 
+                    disabled={!input.trim() || isSending || isStreaming}
+                    status={isStreaming ? "streaming" : isSending ? "submitted" : undefined}
+                  />
+                </PromptInputFooter>
+              </PromptInput>
             </div>
           </div>
         </div>
@@ -761,7 +594,7 @@ export default function IssueViewPage() {
       />
 
       {/* Reconnecting toast */}
-      {reconnecting && (
+      {isReconnecting && (
         <div className="fixed bottom-4 right-4 bg-primary text-primary-foreground px-4 py-2 rounded-lg shadow-lg flex items-center gap-2 animate-in fade-in slide-in-from-bottom-2 duration-200 z-50">
           <Loader2 className="h-4 w-4 animate-spin" />
           <span className="text-sm">Reconnecting to AI...</span>
