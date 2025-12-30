@@ -1,8 +1,10 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { mockProjects, mockEpics, mockSoloSessions } from "@/lib/data/mock";
+import { NewIssueDialog } from "@/components/new-issue-dialog";
 import {
   ChevronRight,
   Zap,
@@ -19,6 +21,7 @@ import {
 export default function ProjectOverviewPage() {
   const params = useParams();
   const project = mockProjects.find((p) => p.id === params.id) ?? mockProjects[0];
+  const [isNewIssueDialogOpen, setIsNewIssueDialogOpen] = useState(false);
 
   // Categorize epics for kanban columns
   const activeSwarms = mockEpics.filter(
@@ -88,7 +91,7 @@ export default function ProjectOverviewPage() {
               iconColor="text-[hsl(var(--orange))]"
               count={ideas.length}
               accentColor="bg-[hsl(var(--orange))]"
-              addAction={`/project/${project.id}/ideate`}
+              onAddClick={() => setIsNewIssueDialogOpen(true)}
             >
               {ideas.map((epic) => (
                 <IdeaCard key={epic.id} epic={epic} projectId={project.id} />
@@ -136,6 +139,14 @@ export default function ProjectOverviewPage() {
           </div>
         </div>
       </div>
+
+      {/* New Issue Dialog */}
+      <NewIssueDialog
+        projectId={project.id}
+        projectPath={project.path}
+        open={isNewIssueDialogOpen}
+        onOpenChange={setIsNewIssueDialogOpen}
+      />
     </div>
   );
 }
@@ -177,6 +188,7 @@ function KanbanColumn({
   count,
   accentColor,
   addAction,
+  onAddClick,
   children,
 }: {
   title: string;
@@ -185,6 +197,7 @@ function KanbanColumn({
   count: number;
   accentColor: string;
   addAction?: string;
+  onAddClick?: () => void;
   children: React.ReactNode;
 }) {
   return (
@@ -205,6 +218,14 @@ function KanbanColumn({
           >
             <Plus className="h-4 w-4" />
           </Link>
+        )}
+        {onAddClick && (
+          <button
+            onClick={onAddClick}
+            className="h-6 w-6 rounded flex items-center justify-center hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors"
+          >
+            <Plus className="h-4 w-4" />
+          </button>
         )}
       </div>
       
