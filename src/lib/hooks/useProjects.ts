@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import type { Project } from "@/lib/types/api";
+import type { Project, GitHubIssue } from "@/lib/types/api";
 
 export function useProjects() {
   return useQuery({
@@ -86,6 +86,50 @@ export function useDeleteProject() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["projects"] });
+    },
+  });
+}
+
+export function useProjectIssues(projectId: string) {
+  return useQuery({
+    queryKey: ["project-issues", projectId],
+    queryFn: async (): Promise<GitHubIssue[]> => {
+      const res = await fetch(`/api/projects/${projectId}/issues`);
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Failed to fetch issues");
+      }
+      const data = await res.json();
+      return data.issues;
+    },
+    enabled: !!projectId,
+  });
+}
+
+export function useCreateIssue() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({
+      projectId,
+      title,
+    }: {
+      projectId: string;
+      title: string;
+    }): Promise<GitHubIssue> => {
+      const res = await fetch(`/api/projects/${projectId}/issues`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Failed to create issue");
+      }
+      return res.json();
+    },
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: ["project-issues", variables.projectId] });
     },
   });
 }

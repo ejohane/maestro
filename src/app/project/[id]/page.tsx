@@ -1,12 +1,16 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { mockProjects, mockEpics, mockSoloSessions } from "@/lib/data/mock";
+import { mockEpics, mockSoloSessions } from "@/lib/data/mock";
+import { NewIssueDialog } from "@/components/new-issue-dialog";
+import { useProject, useProjectIssues } from "@/lib/hooks/useProjects";
+import { Skeleton } from "@/components/ui/skeleton";
+import type { GitHubIssue } from "@/lib/types/api";
 import {
   ChevronRight,
   Zap,
-  Lightbulb,
   CheckCircle,
   MessageSquare,
   GitBranch,
@@ -14,18 +18,40 @@ import {
   Circle,
   MoreHorizontal,
   Plus,
+  CircleDot,
 } from "lucide-react";
 
 export default function ProjectOverviewPage() {
   const params = useParams();
-  const project = mockProjects.find((p) => p.id === params.id) ?? mockProjects[0];
+  const projectId = params.id as string;
+  const project = useProject(projectId);
+  const { data: issues = [], isLoading: issuesLoading } = useProjectIssues(projectId);
+  const [isNewIssueDialogOpen, setIsNewIssueDialogOpen] = useState(false);
+
+  // Loading state
+  if (!project) {
+    return (
+      <div className="h-full bg-background flex flex-col">
+        <header className="sticky top-0 z-50 border-b border-border bg-card flex-shrink-0">
+          <div className="flex h-12 items-center justify-between px-6">
+            <div className="flex items-center gap-3">
+              <Skeleton className="h-6 w-32" />
+              <Skeleton className="h-4 w-48" />
+            </div>
+          </div>
+        </header>
+        <div className="flex-1 flex items-center justify-center">
+          <p className="text-muted-foreground">Loading project...</p>
+        </div>
+      </div>
+    );
+  }
 
   // Categorize epics for kanban columns
   const activeSwarms = mockEpics.filter(
     (e) => e.state === "in_progress" && e.subtasks.some((t) => t.assignedAgent)
   );
   const readyToSwarm = mockEpics.filter((e) => e.state === "planned");
-  const ideas = mockEpics.filter((e) => e.state === "ideating");
   const completed = mockEpics.filter((e) => e.state === "closed");
 
   return (
@@ -54,7 +80,7 @@ export default function ProjectOverviewPage() {
                 <span className="text-sm font-medium">Recent Chats</span>
               </div>
               <Link 
-                href={`/project/${project.id}/solo`}
+                href={`/project/${projectId}/solo`}
                 className="text-xs text-primary hover:underline"
               >
                 View all
@@ -63,7 +89,7 @@ export default function ProjectOverviewPage() {
             <div className="flex gap-3 overflow-x-auto pb-2 -mx-6 px-6 scrollbar-thin">
               {/* New Chat Card */}
               <Link
-                href={`/project/${project.id}/solo`}
+                href={`/project/${projectId}/solo`}
                 className="flex-shrink-0 w-48 h-24 rounded-lg border border-dashed border-border hover:border-primary/50 hover:bg-secondary/30 transition-colors flex flex-col items-center justify-center gap-2 text-muted-foreground hover:text-foreground"
               >
                 <Plus className="h-5 w-5" />
@@ -72,7 +98,7 @@ export default function ProjectOverviewPage() {
               
               {/* Session Cards */}
               {mockSoloSessions.map((session) => (
-                <SessionCard key={session.id} session={session} projectId={project.id} />
+                <SessionCard key={session.id} session={session} projectId={projectId} />
               ))}
             </div>
           </div>
@@ -81,17 +107,18 @@ export default function ProjectOverviewPage() {
         {/* Kanban Board */}
         <div className="flex-1 overflow-hidden p-6">
           <div className="h-full flex gap-4 overflow-x-auto">
-            {/* Ideas Column */}
+            {/* Issues Column */}
             <KanbanColumn
-              title="Ideas"
-              icon={<Lightbulb className="h-3.5 w-3.5" />}
+              title="Issues"
+              icon={<CircleDot className="h-3.5 w-3.5" />}
               iconColor="text-[hsl(var(--orange))]"
-              count={ideas.length}
+              count={issues.length}
               accentColor="bg-[hsl(var(--orange))]"
-              addAction={`/project/${project.id}/ideate`}
+              onAddClick={() => setIsNewIssueDialogOpen(true)}
+              isLoading={issuesLoading}
             >
-              {ideas.map((epic) => (
-                <IdeaCard key={epic.id} epic={epic} projectId={project.id} />
+              {issues.map((issue) => (
+                <IssueCard key={issue.number} issue={issue} projectId={projectId} />
               ))}
             </KanbanColumn>
 
@@ -104,7 +131,7 @@ export default function ProjectOverviewPage() {
               accentColor="bg-[hsl(var(--info))]"
             >
               {readyToSwarm.map((epic) => (
-                <EpicCard key={epic.id} epic={epic} projectId={project.id} />
+                <EpicCard key={epic.id} epic={epic} projectId={projectId} />
               ))}
             </KanbanColumn>
 
@@ -117,7 +144,7 @@ export default function ProjectOverviewPage() {
               accentColor="bg-[hsl(var(--success))]"
             >
               {activeSwarms.map((epic) => (
-                <SwarmCard key={epic.id} epic={epic} projectId={project.id} />
+                <SwarmCard key={epic.id} epic={epic} projectId={projectId} />
               ))}
             </KanbanColumn>
 
@@ -130,12 +157,20 @@ export default function ProjectOverviewPage() {
               accentColor="bg-muted-foreground"
             >
               {completed.map((epic) => (
-                <CompletedCard key={epic.id} epic={epic} projectId={project.id} />
+                <CompletedCard key={epic.id} epic={epic} projectId={projectId} />
               ))}
             </KanbanColumn>
           </div>
         </div>
       </div>
+
+      {/* New Issue Dialog */}
+      <NewIssueDialog
+        projectId={projectId}
+        projectPath={project.path}
+        open={isNewIssueDialogOpen}
+        onOpenChange={setIsNewIssueDialogOpen}
+      />
     </div>
   );
 }
@@ -177,6 +212,8 @@ function KanbanColumn({
   count,
   accentColor,
   addAction,
+  onAddClick,
+  isLoading,
   children,
 }: {
   title: string;
@@ -185,6 +222,8 @@ function KanbanColumn({
   count: number;
   accentColor: string;
   addAction?: string;
+  onAddClick?: () => void;
+  isLoading?: boolean;
   children: React.ReactNode;
 }) {
   return (
@@ -206,11 +245,26 @@ function KanbanColumn({
             <Plus className="h-4 w-4" />
           </Link>
         )}
+        {onAddClick && (
+          <button
+            onClick={onAddClick}
+            className="h-6 w-6 rounded flex items-center justify-center hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors"
+          >
+            <Plus className="h-4 w-4" />
+          </button>
+        )}
       </div>
       
       {/* Column Content */}
       <div className="flex-1 overflow-y-auto p-2 space-y-2">
-        {children}
+        {isLoading ? (
+          <div className="space-y-2">
+            <Skeleton className="h-20 w-full" />
+            <Skeleton className="h-20 w-full" />
+          </div>
+        ) : (
+          children
+        )}
       </div>
       
       {/* Accent Line */}
@@ -299,15 +353,32 @@ function EpicCard({ epic, projectId }: { epic: (typeof mockEpics)[0]; projectId:
   );
 }
 
-// Idea Card
-function IdeaCard({ epic, projectId }: { epic: (typeof mockEpics)[0]; projectId: string }) {
+// Issue Card (GitHub issues)
+function IssueCard({ issue, projectId }: { issue: GitHubIssue; projectId: string }) {
   return (
     <Link
-      href={`/project/${projectId}/ideate?epic=${epic.id}`}
+      href={`/project/${projectId}/issue/${issue.number}`}
       className="block p-3 rounded-md bg-card border border-border hover:border-primary/50 transition-colors group"
     >
-      <h4 className="font-medium text-sm mb-1">{epic.title}</h4>
-      <p className="text-xs text-muted-foreground line-clamp-2">{epic.description}</p>
+      <div className="flex items-start gap-2 mb-1">
+        <CircleDot className="h-3.5 w-3.5 text-[hsl(var(--success))] flex-shrink-0 mt-0.5" />
+        <h4 className="font-medium text-sm flex-1">{issue.title}</h4>
+      </div>
+      <div className="flex items-center gap-2 ml-5.5">
+        <span className="text-xs text-muted-foreground font-mono">#{issue.number}</span>
+        {issue.labels.length > 0 && (
+          <div className="flex gap-1">
+            {issue.labels.slice(0, 2).map((label) => (
+              <span
+                key={label.name}
+                className="text-xs px-1.5 py-0.5 rounded bg-secondary text-muted-foreground"
+              >
+                {label.name}
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
       <div className="flex justify-end mt-2">
         <ChevronRight className="h-3.5 w-3.5 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
       </div>

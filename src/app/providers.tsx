@@ -1,6 +1,7 @@
 "use client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useState } from "react";
+import { ErrorProvider } from "@/lib/contexts/error-context";
 
 export function Providers({ children }: { children: React.ReactNode }) {
   const [queryClient] = useState(() => new QueryClient({
@@ -15,7 +16,9 @@ export function Providers({ children }: { children: React.ReactNode }) {
   
   return (
     <QueryClientProvider client={queryClient}>
-      {children}
+      <ErrorProvider>
+        {children}
+      </ErrorProvider>
     </QueryClientProvider>
   );
 }

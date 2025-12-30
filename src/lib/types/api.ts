@@ -21,3 +21,16 @@ export interface BrowseResult {
   canGoUp: boolean;
   directories: Directory[];
 }
+
+export interface GitHubIssue {
+  number: number;
+  title: string;
+  body: string;
+  state: string;
+  url: string;
+  createdAt: string;
+  author: {
+    login: string;
+  };
+  labels: { name: string }[];
+}
