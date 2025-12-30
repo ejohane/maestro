@@ -3,7 +3,9 @@
 import Link from "next/link";
 import { useParams, usePathname } from "next/navigation";
 import { useState } from "react";
-import { mockProjects, mockEpics, mockSoloSessions } from "@/lib/data/mock";
+import { mockEpics, mockSoloSessions } from "@/lib/data/mock";
+import { useProjects } from "@/lib/hooks/useProjects";
+import { FolderBrowserModal } from "@/components/folder-browser";
 import {
   ChevronDown,
   ChevronRight,
@@ -100,6 +102,8 @@ export function Sidebar() {
   const params = useParams();
   const pathname = usePathname();
   const currentProjectId = params.id as string;
+  const { data: projects, isLoading } = useProjects();
+  const [folderBrowserOpen, setFolderBrowserOpen] = useState(false);
 
   // Categorize epics
   const activeSwarms = mockEpics.filter(
@@ -141,152 +145,167 @@ export function Sidebar() {
             <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
               Projects
             </span>
-            <button className="h-5 w-5 rounded hover:bg-secondary flex items-center justify-center">
+            <button 
+              onClick={() => setFolderBrowserOpen(true)}
+              className="h-5 w-5 rounded hover:bg-secondary flex items-center justify-center"
+              aria-label="Add project"
+            >
               <Plus className="h-3 w-3 text-muted-foreground" />
             </button>
           </div>
         </div>
 
-        {mockProjects.map((project) => {
-          const isCurrentProject = project.id === currentProjectId;
-          const hasActiveSwarm = project.activeSwarms > 0;
+        {isLoading ? (
+          <div className="px-4 py-2 text-xs text-muted-foreground">
+            Loading...
+          </div>
+        ) : projects?.length ? (
+          projects.map((project) => {
+            const isCurrentProject = project.id === currentProjectId;
+            const isMissing = project.status === "missing";
 
-          return (
-            <TreeItem
-              key={project.id}
-              icon={
-                isCurrentProject ? (
-                  <FolderOpen className="h-4 w-4 text-primary" />
-                ) : (
-                  <Folder className="h-4 w-4" />
-                )
-              }
-              label={project.name}
-              defaultOpen={isCurrentProject}
-              statusIndicator={hasActiveSwarm ? "active" : undefined}
-            >
-              {isCurrentProject && (
-                <>
-                  {/* Active Swarms */}
-                  {activeSwarms.length > 0 && (
-                    <TreeItem
-                      icon={<Zap className="h-3.5 w-3.5 text-[hsl(var(--success))]" />}
-                      label="Active Swarms"
-                      count={activeSwarms.length}
-                      defaultOpen={true}
-                    >
-                      {activeSwarms.map((epic) => (
-                        <TreeItem
-                          key={epic.id}
-                          icon={<Circle className="h-2 w-2 fill-[hsl(var(--success))] text-[hsl(var(--success))]" />}
-                          label={epic.title}
-                          href={`/project/${project.id}/swarm/${epic.id}`}
-                          active={pathname.includes(`/swarm/${epic.id}`)}
-                          statusIndicator="active"
-                        />
-                      ))}
-                    </TreeItem>
-                  )}
-
-                  {/* In Progress */}
-                  {inProgress.length > 0 && (
-                    <TreeItem
-                      icon={<Clock className="h-3.5 w-3.5 text-[hsl(var(--warning))]" />}
-                      label="In Progress"
-                      count={inProgress.length}
-                      defaultOpen={true}
-                    >
-                      {inProgress.map((epic) => (
-                        <TreeItem
-                          key={epic.id}
-                          icon={<Circle className="h-2 w-2" />}
-                          label={epic.title}
-                          href={`/project/${project.id}/epic/${epic.id}`}
-                          active={pathname.includes(`/epic/${epic.id}`)}
-                          statusIndicator="warning"
-                        />
-                      ))}
-                    </TreeItem>
-                  )}
-
-                  {/* Ready */}
-                  {readyToSwarm.length > 0 && (
-                    <TreeItem
-                      icon={<Circle className="h-3.5 w-3.5 text-[hsl(var(--info))]" />}
-                      label="Ready"
-                      count={readyToSwarm.length}
-                    >
-                      {readyToSwarm.map((epic) => (
-                        <TreeItem
-                          key={epic.id}
-                          icon={<Circle className="h-2 w-2" />}
-                          label={epic.title}
-                          href={`/project/${project.id}/epic/${epic.id}`}
-                          active={pathname.includes(`/epic/${epic.id}`)}
-                        />
-                      ))}
-                    </TreeItem>
-                  )}
-
-                  {/* Ideas */}
-                  {ideas.length > 0 && (
-                    <TreeItem
-                      icon={<Lightbulb className="h-3.5 w-3.5 text-[hsl(var(--orange))]" />}
-                      label="Ideas"
-                      count={ideas.length}
-                    >
-                      {ideas.map((epic) => (
-                        <TreeItem
-                          key={epic.id}
-                          icon={<Lightbulb className="h-2.5 w-2.5" />}
-                          label={epic.title}
-                          href={`/project/${project.id}/ideate?epic=${epic.id}`}
-                          active={pathname.includes("/ideate") && pathname.includes(epic.id)}
-                        />
-                      ))}
-                    </TreeItem>
-                  )}
-
-                  {/* Completed */}
-                  {completed.length > 0 && (
-                    <TreeItem
-                      icon={<CheckCircle className="h-3.5 w-3.5 text-muted-foreground" />}
-                      label="Completed"
-                      count={completed.length}
-                    >
-                      {completed.map((epic) => (
-                        <TreeItem
-                          key={epic.id}
-                          icon={<CheckCircle className="h-2.5 w-2.5 text-[hsl(var(--success))]" />}
-                          label={epic.title}
-                          href={`/project/${project.id}/epic/${epic.id}`}
-                          active={pathname.includes(`/epic/${epic.id}`)}
-                        />
-                      ))}
-                    </TreeItem>
-                  )}
-
-                  {/* Solo Sessions */}
-                  <TreeItem
-                    icon={<MessageSquare className="h-3.5 w-3.5 text-muted-foreground" />}
-                    label="Solo Sessions"
-                    count={mockSoloSessions.length}
-                  >
-                    {mockSoloSessions.map((session) => (
+            return (
+              <TreeItem
+                key={project.id}
+                icon={
+                  isCurrentProject ? (
+                    <FolderOpen className="h-4 w-4 text-primary" />
+                  ) : (
+                    <Folder className={cn("h-4 w-4", isMissing && "text-yellow-600")} />
+                  )
+                }
+                label={project.displayName}
+                href={isMissing ? undefined : undefined}
+                defaultOpen={isCurrentProject}
+                statusIndicator={isMissing ? "warning" : undefined}
+              >
+                {isCurrentProject && (
+                  <>
+                    {/* Active Swarms */}
+                    {activeSwarms.length > 0 && (
                       <TreeItem
-                        key={session.id}
-                        icon={<MessageSquare className="h-2.5 w-2.5" />}
-                        label={session.title}
-                        href={`/project/${project.id}/solo/${session.id}`}
-                        active={pathname.includes(`/solo/${session.id}`)}
-                      />
-                    ))}
-                  </TreeItem>
-                </>
-              )}
-            </TreeItem>
-          );
-        })}
+                        icon={<Zap className="h-3.5 w-3.5 text-[hsl(var(--success))]" />}
+                        label="Active Swarms"
+                        count={activeSwarms.length}
+                        defaultOpen={true}
+                      >
+                        {activeSwarms.map((epic) => (
+                          <TreeItem
+                            key={epic.id}
+                            icon={<Circle className="h-2 w-2 fill-[hsl(var(--success))] text-[hsl(var(--success))]" />}
+                            label={epic.title}
+                            href={`/project/${project.id}/swarm/${epic.id}`}
+                            active={pathname.includes(`/swarm/${epic.id}`)}
+                            statusIndicator="active"
+                          />
+                        ))}
+                      </TreeItem>
+                    )}
+
+                    {/* In Progress */}
+                    {inProgress.length > 0 && (
+                      <TreeItem
+                        icon={<Clock className="h-3.5 w-3.5 text-[hsl(var(--warning))]" />}
+                        label="In Progress"
+                        count={inProgress.length}
+                        defaultOpen={true}
+                      >
+                        {inProgress.map((epic) => (
+                          <TreeItem
+                            key={epic.id}
+                            icon={<Circle className="h-2 w-2" />}
+                            label={epic.title}
+                            href={`/project/${project.id}/epic/${epic.id}`}
+                            active={pathname.includes(`/epic/${epic.id}`)}
+                            statusIndicator="warning"
+                          />
+                        ))}
+                      </TreeItem>
+                    )}
+
+                    {/* Ready */}
+                    {readyToSwarm.length > 0 && (
+                      <TreeItem
+                        icon={<Circle className="h-3.5 w-3.5 text-[hsl(var(--info))]" />}
+                        label="Ready"
+                        count={readyToSwarm.length}
+                      >
+                        {readyToSwarm.map((epic) => (
+                          <TreeItem
+                            key={epic.id}
+                            icon={<Circle className="h-2 w-2" />}
+                            label={epic.title}
+                            href={`/project/${project.id}/epic/${epic.id}`}
+                            active={pathname.includes(`/epic/${epic.id}`)}
+                          />
+                        ))}
+                      </TreeItem>
+                    )}
+
+                    {/* Ideas */}
+                    {ideas.length > 0 && (
+                      <TreeItem
+                        icon={<Lightbulb className="h-3.5 w-3.5 text-[hsl(var(--orange))]" />}
+                        label="Ideas"
+                        count={ideas.length}
+                      >
+                        {ideas.map((epic) => (
+                          <TreeItem
+                            key={epic.id}
+                            icon={<Lightbulb className="h-2.5 w-2.5" />}
+                            label={epic.title}
+                            href={`/project/${project.id}/ideate?epic=${epic.id}`}
+                            active={pathname.includes("/ideate") && pathname.includes(epic.id)}
+                          />
+                        ))}
+                      </TreeItem>
+                    )}
+
+                    {/* Completed */}
+                    {completed.length > 0 && (
+                      <TreeItem
+                        icon={<CheckCircle className="h-3.5 w-3.5 text-muted-foreground" />}
+                        label="Completed"
+                        count={completed.length}
+                      >
+                        {completed.map((epic) => (
+                          <TreeItem
+                            key={epic.id}
+                            icon={<CheckCircle className="h-2.5 w-2.5 text-[hsl(var(--success))]" />}
+                            label={epic.title}
+                            href={`/project/${project.id}/epic/${epic.id}`}
+                            active={pathname.includes(`/epic/${epic.id}`)}
+                          />
+                        ))}
+                      </TreeItem>
+                    )}
+
+                    {/* Solo Sessions */}
+                    <TreeItem
+                      icon={<MessageSquare className="h-3.5 w-3.5 text-muted-foreground" />}
+                      label="Solo Sessions"
+                      count={mockSoloSessions.length}
+                    >
+                      {mockSoloSessions.map((session) => (
+                        <TreeItem
+                          key={session.id}
+                          icon={<MessageSquare className="h-2.5 w-2.5" />}
+                          label={session.title}
+                          href={`/project/${project.id}/solo/${session.id}`}
+                          active={pathname.includes(`/solo/${session.id}`)}
+                        />
+                      ))}
+                    </TreeItem>
+                  </>
+                )}
+              </TreeItem>
+            );
+          })
+        ) : (
+          <div className="px-4 py-2 text-xs text-muted-foreground">
+            No projects
+          </div>
+        )}
       </nav>
 
       {/* Bottom Actions */}
@@ -312,6 +331,11 @@ export function Sidebar() {
           Solo Chat
         </Link>
       </div>
+
+      <FolderBrowserModal 
+        open={folderBrowserOpen} 
+        onOpenChange={setFolderBrowserOpen}
+      />
     </div>
   );
 }
