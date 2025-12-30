@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import { Providers } from "./providers";
+import { GlobalErrorBanner } from "@/components/error-banner";
 
 export const metadata: Metadata = {
   title: "Maestro",
@@ -15,7 +16,10 @@ export default function RootLayout({
   return (
     <html lang="en" className="dark">
       <body className="min-h-screen bg-background font-sans antialiased">
-        <Providers>{children}</Providers>
+        <Providers>
+          <GlobalErrorBanner />
+          {children}
+        </Providers>
       </body>
     </html>
   );
