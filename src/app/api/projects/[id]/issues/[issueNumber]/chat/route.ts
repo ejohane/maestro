@@ -2,13 +2,25 @@ import { openCodeService } from "@/lib/services/opencode";
 import { configService } from "@/lib/services/config";
 import { NextResponse } from "next/server";
 
-interface OpenCodeEvent {
+interface OpenCodeEventPayload {
   type: string;
   properties?: {
     delta?: string;
-    status?: string;
+    status?: string | { type?: string };
     error?: string;
+    sessionID?: string;
+    part?: {
+      id?: string;
+      sessionID?: string;
+      messageID?: string;
+      type?: string;
+    };
   };
+}
+
+interface OpenCodeGlobalEvent {
+  directory: string;
+  payload: OpenCodeEventPayload;
 }
 
 export async function POST(
@@ -77,30 +89,73 @@ export async function POST(
 
         // Subscribe to events
         const events = await openCodeService.subscribeToEvents(project.path);
+        
+        // Track which part ID we're streaming to avoid duplicates from multiple parts
+        let trackedPartId: string | null = null;
 
         for await (const rawEvent of events) {
-          const event = rawEvent as OpenCodeEvent;
+          // Events may come wrapped in GlobalEvent with directory and payload
+          // or directly as the event payload - handle both cases
+          const globalEvent = rawEvent as OpenCodeGlobalEvent;
+          const event = globalEvent.payload ?? (rawEvent as OpenCodeEventPayload);
+          
+          if (!event || !event.type) continue;
 
-          // Handle text delta updates
+          // Handle text delta updates - filter by sessionId and partId
           if (
             event.type === "message.part.updated" &&
             event.properties?.delta
           ) {
+            // Only process events for our specific session
+            const eventSessionId = event.properties?.part?.sessionID;
+            if (eventSessionId && eventSessionId !== sessionId) {
+              continue; // Skip events from other sessions
+            }
+            
+            // Only process text parts (ignore reasoning, tool, etc.)
+            if (event.properties?.part?.type !== "text") {
+              continue;
+            }
+            
+            // Track the first text part we see and only stream that one
+            const partId = event.properties?.part?.id;
+            if (!trackedPartId && partId) {
+              trackedPartId = partId;
+            }
+            
+            // Only stream deltas from the tracked part to avoid duplicates
+            if (partId && trackedPartId && partId !== trackedPartId) {
+              continue;
+            }
+            
             sendData({ delta: event.properties.delta });
           }
 
           // Session returned to idle = response complete
-          if (
-            event.type === "session.status" &&
-            event.properties?.status === "idle"
-          ) {
-            sendDone();
-            controller.close();
-            break;
+          // Filter by sessionId to ensure we're tracking the right session
+          // Note: status can be string "idle" or object { type: "idle" }
+          if (event.type === "session.status") {
+            const status = event.properties?.status;
+            const isIdle = status === "idle" || 
+              (typeof status === "object" && status?.type === "idle");
+            
+            if (isIdle) {
+              const eventSessionId = event.properties?.sessionID;
+              if (eventSessionId && eventSessionId !== sessionId) {
+                continue; // Skip status events from other sessions
+              }
+              sendDone();
+              controller.close();
+              break;
+            }
           }
 
-          // Handle errors
+          // Handle errors - filter by sessionId
           if (event.type === "session.error") {
+            const eventSessionId = event.properties?.sessionID;
+            if (eventSessionId && eventSessionId !== sessionId) {
+              continue; // Skip errors from other sessions
+            }
             sendData({ error: event.properties?.error || "Session error" });
             controller.close();
             break;

@@ -160,6 +160,17 @@ export type ReasoningContentProps = ComponentProps<
   children: string;
 };
 
+// Custom paragraph component that uses div to avoid invalid HTML nesting
+// when tables, code blocks, or other block elements appear inside paragraphs
+const MarkdownParagraph = ({
+  children,
+  ...props
+}: React.HTMLAttributes<HTMLDivElement>) => (
+  <div className="mb-4 last:mb-0" {...props}>
+    {children}
+  </div>
+);
+
 export const ReasoningContent = memo(
   ({ className, children, ...props }: ReasoningContentProps) => (
     <CollapsibleContent
@@ -170,7 +181,14 @@ export const ReasoningContent = memo(
       )}
       {...props}
     >
-      <Streamdown {...props}>{children}</Streamdown>
+      <Streamdown
+        components={{
+          p: MarkdownParagraph,
+        }}
+        {...props}
+      >
+        {children}
+      </Streamdown>
     </CollapsibleContent>
   )
 );

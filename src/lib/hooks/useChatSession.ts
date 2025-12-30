@@ -251,14 +251,18 @@ export function useChatSession(
             try {
               const { delta, error: streamError } = JSON.parse(data);
               if (delta) {
-                // Append delta to the last message
+                // Append delta to the last message - create new object to avoid mutation issues
                 setMessages((prev) => {
-                  const newMessages = [...prev];
-                  const lastMsg = newMessages[newMessages.length - 1];
+                  if (prev.length === 0) return prev;
+                  const lastMsg = prev[prev.length - 1];
                   if (lastMsg && lastMsg.role === "assistant") {
-                    lastMsg.content += delta;
+                    // Create new array with new message object (immutable update)
+                    return [
+                      ...prev.slice(0, -1),
+                      { ...lastMsg, content: lastMsg.content + delta }
+                    ];
                   }
-                  return newMessages;
+                  return prev;
                 });
                 // Notify parent of streaming activity
                 onStreamChunkRef.current?.();
