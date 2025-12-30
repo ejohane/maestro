@@ -14,7 +14,6 @@ import {
   Send,
   FileCode,
   RefreshCw,
-  MoreHorizontal,
   Activity,
   Play,
   ChevronDown,

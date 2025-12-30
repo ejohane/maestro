@@ -1,0 +1,4 @@
+#!/bin/sh
+
+# Quick typecheck on commit
+bun run typecheck
