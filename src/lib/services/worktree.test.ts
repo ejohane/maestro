@@ -2,8 +2,19 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import * as path from 'path';
 import * as os from 'os';
 
-// Setup mock results storage
-const mockResults: Map<string, { stdout: string; stderr: string } | Error> = new Map();
+// Use vi.hoisted to create shared state that's available to hoisted mocks
+const { mockResults, mockExec, clearExecMocks } = vi.hoisted(() => {
+  const results: Array<{ pattern: string; result: { stdout: string; stderr: string } | Error }> = [];
+  return {
+    mockResults: results,
+    mockExec: (cmdPattern: string, result: { stdout: string; stderr: string } | Error) => {
+      results.push({ pattern: cmdPattern, result });
+    },
+    clearExecMocks: () => {
+      results.length = 0;
+    }
+  };
+});
 
 // Mock child_process - need to properly support promisify
 vi.mock('child_process', () => {
@@ -15,9 +26,9 @@ vi.mock('child_process', () => {
   ) => {
     // Find matching mock result based on command pattern
     let result: { stdout: string; stderr: string } | Error | undefined;
-    for (const [pattern, value] of mockResults.entries()) {
-      if (cmd.includes(pattern)) {
-        result = value;
+    for (const mock of mockResults) {
+      if (cmd.includes(mock.pattern)) {
+        result = mock.result;
         break;
       }
     }
@@ -47,9 +58,9 @@ vi.mock('child_process', () => {
   ): Promise<{ stdout: string; stderr: string }> => {
     // Find matching mock result based on command pattern
     let result: { stdout: string; stderr: string } | Error | undefined;
-    for (const [pattern, value] of mockResults.entries()) {
-      if (cmd.includes(pattern)) {
-        result = value;
+    for (const mock of mockResults) {
+      if (cmd.includes(mock.pattern)) {
+        result = mock.result;
         break;
       }
     }
@@ -83,16 +94,6 @@ vi.mock('fs/promises', () => ({
 
 // Import after mocking
 import { worktreeService, WorktreeError } from './worktree';
-
-// Helper to set mock result
-function mockExec(cmdPattern: string, result: { stdout: string; stderr: string } | Error) {
-  mockResults.set(cmdPattern, result);
-}
-
-// Helper to clear all mocks
-function clearExecMocks() {
-  mockResults.clear();
-}
 
 describe('WorktreeService', () => {
   beforeEach(() => {

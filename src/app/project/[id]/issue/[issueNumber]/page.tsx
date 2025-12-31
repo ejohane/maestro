@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
@@ -39,8 +39,15 @@ import {
   CopyIcon,
   CheckIcon,
   RotateCcw,
+  ListTodo,
 } from "lucide-react";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { SaveSummaryModal } from "@/components/save-summary-modal";
+import { StartPlanningModal } from "@/components/planning";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Loader } from "@/components/ai-elements/loader";
 import {
@@ -115,6 +122,7 @@ function mapToolState(state: ToolPart["state"]): ToolUIPart["state"] {
 
 export default function IssueViewPage() {
   const params = useParams();
+  const router = useRouter();
   const projectId = params.id as string;
   const issueNumber = params.issueNumber as string;
   
@@ -126,6 +134,7 @@ export default function IssueViewPage() {
   // UI state
   const [activeTab, setActiveTab] = useState<"details" | "chat">("chat");
   const [showSaveModal, setShowSaveModal] = useState(false);
+  const [showPlanningModal, setShowPlanningModal] = useState(false);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   
   // Panel resizing state
@@ -360,6 +369,28 @@ export default function IssueViewPage() {
             <Button variant="ghost" size="icon-sm" onClick={fetchIssue} title="Refresh issue">
               <RefreshCw className="h-4 w-4" />
             </Button>
+            {/* Start Planning Button */}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="inline-flex">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setShowPlanningModal(true)}
+                    disabled={!issue?.number}
+                    className="gap-1.5"
+                  >
+                    <ListTodo className="h-4 w-4" />
+                    <span className="hidden sm:inline">Plan</span>
+                  </Button>
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>
+                {issue?.number 
+                  ? "Start planning this issue" 
+                  : "Create a GitHub issue first to start planning"}
+              </TooltipContent>
+            </Tooltip>
             <Button 
               variant="ghost" 
               size="icon-sm" 
@@ -691,6 +722,20 @@ export default function IssueViewPage() {
           fetchIssue()
         }}
       />
+
+      {/* Start Planning Modal */}
+      {issue && (
+        <StartPlanningModal
+          open={showPlanningModal}
+          onOpenChange={setShowPlanningModal}
+          projectId={projectId}
+          issueNumber={issue.number}
+          issueTitle={issue.title}
+          onConfirm={() => {
+            router.push(`/project/${projectId}/planning/${issue.number}`)
+          }}
+        />
+      )}
 
       {/* Reconnecting toast */}
       {isReconnecting && (

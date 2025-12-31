@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useParams, usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
-import { useProjects, useProjectIssues } from "@/lib/hooks/useProjects";
+import { useProjects, useProjectIssues, usePlanningSessions } from "@/lib/hooks/useProjects";
 import { FolderBrowserModal } from "@/components/folder-browser";
 import type { Project } from "@/lib/types/api";
 import {
@@ -41,8 +41,85 @@ import {
   Command,
   MessageSquare,
   Lightbulb,
+  ClipboardList,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+
+// Component to fetch and display planning sessions for a project
+function PlanningSessionsSection({
+  project,
+  pathname,
+  onNavigate,
+}: {
+  project: Project;
+  pathname: string;
+  onNavigate: () => void;
+}) {
+  const { data: sessions = [], isLoading } = usePlanningSessions(project.id);
+  const [isOpen, setIsOpen] = useState(true);
+
+  if (isLoading) {
+    return null; // Don't show loading state for planning - it's optional content
+  }
+
+  if (sessions.length === 0) {
+    return null; // Hide section when no active planning sessions
+  }
+
+  return (
+    <Collapsible open={isOpen} onOpenChange={setIsOpen} className="w-full">
+      <SidebarMenuSubItem>
+        <CollapsibleTrigger asChild>
+          <SidebarMenuSubButton size="sm" className="w-full justify-between pr-2">
+            <span className="flex items-center gap-2">
+              <ClipboardList className="h-3 w-3 text-primary" />
+              <span>Active Planning</span>
+            </span>
+            <span className="flex items-center gap-1">
+              <span className="text-xs text-muted-foreground">{sessions.length}</span>
+              {isOpen ? (
+                <ChevronDown className="h-3 w-3" />
+              ) : (
+                <ChevronRight className="h-3 w-3" />
+              )}
+            </span>
+          </SidebarMenuSubButton>
+        </CollapsibleTrigger>
+        <CollapsibleContent>
+          <SidebarMenuSub>
+            {sessions.map((session) => {
+              const isActive = pathname.includes(`/planning/${session.issueNumber}`);
+              // Truncate title if too long, showing issue number and partial title
+              const displayTitle = `#${session.issueNumber}: ${session.issueTitle.replace(/^Issue #\d+/, '').trim() || 'Planning'}`;
+              const truncatedTitle = displayTitle.length > 30 
+                ? displayTitle.slice(0, 27) + '...' 
+                : displayTitle;
+              
+              return (
+                <SidebarMenuSubItem key={session.issueNumber}>
+                  <SidebarMenuSubButton
+                    asChild
+                    size="sm"
+                    isActive={isActive}
+                  >
+                    <Link
+                      href={`/project/${project.id}/planning/${session.issueNumber}`}
+                      onClick={onNavigate}
+                      title={displayTitle}
+                    >
+                      <ClipboardList className="h-2.5 w-2.5 text-primary" />
+                      <span className="truncate">{truncatedTitle}</span>
+                    </Link>
+                  </SidebarMenuSubButton>
+                </SidebarMenuSubItem>
+              );
+            })}
+          </SidebarMenuSub>
+        </CollapsibleContent>
+      </SidebarMenuSubItem>
+    </Collapsible>
+  );
+}
 
 // Component to fetch and display issues for a project
 function ProjectIssuesSection({ 
@@ -172,6 +249,11 @@ function ProjectItem({
         </CollapsibleTrigger>
         <CollapsibleContent>
           <SidebarMenuSub>
+            <PlanningSessionsSection
+              project={project}
+              pathname={pathname}
+              onNavigate={onNavigate}
+            />
             <ProjectIssuesSection 
               project={project} 
               pathname={pathname}

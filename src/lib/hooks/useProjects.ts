@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import type { Project, GitHubIssue } from "@/lib/types/api";
+import type { Project, GitHubIssue, PlanningSessionInfo } from "@/lib/types/api";
 
 export function useProjects() {
   return useQuery({
@@ -131,5 +131,21 @@ export function useCreateIssue() {
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: ["project-issues", variables.projectId] });
     },
+  });
+}
+
+export function usePlanningSessions(projectId: string) {
+  return useQuery({
+    queryKey: ["planning-sessions", projectId],
+    queryFn: async (): Promise<PlanningSessionInfo[]> => {
+      const res = await fetch(`/api/projects/${projectId}/planning`);
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Failed to fetch planning sessions");
+      }
+      const data = await res.json();
+      return data.sessions;
+    },
+    enabled: !!projectId,
   });
 }
