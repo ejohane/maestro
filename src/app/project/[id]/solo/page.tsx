@@ -11,6 +11,7 @@ import {
   MoreHorizontal,
   MessageSquare,
 } from "lucide-react";
+import { SidebarTrigger } from "@/components/ui/sidebar";
 
 export default function SoloPage() {
   const params = useParams();
@@ -48,6 +49,7 @@ export default function SoloPage() {
       {/* Header */}
       <header className="sticky top-0 z-50 border-b border-border bg-card">
         <div className="flex h-12 items-center gap-2 px-4">
+          <SidebarTrigger className="lg:hidden" />
           <Link href={`/project/${project.id}`} className="h-7 w-7 rounded flex items-center justify-center hover:bg-secondary">
             <ChevronLeft className="h-4 w-4" />
           </Link>

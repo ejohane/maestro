@@ -19,6 +19,7 @@ import {
   ChevronDown,
   ChevronRight,
 } from "lucide-react";
+import { SidebarTrigger } from "@/components/ui/sidebar";
 
 export default function SwarmPage() {
   const params = useParams();
@@ -37,6 +38,7 @@ export default function SwarmPage() {
       {/* Header */}
       <header className="sticky top-0 z-50 border-b border-border bg-card">
         <div className="flex h-12 items-center gap-2 px-4">
+          <SidebarTrigger className="lg:hidden" />
           <Link href={`/project/${project.id}`} className="h-7 w-7 rounded flex items-center justify-center hover:bg-secondary">
             <ChevronLeft className="h-4 w-4" />
           </Link>
@@ -57,7 +59,7 @@ export default function SwarmPage() {
       {/* Stats Bar */}
       <div className="border-b border-border bg-card px-4 py-3">
         <div className="max-w-3xl mx-auto">
-          <div className="grid grid-cols-4 gap-4 text-center mb-3">
+          <div className="grid grid-cols-2 gap-2 lg:grid-cols-4 lg:gap-4 text-center mb-3">
             <Stat label="Progress" value={`${pct}%`} />
             <Stat label="Completed" value={done.toString()} color="success" />
             <Stat label="Running" value={mockAgents.filter(a => a.status === "working").length.toString()} color="info" />
