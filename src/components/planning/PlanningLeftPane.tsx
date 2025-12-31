@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { SetupProgress } from "./SetupProgress";
 import { SetupSummary } from "./SetupSummary";
 import { PlanningChat } from "./PlanningChat";
-import { Loader2, AlertCircle } from "lucide-react";
+import { Loader2, AlertCircle, Play } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 interface PlanningLeftPaneProps {
@@ -38,7 +38,7 @@ interface SessionStatusResponse {
  * Manages the transition from setup to chat mode:
  * 1. On mount: Check for existing session
  * 2. If session exists: Show chat immediately
- * 3. If no session: Show SetupProgress, auto-start after 500ms
+ * 3. If no session: Show "Start Planning" button (user must explicitly trigger)
  * 4. After setup completes: Collapse setup section, show chat
  */
 export function PlanningLeftPane({
@@ -101,19 +101,11 @@ export function PlanningLeftPane({
     checkExistingSession();
   }, [checkExistingSession]);
 
-  // Auto-start setup after 500ms delay when in pending state
-  useEffect(() => {
-    if (setupState !== "pending" || setupStartedRef.current) return;
-
-    const timer = setTimeout(() => {
-      if (!setupStartedRef.current) {
-        setupStartedRef.current = true;
-        setSetupState("in_progress");
-      }
-    }, 500);
-
-    return () => clearTimeout(timer);
-  }, [setupState]);
+  // Start planning - triggered by user clicking the button
+  const handleStartPlanning = useCallback(() => {
+    setupStartedRef.current = true;
+    setSetupState("in_progress");
+  }, []);
 
   // Handle setup completion
   const handleSetupComplete = useCallback(
@@ -166,16 +158,22 @@ export function PlanningLeftPane({
     );
   }
 
-  // Pending state (waiting for auto-start)
+  // Pending state - show Start Planning button
   if (setupState === "pending") {
     return (
       <div className="flex flex-col h-full overflow-hidden">
         <div className="flex-1 flex items-center justify-center">
-          <div className="flex flex-col items-center gap-3">
-            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-            <p className="text-sm text-muted-foreground">
-              Preparing planning environment...
-            </p>
+          <div className="flex flex-col items-center gap-4 text-center px-4">
+            <div className="flex flex-col items-center gap-2">
+              <h3 className="text-lg font-medium">Ready to Plan</h3>
+              <p className="text-sm text-muted-foreground max-w-sm">
+                This will create a dedicated workspace for issue #{issueNumber} and start an AI planning session.
+              </p>
+            </div>
+            <Button onClick={handleStartPlanning} size="lg">
+              <Play className="h-4 w-4 mr-2" />
+              Start Planning
+            </Button>
           </div>
         </div>
       </div>
