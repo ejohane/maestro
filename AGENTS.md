@@ -100,4 +100,23 @@ git push                # Push to remote
 - Use descriptive titles and set appropriate priority/type
 - Always `bd sync` before ending session
 
+### Git Worktrees
+
+This repo is configured for worktree support via `.beads/config.yaml`:
+- **Sync branch**: `beads-sync` - daemon commits go to this dedicated branch
+- **Shared database**: All worktrees share the main repo's `.beads/beads.db`
+- **No extra setup needed**: Just create worktrees and use `bd` commands normally
+
+```bash
+# Create a worktree
+git worktree add ../my-feature -b feature-branch
+
+# Use bd normally - it auto-discovers the shared database
+cd ../my-feature
+bd ready
+bd create "New task" -t task -p 2
+```
+
+If daemon issues occur in worktrees, use `--no-daemon` flag or set `BEADS_NO_DAEMON=1`.
+
 <!-- end-bv-agent-instructions -->

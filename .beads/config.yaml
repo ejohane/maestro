@@ -1,0 +1,8 @@
+# Beads configuration for worktree support
+# See: https://github.com/steveyegge/beads/blob/main/docs/WORKTREES.md
+
+# Sync branch for worktree compatibility
+# This allows the beads daemon to commit changes to a dedicated branch
+# instead of the current branch, enabling full daemon support in worktrees.
+# Without this, the daemon would be auto-disabled in worktrees.
+sync-branch: beads-sync
