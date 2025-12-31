@@ -276,6 +276,25 @@ export async function POST(
               worktreeInfo.path
             );
 
+            // Inject worktree context into the session so the AI knows where to work
+            const worktreeContext = `<system-reminder>
+IMPORTANT: You are working in a git worktree, NOT the main repository.
+
+Working Directory: ${worktreeInfo.path}
+Git Branch: ${worktreeInfo.branch}
+Issue Number: ${issueNumber}
+
+All file operations, bash commands, and git operations MUST be performed in this worktree directory (${worktreeInfo.path}), not the main repository. The main repository is located elsewhere and should not be modified.
+
+When running any commands, ensure you are operating within this worktree path.
+</system-reminder>`;
+
+            await openCodeService.injectContext(
+              worktreeInfo.path,
+              sessionId,
+              worktreeContext
+            );
+
             sendStepEvent({
               id: "create_session",
               status: "completed",
@@ -307,11 +326,11 @@ export async function POST(
           });
 
           try {
-            const planningPrompt = `/turn_gh_issue_into_beads ${issueNumber}`;
-            await openCodeService.sendPlanningMessageAsync(
+            await openCodeService.sendPlanningCommand(
               worktreeInfo.path,
               sessionId,
-              planningPrompt
+              "turn_gh_issue_into_beads",
+              String(issueNumber)
             );
 
             sendStepEvent({

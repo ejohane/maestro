@@ -316,6 +316,31 @@ export class OpenCodeService {
   }
 
   /**
+   * Execute a slash command in a planning session.
+   * Uses the dedicated command endpoint for proper command parsing.
+   * Synchronous - waits for command completion.
+   * @param worktreePath - Absolute path to the worktree directory
+   * @param sessionId - Target session ID
+   * @param command - Command name (without leading slash, e.g. "turn_gh_issue_into_beads")
+   * @param args - Command arguments as a string
+   */
+  async sendPlanningCommand(
+    worktreePath: string,
+    sessionId: string,
+    command: string,
+    args: string
+  ): Promise<void> {
+    await this.client.session.command({
+      path: { id: sessionId },
+      query: { directory: worktreePath },
+      body: {
+        command,
+        arguments: args,
+      },
+    });
+  }
+
+  /**
    * Send a message to a planning session and stream the response.
    * Returns a ReadableStream suitable for SSE responses.
    * Enables full tool access (bash, write, edit).

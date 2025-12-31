@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Message,
@@ -64,6 +64,108 @@ interface StreamState {
   error: string | null;
 }
 
+// OpenCode SDK message types (from API response)
+interface OpenCodeTextPart {
+  id: string;
+  type: "text";
+  text: string;
+  synthetic?: boolean;
+}
+
+interface OpenCodeReasoningPart {
+  id: string;
+  type: "reasoning";
+  text: string;
+  time?: { start: number; end?: number };
+}
+
+interface OpenCodeToolState {
+  status: "pending" | "running" | "completed" | "error";
+  input?: Record<string, unknown>;
+  output?: string;
+  error?: string;
+  title?: string;
+}
+
+interface OpenCodeToolPart {
+  id: string;
+  type: "tool";
+  tool: string;
+  callID: string;
+  state: OpenCodeToolState;
+}
+
+type OpenCodePart = OpenCodeTextPart | OpenCodeReasoningPart | OpenCodeToolPart | { type: string; id: string };
+
+interface OpenCodeMessage {
+  info: {
+    id: string;
+    role: "user" | "assistant";
+    time: { created: number };
+  };
+  parts: OpenCodePart[];
+}
+
+/**
+ * Convert OpenCode SDK messages to our ChatMessage format
+ */
+function convertOpenCodeMessages(openCodeMessages: OpenCodeMessage[]): ChatMessage[] {
+  return openCodeMessages.map((msg) => {
+    const parts: MessagePart[] = [];
+
+    for (const part of msg.parts) {
+      if (part.type === "text") {
+        const textPart = part as OpenCodeTextPart;
+        // Skip synthetic messages (injected context)
+        if (textPart.synthetic) continue;
+        parts.push({
+          type: "text",
+          partId: textPart.id,
+          text: textPart.text,
+        });
+      } else if (part.type === "reasoning") {
+        const reasoningPart = part as OpenCodeReasoningPart;
+        parts.push({
+          type: "reasoning",
+          partId: reasoningPart.id,
+          text: reasoningPart.text,
+          isStreaming: false,
+          time: reasoningPart.time,
+        });
+      } else if (part.type === "tool") {
+        const toolPart = part as OpenCodeToolPart;
+        parts.push({
+          type: "tool",
+          partId: toolPart.id,
+          tool: toolPart.tool,
+          callID: toolPart.callID,
+          state: toolPart.state,
+        });
+      }
+    }
+
+    // Build content string from text parts
+    const content = parts
+      .filter((p): p is TextPart => p.type === "text")
+      .map((p) => p.text)
+      .join("");
+
+    // Format timestamp
+    const timestamp = new Date(msg.info.time.created).toLocaleTimeString([], {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+
+    return {
+      id: msg.info.id,
+      role: msg.info.role,
+      content,
+      parts,
+      timestamp,
+    };
+  });
+}
+
 export function PlanningChat({
   projectId,
   issueNumber,
@@ -78,7 +180,9 @@ export function PlanningChat({
     isStreaming: false,
     error: null,
   });
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const historyLoadedRef = useRef(false);
 
   // Auto-scroll to bottom when messages change
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -86,6 +190,44 @@ export function PlanningChat({
   // Whether the session is ready for interaction
   const isSessionReady = Boolean(sessionId && worktreePath);
   const isDisabled = !isSessionReady || streamState.isStreaming;
+
+  // Load message history when session becomes ready
+  useEffect(() => {
+    if (!sessionId || !worktreePath || historyLoadedRef.current) return;
+
+    const loadMessageHistory = async () => {
+      setIsLoadingHistory(true);
+      try {
+        const response = await fetch(
+          `/api/projects/${projectId}/planning/${issueNumber}/messages`
+        );
+
+        if (!response.ok) {
+          // Session might be new with no messages yet - that's OK
+          if (response.status === 404) {
+            historyLoadedRef.current = true;
+            return;
+          }
+          throw new Error(`HTTP ${response.status}`);
+        }
+
+        const data = await response.json();
+        if (data.messages && Array.isArray(data.messages)) {
+          const convertedMessages = convertOpenCodeMessages(data.messages);
+          setMessages(convertedMessages);
+        }
+        historyLoadedRef.current = true;
+      } catch (err) {
+        console.error("Error loading message history:", err);
+        // Don't set error state - just proceed with empty messages
+        historyLoadedRef.current = true;
+      } finally {
+        setIsLoadingHistory(false);
+      }
+    };
+
+    loadMessageHistory();
+  }, [sessionId, worktreePath, projectId, issueNumber]);
 
   // Handle sending a message
   const sendMessage = useCallback(
@@ -403,8 +545,20 @@ export function PlanningChat({
     setStreamState((prev) => ({ ...prev, error: null }));
   }, []);
 
-  // Empty state
-  if (messages.length === 0 && !streamState.isStreaming) {
+  // Loading history state
+  if (isLoadingHistory) {
+    return (
+      <div className="flex flex-col h-full">
+        <div className="flex-1 flex flex-col items-center justify-center p-4">
+          <Loader size={24} className="text-muted-foreground mb-3" />
+          <p className="text-xs text-muted-foreground">Loading chat history...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Empty state (only show if not loading history)
+  if (messages.length === 0 && !streamState.isStreaming && !isLoadingHistory) {
     return (
       <div className="flex flex-col h-full">
         {/* Empty state */}

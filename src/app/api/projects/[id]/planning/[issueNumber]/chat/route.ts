@@ -52,12 +52,27 @@ interface ChatRequestBody {
 }
 
 /**
- * Build a contextual message that includes bead context
+ * Build a contextual message that includes bead context and worktree reminder
  */
-function buildContextualMessage(message: string, beadContext: BeadContext): string {
-  return `[Context: Working on bead "${beadContext.title}" (ID: ${beadContext.id})]
-
-User request: ${message}`;
+function buildContextualMessage(
+  message: string,
+  worktreePath: string,
+  beadContext?: BeadContext
+): string {
+  const parts: string[] = [];
+  
+  // Always include worktree reminder
+  parts.push(`[Working Directory: ${worktreePath}]`);
+  
+  // Add bead context if provided
+  if (beadContext) {
+    parts.push(`[Context: Working on bead "${beadContext.title}" (ID: ${beadContext.id})]`);
+  }
+  
+  parts.push("");
+  parts.push(message);
+  
+  return parts.join("\n");
 }
 
 export async function POST(
@@ -108,10 +123,8 @@ export async function POST(
     );
   }
 
-  // Build message with optional bead context
-  const fullMessage = beadContext
-    ? buildContextualMessage(message, beadContext)
-    : message;
+  // Build message with worktree context and optional bead context
+  const fullMessage = buildContextualMessage(message, worktreePath, beadContext);
 
   // Create SSE stream
   const stream = new ReadableStream({
