@@ -3,13 +3,23 @@ import * as path from "path";
 import * as os from "os";
 
 // Types
+export type SessionType = 'discussion' | 'planning';
+
 export interface SessionMapping {
   projectId: string;       // Project UUID (from Maestro config)
   projectPath: string;     // Project absolute path (for verification)
   issueNumber: number;     // GitHub issue number
   sessionId: string;       // OpenCode session ID
+  sessionType?: SessionType; // Session type - defaults to 'discussion' for backwards compat
+  worktreePath?: string;   // Only for planning sessions
   createdAt: string;       // ISO timestamp
   lastAccessedAt: string;  // ISO timestamp (updated on access)
+}
+
+// Helper type for planning sessions - worktreePath is required
+export interface PlanningSessionMapping extends SessionMapping {
+  sessionType: 'planning';
+  worktreePath: string;  // Required for planning
 }
 
 export interface SessionStore {
@@ -23,16 +33,59 @@ class SessionStorageService {
 
   /**
    * Get a session mapping for a specific project and issue
+   * @param sessionType - defaults to 'discussion' for backwards compatibility
    */
-  async getSession(projectId: string, issueNumber: number): Promise<SessionMapping | null> {
+  async getSession(
+    projectId: string,
+    issueNumber: number,
+    sessionType: SessionType = 'discussion'
+  ): Promise<SessionMapping | null> {
     const store = await this.readStore();
     return store.mappings.find(
-      (m) => m.projectId === projectId && m.issueNumber === issueNumber
+      (m) => m.projectId === projectId && 
+             m.issueNumber === issueNumber &&
+             this.getSessionType(m) === sessionType
     ) ?? null;
   }
 
   /**
+   * Get a planning session for a specific project and issue
+   */
+  async getPlanningSession(
+    projectId: string,
+    issueNumber: number
+  ): Promise<PlanningSessionMapping | null> {
+    const session = await this.getSession(projectId, issueNumber, 'planning');
+    if (session && session.sessionType === 'planning' && session.worktreePath) {
+      return session as PlanningSessionMapping;
+    }
+    return null;
+  }
+
+  /**
+   * List all planning sessions for a project
+   */
+  async listPlanningSessions(projectId: string): Promise<PlanningSessionMapping[]> {
+    const store = await this.readStore();
+    return store.mappings.filter(
+      (m): m is PlanningSessionMapping => 
+        m.projectId === projectId && 
+        m.sessionType === 'planning' &&
+        typeof m.worktreePath === 'string'
+    );
+  }
+
+  /**
+   * Helper to get sessionType with backwards compatibility
+   * Sessions without sessionType are treated as 'discussion'
+   */
+  private getSessionType(mapping: SessionMapping): SessionType {
+    return mapping.sessionType ?? 'discussion';
+  }
+
+  /**
    * Save a session mapping (creates or updates)
+   * This method preserves backward compatibility - saves as 'discussion' type
    */
   async saveSession(
     projectId: string,
@@ -43,9 +96,11 @@ class SessionStorageService {
     const store = await this.readStore();
     const now = new Date().toISOString();
 
-    // Check if mapping already exists
+    // Check if mapping already exists (only for discussion sessions)
     const existingIndex = store.mappings.findIndex(
-      (m) => m.projectId === projectId && m.issueNumber === issueNumber
+      (m) => m.projectId === projectId && 
+             m.issueNumber === issueNumber &&
+             this.getSessionType(m) === 'discussion'
     );
 
     const mapping: SessionMapping = {
@@ -53,6 +108,49 @@ class SessionStorageService {
       projectPath,
       issueNumber,
       sessionId,
+      sessionType: 'discussion',
+      createdAt: existingIndex >= 0 ? store.mappings[existingIndex].createdAt : now,
+      lastAccessedAt: now,
+    };
+
+    if (existingIndex >= 0) {
+      store.mappings[existingIndex] = mapping;
+    } else {
+      store.mappings.push(mapping);
+    }
+
+    await this.writeStore(store);
+    return mapping;
+  }
+
+  /**
+   * Save a planning session mapping (creates or updates)
+   * Planning sessions require a worktreePath
+   */
+  async savePlanningSession(
+    projectId: string,
+    projectPath: string,
+    issueNumber: number,
+    sessionId: string,
+    worktreePath: string
+  ): Promise<PlanningSessionMapping> {
+    const store = await this.readStore();
+    const now = new Date().toISOString();
+
+    // Check if planning mapping already exists for this project/issue
+    const existingIndex = store.mappings.findIndex(
+      (m) => m.projectId === projectId && 
+             m.issueNumber === issueNumber &&
+             m.sessionType === 'planning'
+    );
+
+    const mapping: PlanningSessionMapping = {
+      projectId,
+      projectPath,
+      issueNumber,
+      sessionId,
+      sessionType: 'planning',
+      worktreePath,
       createdAt: existingIndex >= 0 ? store.mappings[existingIndex].createdAt : now,
       lastAccessedAt: now,
     };
@@ -69,13 +167,20 @@ class SessionStorageService {
 
   /**
    * Remove a session mapping
+   * @param sessionType - defaults to 'discussion' for backwards compatibility
    */
-  async removeSession(projectId: string, issueNumber: number): Promise<boolean> {
+  async removeSession(
+    projectId: string,
+    issueNumber: number,
+    sessionType: SessionType = 'discussion'
+  ): Promise<boolean> {
     const store = await this.readStore();
     const initialLength = store.mappings.length;
 
     store.mappings = store.mappings.filter(
-      (m) => !(m.projectId === projectId && m.issueNumber === issueNumber)
+      (m) => !(m.projectId === projectId && 
+               m.issueNumber === issueNumber &&
+               this.getSessionType(m) === sessionType)
     );
 
     if (store.mappings.length !== initialLength) {
@@ -88,11 +193,18 @@ class SessionStorageService {
 
   /**
    * Update lastAccessedAt timestamp for a session
+   * @param sessionType - defaults to 'discussion' for backwards compatibility
    */
-  async touchSession(projectId: string, issueNumber: number): Promise<boolean> {
+  async touchSession(
+    projectId: string,
+    issueNumber: number,
+    sessionType: SessionType = 'discussion'
+  ): Promise<boolean> {
     const store = await this.readStore();
     const mapping = store.mappings.find(
-      (m) => m.projectId === projectId && m.issueNumber === issueNumber
+      (m) => m.projectId === projectId && 
+             m.issueNumber === issueNumber &&
+             this.getSessionType(m) === sessionType
     );
 
     if (!mapping) {

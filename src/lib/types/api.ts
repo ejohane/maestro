@@ -34,3 +34,10 @@ export interface GitHubIssue {
   };
   labels: { name: string }[];
 }
+
+export interface PlanningSessionInfo {
+  issueNumber: number;
+  issueTitle: string;
+  worktreePath: string;
+  createdAt: string;
+}

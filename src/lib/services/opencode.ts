@@ -259,6 +259,105 @@ export class OpenCodeService {
       return [];
     }
   }
+
+  // ============================================================
+  // Planning Mode Methods (Full Tool Access)
+  // ============================================================
+
+  /**
+   * Create a new session configured for planning mode.
+   * Uses worktreePath as the directory context for the session.
+   * @param worktreePath - Absolute path to the worktree directory
+   * @param title - Optional session title for identification
+   * @returns Object containing the new session ID
+   */
+  async createPlanningSession(
+    worktreePath: string,
+    title?: string
+  ): Promise<{ id: string }> {
+    const result = await this.client.session.create({
+      query: { directory: worktreePath },
+      body: { title: title || "Planning Session" },
+    });
+
+    if (!result.data?.id) {
+      throw new Error("Failed to create planning session: no session ID returned");
+    }
+
+    return { id: result.data.id };
+  }
+
+  /**
+   * Send a message with full tool access (bash, write, edit, read).
+   * Used for planning sessions where the agent needs to create/modify beads.
+   * Uses promptAsync for non-blocking execution.
+   * @param worktreePath - Absolute path to the worktree directory
+   * @param sessionId - Target session ID
+   * @param message - Message to send
+   */
+  async sendPlanningMessageAsync(
+    worktreePath: string,
+    sessionId: string,
+    message: string
+  ): Promise<void> {
+    await this.client.session.promptAsync({
+      path: { id: sessionId },
+      query: { directory: worktreePath },
+      body: {
+        model: DEFAULT_MODEL,
+        tools: {
+          bash: true,
+          write: true,
+          edit: true,
+        },
+        parts: [{ type: "text", text: message }],
+      },
+    });
+  }
+
+  /**
+   * Send a message to a planning session and stream the response.
+   * Returns a ReadableStream suitable for SSE responses.
+   * Enables full tool access (bash, write, edit).
+   * @param worktreePath - Absolute path to the worktree directory
+   * @param sessionId - Target session ID
+   * @param message - Message to send
+   * @returns ReadableStream for SSE consumption
+   */
+  async streamPlanningResponse(
+    worktreePath: string,
+    sessionId: string,
+    message: string
+  ): Promise<ReadableStream> {
+    const result = await this.client.session.prompt({
+      path: { id: sessionId },
+      query: { directory: worktreePath },
+      body: {
+        model: DEFAULT_MODEL,
+        tools: {
+          bash: true,
+          write: true,
+          edit: true,
+        },
+        parts: [{ type: "text", text: message }],
+      },
+    });
+
+    // Create a ReadableStream that emits the response as SSE events
+    const encoder = new TextEncoder();
+    const responseData = result.data;
+
+    return new ReadableStream({
+      start(controller) {
+        // Emit the response as a single SSE event
+        if (responseData) {
+          const event = `data: ${JSON.stringify(responseData)}\n\n`;
+          controller.enqueue(encoder.encode(event));
+        }
+        controller.close();
+      },
+    });
+  }
 }
 
 // Singleton instance for application-wide use
