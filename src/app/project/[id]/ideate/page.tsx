@@ -11,6 +11,7 @@ import {
   GitBranch,
   MoreHorizontal,
 } from "lucide-react";
+import { SidebarTrigger } from "@/components/ui/sidebar";
 
 export default function IdeationPage() {
   const params = useParams();
@@ -47,6 +48,7 @@ export default function IdeationPage() {
       {/* Header */}
       <header className="sticky top-0 z-50 border-b border-border bg-card">
         <div className="flex h-12 items-center gap-2 px-4">
+          <SidebarTrigger className="lg:hidden" />
           <Link href={`/project/${project.id}`} className="h-7 w-7 rounded flex items-center justify-center hover:bg-secondary">
             <ChevronLeft className="h-4 w-4" />
           </Link>
@@ -84,13 +86,13 @@ export default function IdeationPage() {
 
       {/* Formalize CTA */}
       <div className="border-t border-border bg-card px-4 py-3">
-        <div className="max-w-3xl mx-auto flex items-center justify-between">
+        <div className="max-w-3xl mx-auto flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div>
             <p className="text-sm font-medium">Ready to formalize?</p>
             <p className="text-xs text-muted-foreground">Create a GitHub issue and start planning</p>
           </div>
           <Link href={`/project/${project.id}/epic/epic-4`}>
-            <Button variant="outline" size="sm">
+            <Button variant="outline" size="sm" className="w-full lg:w-auto">
               <GitBranch className="h-3 w-3 mr-1.5" />
               Create Issue
             </Button>

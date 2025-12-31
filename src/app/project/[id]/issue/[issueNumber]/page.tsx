@@ -60,6 +60,7 @@ import {
 } from "@/components/ai-elements/prompt-input";
 import { cn } from "@/lib/utils";
 import { useChatSession } from "@/lib/hooks/useChatSession";
+import { SidebarTrigger } from "@/components/ui/sidebar";
 
 interface GitHubIssue {
   number: number;
@@ -269,7 +270,7 @@ export default function IssueViewPage() {
         </header>
         <div className="flex-1 flex">
           {/* Skeleton for details panel */}
-          <div className="hidden md:flex flex-col w-[400px] border-r border-border p-4">
+          <div className="hidden lg:flex flex-col w-[400px] border-r border-border p-4">
             <div className="space-y-4">
               <div className="flex items-center gap-2">
                 <Skeleton className="h-5 w-16 rounded-full" />
@@ -335,6 +336,7 @@ export default function IssueViewPage() {
       {/* Header */}
       <header className="sticky top-0 z-50 border-b border-border bg-card">
         <div className="flex h-12 items-center gap-2 px-4">
+          <SidebarTrigger className="lg:hidden" />
           <Link href={`/project/${projectId}`} className="h-7 w-7 rounded flex items-center justify-center hover:bg-secondary">
             <ChevronLeft className="h-4 w-4" />
           </Link>
@@ -374,7 +376,7 @@ export default function IssueViewPage() {
         </div>
 
         {/* Mobile tabs */}
-        <div className="flex border-t border-border md:hidden">
+        <div className="flex border-t border-border lg:hidden">
           <button
             onClick={() => handleTabChange("details")}
             className={cn(
@@ -409,13 +411,13 @@ export default function IssueViewPage() {
         <div
           className={`${
             activeTab === "details" ? "flex" : "hidden"
-          } md:flex flex-col w-full border-r border-border overflow-hidden relative flex-shrink-0`}
-          style={{ width: typeof window !== "undefined" && window.innerWidth >= 768 ? panelWidth : undefined }}
+          } lg:flex flex-col w-full border-r border-border overflow-hidden relative flex-shrink-0`}
+          style={{ width: typeof window !== "undefined" && window.innerWidth >= 1024 ? panelWidth : undefined }}
         >
           {/* Drag handle - desktop only */}
           <div 
             className={cn(
-              "absolute right-0 top-0 bottom-0 w-1 cursor-col-resize transition-colors z-10 hidden md:block",
+              "absolute right-0 top-0 bottom-0 w-1 cursor-col-resize transition-colors z-10 hidden lg:block",
               isDragging ? "bg-primary" : "hover:bg-primary/30"
             )}
             onMouseDown={handleMouseDown}
@@ -487,7 +489,7 @@ export default function IssueViewPage() {
         <div
           className={`${
             activeTab === "chat" ? "flex" : "hidden"
-          } md:flex flex-col flex-1 overflow-hidden`}
+          } lg:flex flex-col flex-1 overflow-hidden`}
         >
           {/* Messages */}
           <Conversation className="flex-1">

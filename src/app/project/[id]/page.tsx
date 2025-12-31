@@ -6,7 +6,10 @@ import { useParams } from "next/navigation";
 import { mockEpics, mockSoloSessions } from "@/lib/data/mock";
 import { NewIssueDialog } from "@/components/new-issue-dialog";
 import { useProject, useProjectIssues } from "@/lib/hooks/useProjects";
+import { CompactSessionCard, CompactIssueCard, CompactEpicCard, CompactSwarmCard } from "@/components/compact-cards";
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Skeleton } from "@/components/ui/skeleton";
+import { SidebarTrigger } from "@/components/ui/sidebar";
 import type { GitHubIssue } from "@/lib/types/api";
 import {
   ChevronRight,
@@ -60,6 +63,7 @@ export default function ProjectOverviewPage() {
       <header className="sticky top-0 z-50 border-b border-border bg-card flex-shrink-0">
         <div className="flex h-12 items-center justify-between px-6">
           <div className="flex items-center gap-3">
+            <SidebarTrigger className="lg:hidden" />
             <h1 className="font-semibold text-lg">{project.name}</h1>
             <span className="text-xs text-muted-foreground font-mono">{project.path}</span>
           </div>
@@ -71,41 +75,125 @@ export default function ProjectOverviewPage() {
 
       {/* Main Content */}
       <div className="flex-1 overflow-hidden flex flex-col">
-        {/* Recent Chats - Horizontal Scroll */}
-        <div className="flex-shrink-0 border-b border-border">
-          <div className="px-6 py-4">
-            <div className="flex items-center justify-between mb-3">
-              <div className="flex items-center gap-2">
-                <MessageSquare className="h-4 w-4 text-muted-foreground" />
-                <span className="text-sm font-medium">Recent Chats</span>
-              </div>
-              <Link 
-                href={`/project/${projectId}/solo`}
-                className="text-xs text-primary hover:underline"
-              >
-                View all
-              </Link>
-            </div>
-            <div className="flex gap-3 overflow-x-auto pb-2 -mx-6 px-6 scrollbar-thin">
-              {/* New Chat Card */}
-              <Link
-                href={`/project/${projectId}/solo`}
-                className="flex-shrink-0 w-48 h-24 rounded-lg border border-dashed border-border hover:border-primary/50 hover:bg-secondary/30 transition-colors flex flex-col items-center justify-center gap-2 text-muted-foreground hover:text-foreground"
-              >
-                <Plus className="h-5 w-5" />
-                <span className="text-xs font-medium">New Chat</span>
-              </Link>
-              
-              {/* Session Cards */}
-              {mockSoloSessions.map((session) => (
-                <SessionCard key={session.id} session={session} projectId={projectId} />
-              ))}
-            </div>
-          </div>
+        {/* Recent Chats Section */}
+        <RecentChatsSection projectId={projectId} />
+
+        {/* Mobile Accordion Layout (< lg) */}
+        <div className="lg:hidden flex-1 overflow-y-auto px-4 py-4">
+          <Accordion type="single" collapsible defaultValue="issues">
+            {/* Issues Section */}
+            <AccordionItem value="issues">
+              <AccordionTrigger className="py-3">
+                <div className="flex items-center gap-2">
+                  <CircleDot className="h-4 w-4 text-[hsl(var(--orange))]" />
+                  <span className="font-medium">Issues</span>
+                  <span className="text-xs text-muted-foreground bg-secondary rounded-full px-2 py-0.5">
+                    {issues.length}
+                  </span>
+                </div>
+              </AccordionTrigger>
+              <AccordionContent>
+                <div className="space-y-2">
+                  {/* New Issue Button */}
+                  <button
+                    onClick={() => setIsNewIssueDialogOpen(true)}
+                    className="w-full h-11 rounded-lg border border-dashed border-border hover:border-primary/50 hover:bg-secondary/30 transition-colors flex items-center justify-center gap-2 text-muted-foreground hover:text-foreground"
+                  >
+                    <Plus className="h-4 w-4" />
+                    <span className="text-sm font-medium">New Issue</span>
+                  </button>
+                  {issuesLoading ? (
+                    <div className="space-y-2">
+                      <Skeleton className="h-16 w-full" />
+                      <Skeleton className="h-16 w-full" />
+                    </div>
+                  ) : issues.length > 0 ? (
+                    issues.map((issue) => (
+                      <CompactIssueCard key={issue.number} issue={issue} projectId={projectId} />
+                    ))
+                  ) : (
+                    <p className="text-sm text-muted-foreground text-center py-4">No open issues</p>
+                  )}
+                </div>
+              </AccordionContent>
+            </AccordionItem>
+
+            {/* Ready Section */}
+            <AccordionItem value="ready">
+              <AccordionTrigger className="py-3">
+                <div className="flex items-center gap-2">
+                  <Circle className="h-4 w-4 text-[hsl(var(--info))]" />
+                  <span className="font-medium">Ready</span>
+                  <span className="text-xs text-muted-foreground bg-secondary rounded-full px-2 py-0.5">
+                    {readyToSwarm.length}
+                  </span>
+                </div>
+              </AccordionTrigger>
+              <AccordionContent>
+                <div className="space-y-2">
+                  {readyToSwarm.length > 0 ? (
+                    readyToSwarm.map((epic) => (
+                      <CompactEpicCard key={epic.id} epic={epic} projectId={projectId} />
+                    ))
+                  ) : (
+                    <p className="text-sm text-muted-foreground text-center py-4">No epics ready to swarm</p>
+                  )}
+                </div>
+              </AccordionContent>
+            </AccordionItem>
+
+            {/* Active Section */}
+            <AccordionItem value="active">
+              <AccordionTrigger className="py-3">
+                <div className="flex items-center gap-2">
+                  <Zap className="h-4 w-4 text-[hsl(var(--success))]" />
+                  <span className="font-medium">Active</span>
+                  <span className="text-xs text-muted-foreground bg-secondary rounded-full px-2 py-0.5">
+                    {activeSwarms.length}
+                  </span>
+                </div>
+              </AccordionTrigger>
+              <AccordionContent>
+                <div className="space-y-2">
+                  {activeSwarms.length > 0 ? (
+                    activeSwarms.map((epic) => (
+                      <CompactSwarmCard key={epic.id} epic={epic} projectId={projectId} />
+                    ))
+                  ) : (
+                    <p className="text-sm text-muted-foreground text-center py-4">No active swarms</p>
+                  )}
+                </div>
+              </AccordionContent>
+            </AccordionItem>
+
+            {/* Completed Section */}
+            <AccordionItem value="completed">
+              <AccordionTrigger className="py-3">
+                <div className="flex items-center gap-2">
+                  <CheckCircle className="h-4 w-4 text-muted-foreground" />
+                  <span className="font-medium">Completed</span>
+                  <span className="text-xs text-muted-foreground bg-secondary rounded-full px-2 py-0.5">
+                    {completed.length}
+                  </span>
+                </div>
+              </AccordionTrigger>
+              <AccordionContent>
+                <div className="space-y-2">
+                  {completed.length > 0 ? (
+                    completed.map((epic) => (
+                      <CompactEpicCard key={epic.id} epic={epic} projectId={projectId} />
+                    ))
+                  ) : (
+                    <p className="text-sm text-muted-foreground text-center py-4">No completed items</p>
+                  )}
+                </div>
+              </AccordionContent>
+            </AccordionItem>
+          </Accordion>
         </div>
 
-        {/* Kanban Board */}
-        <div className="flex-1 overflow-hidden p-6">
+        {/* Desktop Kanban Board (>= lg) */}
+        <div className="hidden lg:block flex-1 overflow-hidden p-6">
           <div className="h-full flex gap-4 overflow-x-auto">
             {/* Issues Column */}
             <KanbanColumn
@@ -175,7 +263,86 @@ export default function ProjectOverviewPage() {
   );
 }
 
-// Session Card Component
+// Recent Chats Section - Responsive layout
+function RecentChatsSection({ projectId }: { projectId: string }) {
+  const mobileSessions = mockSoloSessions.slice(0, 3);
+  const hasMoreSessions = mockSoloSessions.length > 3;
+
+  return (
+    <div className="flex-shrink-0 border-b border-border">
+      {/* Mobile Layout (< lg) */}
+      <div className="lg:hidden px-4 py-4">
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
+            <MessageSquare className="h-4 w-4 text-muted-foreground" />
+            <span className="text-sm font-medium">Recent Chats</span>
+          </div>
+          {hasMoreSessions && (
+            <Link
+              href={`/project/${projectId}/solo`}
+              className="text-xs text-primary hover:underline"
+            >
+              View all
+            </Link>
+          )}
+        </div>
+
+        {/* Full-width New Chat button */}
+        <Link
+          href={`/project/${projectId}/solo`}
+          className="w-full h-11 rounded-lg border border-dashed border-border hover:border-primary/50 hover:bg-secondary/30 transition-colors flex items-center justify-center gap-2 text-muted-foreground hover:text-foreground mb-3"
+        >
+          <Plus className="h-4 w-4" />
+          <span className="text-sm font-medium">New Chat</span>
+        </Link>
+
+        {/* Vertical list of sessions */}
+        <div className="space-y-2">
+          {mobileSessions.map((session) => (
+            <CompactSessionCard
+              key={session.id}
+              session={session}
+              projectId={projectId}
+            />
+          ))}
+        </div>
+      </div>
+
+      {/* Desktop Layout (>= lg) */}
+      <div className="hidden lg:block px-6 py-4">
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
+            <MessageSquare className="h-4 w-4 text-muted-foreground" />
+            <span className="text-sm font-medium">Recent Chats</span>
+          </div>
+          <Link
+            href={`/project/${projectId}/solo`}
+            className="text-xs text-primary hover:underline"
+          >
+            View all
+          </Link>
+        </div>
+        <div className="flex gap-3 overflow-x-auto pb-2 -mx-6 px-6 scrollbar-thin">
+          {/* New Chat Card */}
+          <Link
+            href={`/project/${projectId}/solo`}
+            className="flex-shrink-0 w-48 h-24 rounded-lg border border-dashed border-border hover:border-primary/50 hover:bg-secondary/30 transition-colors flex flex-col items-center justify-center gap-2 text-muted-foreground hover:text-foreground"
+          >
+            <Plus className="h-5 w-5" />
+            <span className="text-xs font-medium">New Chat</span>
+          </Link>
+
+          {/* Session Cards */}
+          {mockSoloSessions.map((session) => (
+            <SessionCard key={session.id} session={session} projectId={projectId} />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Session Card Component (Desktop)
 function SessionCard({ 
   session, 
   projectId 
