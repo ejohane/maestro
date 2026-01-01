@@ -288,6 +288,8 @@ Issue Number: ${issueNumber}
 
 All file operations, bash commands, and git operations MUST be performed in this worktree directory (${worktreeInfo.path}), not the main repository. The main repository is located elsewhere and should not be modified.
 
+CRITICAL FOR BEADS: You MUST use the \`bd\` CLI via bash for all beads operations. Do NOT use the built-in beads_* tools (beads_create, beads_update, beads_create_epic, etc.) as they may target the wrong database. Always run \`bd\` commands in the current working directory.
+
 When running any commands, ensure you are operating within this worktree path.
 </system-reminder>`;
 
