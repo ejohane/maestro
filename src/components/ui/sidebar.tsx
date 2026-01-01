@@ -599,14 +599,6 @@ function SidebarMenuBadge({
   )
 }
 
-// Simple seeded pseudo-random generator for consistent skeleton widths
-let skeletonSeed = 0
-function getSkeletonWidth(): string {
-  // Simple LCG-based pseudo-random - produces consistent results on re-render
-  skeletonSeed = (skeletonSeed * 1103515245 + 12345) & 0x7fffffff
-  return `${(skeletonSeed % 41) + 50}%`
-}
-
 function SidebarMenuSkeleton({
   className,
   showIcon = false,
@@ -614,8 +606,8 @@ function SidebarMenuSkeleton({
 }: React.ComponentProps<"div"> & {
   showIcon?: boolean
 }) {
-  // Width between 50 to 90% - uses stable pseudo-random value
-  const width = React.useMemo(() => getSkeletonWidth(), [])
+  // Use a fixed width to avoid hydration mismatch between server and client
+  const width = "70%"
 
   return (
     <div
