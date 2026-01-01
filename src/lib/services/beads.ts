@@ -157,6 +157,20 @@ function normalizeBeadFromCLI(raw: Record<string, unknown>): Bead {
       parent = parentDep.id;
     }
   }
+  
+  // Infer parent from ID structure if not found elsewhere
+  // IDs like "maestro-5zh.15" indicate parent "maestro-5zh"
+  if (!parent && typeof raw.id === "string") {
+    const id = raw.id;
+    const lastDotIndex = id.lastIndexOf(".");
+    if (lastDotIndex > 0) {
+      const suffix = id.substring(lastDotIndex + 1);
+      // Only infer parent if suffix is numeric (e.g., ".15", ".1")
+      if (/^\d+$/.test(suffix)) {
+        parent = id.substring(0, lastDotIndex);
+      }
+    }
+  }
 
   // Extract blocked-by from dependencies
   let blockedBy: string[] = [];

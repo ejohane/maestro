@@ -732,7 +732,7 @@ export default function IssueViewPage() {
           issueNumber={issue.number}
           issueTitle={issue.title}
           onConfirm={() => {
-            router.push(`/project/${projectId}/planning/${issue.number}`)
+            router.push(`/project/${projectId}/planning/${issue.number}?autoStart=true`)
           }}
         />
       )}

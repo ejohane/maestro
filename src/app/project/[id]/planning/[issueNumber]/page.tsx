@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef, useSyncExternalStore } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 import { Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -53,8 +53,10 @@ function useIsDesktop() {
 
 export default function PlanningPage() {
   const params = useParams();
+  const searchParams = useSearchParams();
   const projectId = params.id as string;
   const issueNumber = params.issueNumber as string;
+  const autoStart = searchParams.get("autoStart") === "true";
 
   // Issue state
   const [issue, setIssue] = useState<GitHubIssue | null>(null);
@@ -252,6 +254,7 @@ export default function PlanningPage() {
               issueTitle={issue?.title || ""}
               selectedBead={selectedBead}
               onClearContext={handleClearContext}
+              autoStart={autoStart}
             />
           </div>
 
@@ -320,6 +323,7 @@ export default function PlanningPage() {
             issueTitle={issue?.title || ""}
             selectedBead={selectedBead}
             onClearContext={handleClearContext}
+            autoStart={autoStart}
           />
         ) : (
           <PlanningRightPane

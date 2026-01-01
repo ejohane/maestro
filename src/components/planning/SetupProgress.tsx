@@ -23,6 +23,7 @@ interface SetupProgressProps {
   issueTitle: string
   onComplete: (result: { sessionId: string; worktreePath: string }) => void
   onError: (error: { step: string; error: string }) => void
+  onSessionCreated?: (result: { sessionId: string; worktreePath: string }) => void
 }
 
 // Step definitions matching the API
@@ -57,6 +58,7 @@ export function SetupProgress({
   issueTitle,
   onComplete,
   onError,
+  onSessionCreated,
 }: SetupProgressProps) {
   const [steps, setSteps] = useState<StepState[]>(INITIAL_STEPS)
   const [pipelineError, setPipelineError] = useState<string | null>(null)
@@ -161,6 +163,14 @@ export function SetupProgress({
                   onError({
                     step: data.name || stepId,
                     error: data.error || "Step failed",
+                  })
+                }
+
+                // Notify when session is created so chat can start early
+                if (stepId === "create_session" && status === "completed" && data.sessionId && data.worktreePath) {
+                  onSessionCreated?.({
+                    sessionId: data.sessionId,
+                    worktreePath: data.worktreePath,
                   })
                 }
               } else if (currentEvent === "complete") {

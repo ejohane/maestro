@@ -16,6 +16,8 @@ interface StepEvent {
   status: StepStatus;
   name: string;
   error?: string;
+  sessionId?: string;
+  worktreePath?: string;
 }
 
 interface CompleteEvent {
@@ -299,6 +301,8 @@ When running any commands, ensure you are operating within this worktree path.
               id: "create_session",
               status: "completed",
               name: STEPS.create_session.name,
+              sessionId,
+              worktreePath: worktreeInfo.path,
             });
           } catch (err) {
             const message = err instanceof Error ? err.message : String(err);

@@ -13,6 +13,7 @@ interface PlanningLeftPaneProps {
   issueTitle: string;
   selectedBead: { id: string; title: string } | null;
   onClearContext: () => void;
+  autoStart?: boolean;
 }
 
 type SetupState = "pending" | "checking" | "in_progress" | "completed" | "error";
@@ -21,6 +22,7 @@ interface SessionInfo {
   sessionId: string;
   worktreePath: string;
   branch?: string;
+  isInitialPromptPending?: boolean;
 }
 
 interface SessionStatusResponse {
@@ -38,8 +40,9 @@ interface SessionStatusResponse {
  * Manages the transition from setup to chat mode:
  * 1. On mount: Check for existing session
  * 2. If session exists: Show chat immediately
- * 3. If no session: Show "Start Planning" button (user must explicitly trigger)
- * 4. After setup completes: Collapse setup section, show chat
+ * 3. If no session and autoStart: Automatically start planning
+ * 4. If no session and !autoStart: Show "Start Planning" button
+ * 5. After setup completes: Collapse setup section, show chat
  */
 export function PlanningLeftPane({
   projectId,
@@ -47,6 +50,7 @@ export function PlanningLeftPane({
   issueTitle,
   selectedBead,
   onClearContext,
+  autoStart = false,
 }: PlanningLeftPaneProps) {
   // State
   const [setupState, setSetupState] = useState<SetupState>("checking");
@@ -56,63 +60,98 @@ export function PlanningLeftPane({
 
   // Track if we've started setup to prevent duplicate starts
   const setupStartedRef = useRef(false);
-  const checkCompletedRef = useRef(false);
 
-  // Check for existing session on mount
-  const checkExistingSession = useCallback(async () => {
-    if (checkCompletedRef.current) return;
-    
-    try {
-      const response = await fetch(
-        `/api/projects/${projectId}/planning/${issueNumber}/session`
-      );
-
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
-
-      const data: SessionStatusResponse = await response.json();
-
-      checkCompletedRef.current = true;
-
-      if (data.exists && data.sessionId && data.worktreePath && data.sessionAlive) {
-        // Existing session found and alive
-        setSessionInfo({
-          sessionId: data.sessionId,
-          worktreePath: data.worktreePath,
-          branch: data.branch,
-        });
-        setSetupState("completed");
-        setSetupCollapsed(true);
-      } else {
-        // No session or session not alive - need to run setup
-        setSetupState("pending");
-      }
-    } catch (err) {
-      console.error("Error checking session:", err);
-      checkCompletedRef.current = true;
-      // On error, proceed with setup
-      setSetupState("pending");
-    }
-  }, [projectId, issueNumber]);
-
-  // Check for existing session on mount
-  useEffect(() => {
-    checkExistingSession();
-  }, [checkExistingSession]);
-
-  // Start planning - triggered by user clicking the button
-  const handleStartPlanning = useCallback(() => {
+  // Start planning - can be called from button click or auto-start
+  const startPlanning = useCallback(() => {
+    if (setupStartedRef.current) return;
     setupStartedRef.current = true;
     setSetupState("in_progress");
   }, []);
 
-  // Handle setup completion
-  const handleSetupComplete = useCallback(
+  // Check for existing session on mount
+  useEffect(() => {
+    let cancelled = false;
+    
+    async function checkExistingSession() {
+      try {
+        const response = await fetch(
+          `/api/projects/${projectId}/planning/${issueNumber}/session`
+        );
+
+        if (cancelled) return;
+
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+
+        const data: SessionStatusResponse = await response.json();
+
+        if (cancelled) return;
+
+        if (data.exists && data.sessionId && data.worktreePath && data.sessionAlive) {
+          // Existing session found and alive
+          setSessionInfo({
+            sessionId: data.sessionId,
+            worktreePath: data.worktreePath,
+            branch: data.branch,
+          });
+          setSetupState("completed");
+          setSetupCollapsed(true);
+        } else {
+          // No session or session not alive - check if we should auto-start
+          if (autoStart) {
+            startPlanning();
+          } else {
+            setSetupState("pending");
+          }
+        }
+      } catch (err) {
+        console.error("Error checking session:", err);
+        if (cancelled) return;
+        // On error, check if we should auto-start
+        if (autoStart) {
+          startPlanning();
+        } else {
+          setSetupState("pending");
+        }
+      }
+    }
+
+    checkExistingSession();
+    
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, issueNumber, autoStart, startPlanning]);
+
+  // Handle manual start from button click
+  const handleStartPlanning = useCallback(() => {
+    startPlanning();
+  }, [startPlanning]);
+
+  // Handle session created (called early, before setup completes)
+  const handleSessionCreated = useCallback(
     (result: { sessionId: string; worktreePath: string }) => {
+      // Set session info early so chat can connect while setup continues
+      // Mark that the initial prompt is pending (will be sent next)
       setSessionInfo({
         sessionId: result.sessionId,
         worktreePath: result.worktreePath,
+        isInitialPromptPending: true,
+      });
+    },
+    []
+  );
+
+  // Handle setup completion
+  const handleSetupComplete = useCallback(
+    (result: { sessionId: string; worktreePath: string }) => {
+      // When setup completes, the initial prompt was just sent but the AI is still processing
+      // Mark isInitialPromptPending so the chat knows to poll for activity
+      setSessionInfo({
+        sessionId: result.sessionId,
+        worktreePath: result.worktreePath,
+        isInitialPromptPending: true,
       });
       setSetupState("completed");
       setSetupCollapsed(true);
@@ -135,6 +174,13 @@ export function PlanningLeftPane({
     setupStartedRef.current = false;
     setSetupError(null);
     setSetupState("pending");
+  }, []);
+
+  // Handle when initial prompt processing completes
+  const handleInitialPromptComplete = useCallback(() => {
+    setSessionInfo((prev) =>
+      prev ? { ...prev, isInitialPromptPending: false } : null
+    );
   }, []);
 
   // Toggle setup section collapse
@@ -184,17 +230,35 @@ export function PlanningLeftPane({
   if (setupState === "in_progress") {
     return (
       <div className="flex flex-col h-full overflow-hidden">
-        <div className="p-4">
+        <div className="p-4 border-b border-border">
           <SetupProgress
             projectId={projectId}
             issueNumber={issueNumber}
             issueTitle={issueTitle}
             onComplete={handleSetupComplete}
             onError={handleSetupError}
+            onSessionCreated={handleSessionCreated}
           />
         </div>
-        {/* Empty space for future chat */}
-        <div className="flex-1" />
+        {/* Show chat once session is created (before setup fully completes) */}
+        <div className="flex-1 overflow-hidden">
+          {sessionInfo ? (
+            <PlanningChat
+              projectId={projectId}
+              issueNumber={issueNumber}
+              sessionId={sessionInfo.sessionId}
+              worktreePath={sessionInfo.worktreePath}
+              selectedBead={selectedBead}
+              onClearContext={onClearContext}
+              isInitialPromptPending={sessionInfo.isInitialPromptPending}
+              onInitialPromptComplete={handleInitialPromptComplete}
+            />
+          ) : (
+            <div className="flex-1 flex items-center justify-center text-muted-foreground text-sm">
+              Chat will appear once the session is ready...
+            </div>
+          )}
+        </div>
       </div>
     );
   }
@@ -253,6 +317,8 @@ export function PlanningLeftPane({
           worktreePath={sessionInfo?.worktreePath || null}
           selectedBead={selectedBead}
           onClearContext={onClearContext}
+          isInitialPromptPending={sessionInfo?.isInitialPromptPending}
+          onInitialPromptComplete={handleInitialPromptComplete}
         />
       </div>
     </div>
