@@ -75,23 +75,28 @@ export function PlanningHeader({
         <SidebarTrigger className="lg:hidden" />
 
         {/* Breadcrumb navigation */}
-        <nav className="flex items-center gap-1 text-sm min-w-0 flex-1">
+        <nav className="flex items-center gap-1 text-sm min-w-0 flex-1 overflow-hidden">
+          {/* Project name - can truncate on small screens */}
           <Link
             href={`/project/${projectId}`}
-            className="text-muted-foreground hover:text-foreground transition-colors flex-shrink-0"
+            className="text-muted-foreground hover:text-foreground transition-colors truncate max-w-[100px] sm:max-w-[150px] lg:max-w-none"
           >
             {projectName}
           </Link>
           <ChevronRight className="h-4 w-4 text-muted-foreground flex-shrink-0" />
-          <span className="text-muted-foreground flex-shrink-0">Planning</span>
-          <ChevronRight className="h-4 w-4 text-muted-foreground flex-shrink-0" />
-          <span className="font-medium truncate">
+
+          {/* "Planning" segment - hidden on very small screens */}
+          <span className="text-muted-foreground flex-shrink-0 hidden sm:inline">
+            Planning
+          </span>
+          <ChevronRight className="h-4 w-4 text-muted-foreground flex-shrink-0 hidden sm:inline" />
+
+          {/* Issue number and title - always visible */}
+          <span className="font-medium truncate min-w-0">
             #{issueNumber}
             {issueTitle && (
               <span className="text-muted-foreground font-normal ml-1">
-                {issueTitle.length > 40
-                  ? `${issueTitle.slice(0, 40)}...`
-                  : issueTitle}
+                {issueTitle}
               </span>
             )}
           </span>

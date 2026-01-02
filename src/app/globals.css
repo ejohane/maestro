@@ -200,6 +200,51 @@ body {
   }
 }
 
+/* Markdown/Streamdown content overflow handling */
+[data-streamdown="table-wrapper"] {
+  max-width: 100%;
+  overflow-x: auto;
+  display: block;
+}
+
+[data-streamdown="table-wrapper"] > div {
+  overflow-x: auto;
+  max-width: 100%;
+}
+
+[data-streamdown="table"] {
+  min-width: 0;
+  width: max-content;
+  max-width: none;
+}
+
+/* Force all streamdown content to respect container width */
+[class*="streamdown"],
+.sd-root {
+  max-width: 100%;
+  min-width: 0;
+  overflow-wrap: break-word;
+  word-wrap: break-word;
+}
+
+/* Ensure pre blocks with code don't overflow */
+[data-streamdown="code-block"] {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+/* Planning chat specific overflow handling */
+.planning-chat-content {
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: hidden;
+}
+
+/* Ensure message content containers don't overflow */
+[data-streamdown] {
+  max-width: 100%;
+}
+
 /* Safe area utilities for iOS notch/home indicator */
 .safe-top {
   padding-top: env(safe-area-inset-top, 0);

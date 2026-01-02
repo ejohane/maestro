@@ -1,35 +1,15 @@
 "use client";
 
-import { useState, useMemo, useSyncExternalStore, useCallback } from "react";
+import { useState, useMemo } from "react";
 import { List, Network, ListTodo, WifiOff } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { useBeadsWatch } from "@/lib/hooks/useBeadsWatch";
 import { BeadsList } from "./BeadsList";
 import { BeadDetail } from "./BeadDetail";
 import type { Bead, BeadTree } from "@/lib/services/beads";
 import { Badge } from "@/components/ui/badge";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
-
-// Desktop breakpoint for mobile detection (matches page.tsx)
-const DESKTOP_BREAKPOINT = 1024;
-
-function useIsMobile() {
-  const subscribe = useCallback((callback: () => void) => {
-    const mql = window.matchMedia(`(max-width: ${DESKTOP_BREAKPOINT - 1}px)`);
-    mql.addEventListener("change", callback);
-    return () => mql.removeEventListener("change", callback);
-  }, []);
-
-  const getSnapshot = useCallback(() => {
-    return window.innerWidth < DESKTOP_BREAKPOINT;
-  }, []);
-
-  const getServerSnapshot = useCallback(() => {
-    return false; // Default to desktop on server
-  }, []);
-
-  return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
-}
 
 type ViewMode = "list" | "graph";
 
@@ -160,7 +140,7 @@ export function PlanningRightPane({
   };
 
   return (
-    <div className="flex flex-col h-full overflow-hidden">
+    <div className="flex flex-col h-full overflow-hidden min-w-0">
       {/* Header with view toggle and connection status */}
       <div className="border-b border-border p-3 flex items-center justify-between">
         <div className="flex items-center gap-2">
@@ -201,9 +181,9 @@ export function PlanningRightPane({
       </div>
 
       {/* Main content area - list + detail panel */}
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex flex-1 overflow-hidden relative min-w-0">
         {/* Beads list */}
-        <div className="flex-1 overflow-auto">
+        <div className="flex-1 overflow-auto min-w-0">
           {viewMode === "list" ? (
             tree ? (
               <BeadsList
@@ -228,19 +208,28 @@ export function PlanningRightPane({
           )}
         </div>
 
-        {/* Detail panel - desktop: side panel, mobile: bottom sheet */}
-        {selectedBead && !isMobile && (
-          <div className="w-80 border-l overflow-auto flex-shrink-0">
-            <BeadDetail
-              bead={selectedBead}
-              onUpdate={handleUpdate}
-              onClose={() => setSelectedBeadId(null)}
-              onChatAbout={(beadId) =>
-                onChatAbout?.(beadId, selectedBead.title)
-              }
-              onDelete={handleDelete}
-              onBeadClick={handleBeadClick}
-            />
+        {/* Detail panel - desktop: slide-in overlay */}
+        {!isMobile && (
+          <div
+            className={cn(
+              "absolute right-0 top-0 bottom-0 w-[75%]",
+              "bg-card border-l shadow-xl z-10 overflow-auto",
+              "transition-transform duration-300 ease-out",
+              selectedBead ? "translate-x-0" : "translate-x-full"
+            )}
+          >
+            {selectedBead && (
+              <BeadDetail
+                bead={selectedBead}
+                onUpdate={handleUpdate}
+                onClose={() => setSelectedBeadId(null)}
+                onChatAbout={(beadId) =>
+                  onChatAbout?.(beadId, selectedBead.title)
+                }
+                onDelete={handleDelete}
+                onBeadClick={handleBeadClick}
+              />
+            )}
           </div>
         )}
       </div>
@@ -248,7 +237,7 @@ export function PlanningRightPane({
       {/* Mobile bottom sheet for bead detail */}
       {isMobile && (
         <Sheet open={!!selectedBead} onOpenChange={(open) => !open && setSelectedBeadId(null)}>
-          <SheetContent side="bottom" className="h-[70vh] safe-bottom p-0">
+          <SheetContent side="bottom" className="h-[92vh] safe-bottom p-0" showCloseButton={false}>
             <SheetHeader className="sr-only">
               <SheetTitle>Bead Details</SheetTitle>
             </SheetHeader>

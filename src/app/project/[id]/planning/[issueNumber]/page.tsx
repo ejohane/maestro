@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef, useSyncExternalStore } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import { Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -11,6 +11,7 @@ import {
 } from "@/components/planning";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useBeadsWatch } from "@/lib/hooks/useBeadsWatch";
+import { useIsMobile } from "@/hooks/use-mobile";
 
 interface GitHubIssue {
   number: number;
@@ -23,32 +24,6 @@ interface GitHubIssue {
 interface BeadContext {
   id: string;
   title: string;
-}
-
-// Desktop breakpoint (lg: 1024px)
-const DESKTOP_BREAKPOINT = 1024;
-
-function useIsDesktop() {
-  const subscribe = useCallback((callback: () => void) => {
-    const mql = window.matchMedia(`(min-width: ${DESKTOP_BREAKPOINT}px)`);
-    mql.addEventListener("change", callback);
-    window.addEventListener("resize", callback);
-    return () => {
-      mql.removeEventListener("change", callback);
-      window.removeEventListener("resize", callback);
-    };
-  }, []);
-
-  const getSnapshot = useCallback(() => {
-    return window.innerWidth >= DESKTOP_BREAKPOINT;
-  }, []);
-
-  const getServerSnapshot = useCallback(() => {
-    // Default to desktop on server
-    return true;
-  }, []);
-
-  return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 }
 
 export default function PlanningPage() {
@@ -64,7 +39,8 @@ export default function PlanningPage() {
   const [issueError, setIssueError] = useState<string | null>(null);
 
   // Layout state
-  const isDesktop = useIsDesktop();
+  const isMobile = useIsMobile();
+  const isDesktop = !isMobile;
   const [activeTab, setActiveTab] = useState<"setup" | "plan">("setup");
 
   // Beads tracking for unread indicator (mobile only)
@@ -234,10 +210,10 @@ export default function PlanningPage() {
           projectName="Project"
         />
 
-        <div ref={containerRef} className="flex-1 overflow-hidden flex">
+        <div ref={containerRef} className="flex-1 overflow-hidden flex min-h-0">
           {/* Left Pane */}
           <div
-            className="flex flex-col border-r border-border overflow-hidden relative flex-shrink-0"
+            className="flex flex-col border-r border-border overflow-hidden relative flex-shrink-0 min-w-0"
             style={{ width: `${leftPanelPercent}%` }}
           >
             {/* Drag handle */}
@@ -260,7 +236,7 @@ export default function PlanningPage() {
 
           {/* Right Pane */}
           <div
-            className="flex flex-col flex-1 overflow-hidden"
+            className="flex flex-col flex-1 overflow-hidden min-w-0"
             style={{ width: `${100 - leftPanelPercent}%` }}
           >
             <PlanningRightPane
@@ -315,7 +291,7 @@ export default function PlanningPage() {
       </div>
 
       {/* Tab content */}
-      <div className="flex-1 overflow-hidden">
+      <div className="flex-1 overflow-hidden min-w-0 min-h-0">
         {activeTab === "setup" ? (
           <PlanningLeftPane
             projectId={projectId}
