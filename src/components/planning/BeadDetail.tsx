@@ -121,21 +121,18 @@ export function BeadDetail({
   return (
     <div className="flex flex-col h-full overflow-hidden bg-card">
       {/* Header */}
-      <div className="flex items-start justify-between gap-3 p-4 border-b border-border">
-        <div className="min-w-0 flex-1">
-          <h2 className="text-base font-semibold leading-tight truncate">
-            {bead.id}: {bead.title}
-          </h2>
-        </div>
-        <Button
-          variant="ghost"
-          size="icon-sm"
+      <div className="flex items-center justify-between gap-3 p-4 border-b border-border">
+        <h2 className="text-base font-semibold leading-tight truncate min-w-0 flex-1">
+          {bead.id}: {bead.title}
+        </h2>
+        <button
+          type="button"
           onClick={onClose}
-          className="flex-shrink-0"
+          className="flex-shrink-0 h-8 w-8 flex items-center justify-center rounded-md hover:bg-accent text-muted-foreground hover:text-foreground transition-colors"
           aria-label="Close detail panel"
         >
-          <X className="h-4 w-4" />
-        </Button>
+          <X className="h-5 w-5" strokeWidth={1.5} />
+        </button>
       </div>
 
       {/* Content */}
@@ -256,23 +253,23 @@ export function BeadDetail({
       </div>
 
       {/* Footer actions - min 44px touch targets */}
-      <div className="flex items-center gap-2 p-4 border-t border-border safe-bottom">
+      <div className="flex items-center justify-center gap-3 p-4 border-t border-border">
         <Button
           variant="outline"
           size="sm"
           onClick={() => onChatAbout(bead.id)}
-          className="flex-1 sm:flex-none h-11 min-w-[44px]"
+          className="h-10"
         >
-          <MessageSquare className="h-4 w-4 mr-1.5" />
+          <MessageSquare className="h-4 w-4 mr-2" />
           Chat about this
         </Button>
         <Button
           variant="outline"
           size="sm"
           onClick={() => setShowDeleteDialog(true)}
-          className="text-destructive hover:text-destructive hover:bg-destructive/10 h-11 min-w-[44px]"
+          className="text-destructive hover:text-destructive hover:bg-destructive/10 h-10"
         >
-          <Trash2 className="h-4 w-4 mr-1.5" />
+          <Trash2 className="h-4 w-4 mr-2" />
           Delete
         </Button>
       </div>

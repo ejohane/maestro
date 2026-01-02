@@ -11,8 +11,8 @@ export default function ProjectLayout({
   return (
     <SidebarProvider>
       <AppSidebar />
-      <SidebarInset>
-        <main className="flex-1 overflow-hidden">
+      <SidebarInset className="min-w-0 overflow-hidden">
+        <main className="flex-1 overflow-hidden min-w-0">
           {children}
         </main>
       </SidebarInset>

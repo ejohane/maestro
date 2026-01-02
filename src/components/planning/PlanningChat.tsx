@@ -436,8 +436,8 @@ export function PlanningChat({
   // Loading history state
   if (isLoadingHistory) {
     return (
-      <div className="flex flex-col h-full">
-        <div className="flex-1 flex flex-col items-center justify-center p-4">
+      <div className="flex flex-col h-full min-w-0 overflow-hidden">
+        <div className="flex-1 flex flex-col items-center justify-center p-4 min-w-0">
           <Loader size={24} className="text-muted-foreground mb-3" />
           <p className="text-xs text-muted-foreground">Loading chat history...</p>
         </div>
@@ -448,8 +448,8 @@ export function PlanningChat({
   // Initial prompt pending state - show that the AI is analyzing
   if (isInitialPromptPending && messages.length === 0) {
     return (
-      <div className="flex flex-col h-full">
-        <div className="flex-1 flex flex-col items-center justify-center p-4">
+      <div className="flex flex-col h-full min-w-0 overflow-hidden">
+        <div className="flex-1 flex flex-col items-center justify-center p-4 min-w-0">
           <Loader size={24} className="text-muted-foreground mb-3" />
           <p className="text-sm font-medium text-foreground mb-1">Analyzing issue...</p>
           <p className="text-xs text-muted-foreground text-center max-w-xs">
@@ -463,9 +463,9 @@ export function PlanningChat({
   // Empty state (only show if not loading history and no initial prompt pending)
   if (messages.length === 0 && !streamState.isStreaming && !isLoadingHistory && !isInitialPromptPending) {
     return (
-      <div className="flex flex-col h-full">
+      <div className="flex flex-col h-full min-w-0 overflow-hidden">
         {/* Empty state */}
-        <div className="flex-1 flex flex-col items-center justify-center p-4">
+        <div className="flex-1 flex flex-col items-center justify-center p-4 min-w-0">
           <MessageSquare className="h-12 w-12 text-muted-foreground/30 mb-3" />
           <h3 className="font-medium text-sm text-foreground">
             Planning Chat
@@ -478,7 +478,7 @@ export function PlanningChat({
         </div>
 
         {/* Input area */}
-        <div className="border-t border-border bg-card p-3">
+        <div className="border-t border-border bg-card p-3 min-w-0">
           {/* Context indicator */}
           {selectedBead && (
             <div className="flex items-center gap-2 px-3 py-2 bg-accent/50 rounded-t-md mb-2">
@@ -529,7 +529,7 @@ export function PlanningChat({
   }
 
   return (
-    <div className="flex flex-col h-full overflow-hidden">
+    <div className="flex flex-col h-full overflow-hidden min-w-0">
       {/* Header with actions */}
       {onNewSession && (
         <div className="flex items-center justify-between px-3 py-2 border-b border-border bg-card/50">
@@ -549,8 +549,8 @@ export function PlanningChat({
       )}
 
       {/* Messages */}
-      <Conversation className="flex-1">
-        <ConversationContent className="gap-4">
+      <Conversation className="flex-1 min-w-0">
+        <ConversationContent className="gap-4 min-w-0">
           {messages.map((message) => (
             <Message key={message.id} from={message.role}>
               {message.role === "assistant" ? (
@@ -651,7 +651,7 @@ export function PlanningChat({
       )}
 
       {/* Input area */}
-      <div className="border-t border-border bg-card p-3">
+      <div className="border-t border-border bg-card p-3 min-w-0">
         {/* Context indicator */}
         {selectedBead && (
           <div className="flex items-center gap-2 px-3 py-2 bg-accent/50 rounded-t-md mb-2">

@@ -230,8 +230,8 @@ export function PlanningLeftPane({
   // Loading state while checking for existing session
   if (setupState === "checking") {
     return (
-      <div className="flex flex-col h-full overflow-hidden">
-        <div className="flex-1 flex items-center justify-center">
+      <div className="flex flex-col h-full overflow-hidden min-w-0">
+        <div className="flex-1 flex items-center justify-center min-w-0">
           <div className="flex flex-col items-center gap-3">
             <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
             <p className="text-sm text-muted-foreground">
@@ -246,8 +246,8 @@ export function PlanningLeftPane({
   // Pending state - show Start Planning button
   if (setupState === "pending") {
     return (
-      <div className="flex flex-col h-full overflow-hidden">
-        <div className="flex-1 flex items-center justify-center">
+      <div className="flex flex-col h-full overflow-hidden min-w-0">
+        <div className="flex-1 flex items-center justify-center min-w-0">
           <div className="flex flex-col items-center gap-4 text-center px-4">
             <div className="flex flex-col items-center gap-2">
               <h3 className="text-lg font-medium">Ready to Plan</h3>
@@ -268,8 +268,8 @@ export function PlanningLeftPane({
   // Setup in progress
   if (setupState === "in_progress") {
     return (
-      <div className="flex flex-col h-full overflow-hidden">
-        <div className="p-4 border-b border-border">
+      <div className="flex flex-col h-full overflow-hidden min-w-0">
+        <div className="p-4 border-b border-border min-w-0">
           <SetupProgress
             projectId={projectId}
             issueNumber={issueNumber}
@@ -280,7 +280,7 @@ export function PlanningLeftPane({
           />
         </div>
         {/* Show chat once session is created (before setup fully completes) */}
-        <div className="flex-1 overflow-hidden">
+        <div className="flex-1 overflow-hidden min-w-0">
           {sessionInfo ? (
             <PlanningChat
               projectId={projectId}
@@ -306,8 +306,8 @@ export function PlanningLeftPane({
   // Error state
   if (setupState === "error") {
     return (
-      <div className="flex flex-col h-full overflow-hidden">
-        <div className="p-4">
+      <div className="flex flex-col h-full overflow-hidden min-w-0">
+        <div className="p-4 min-w-0">
           <div className="flex items-start gap-3 p-3 bg-destructive/10 rounded-md border border-destructive/30">
             <AlertCircle className="h-5 w-5 text-destructive flex-shrink-0 mt-0.5" />
             <div className="flex-1 min-w-0">
@@ -337,7 +337,7 @@ export function PlanningLeftPane({
 
   // Completed state - show collapsible summary and chat
   return (
-    <div className="flex flex-col h-full overflow-hidden">
+    <div className="flex flex-col h-full overflow-hidden min-w-0">
       {/* Setup Summary (collapsible) */}
       {sessionInfo && (
         <SetupSummary
@@ -349,7 +349,7 @@ export function PlanningLeftPane({
       )}
 
       {/* Chat section fills remaining space */}
-      <div className="flex-1 overflow-hidden">
+      <div className="flex-1 overflow-hidden min-w-0">
         <PlanningChat
           projectId={projectId}
           issueNumber={issueNumber}
