@@ -1,10 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { CircleDot, Circle, ChevronRight, MessageSquare } from "lucide-react";
+import { CircleDot, Circle, ChevronRight, MessageSquare, ClipboardList } from "lucide-react";
 
 // Import types from codebase
-import { GitHubIssue } from "@/lib/types/api";
+import { GitHubIssue, PlanningSessionInfo } from "@/lib/types/api";
 import { Epic, Session } from "@/lib/data/mock";
 
 // CompactIssueCard - for issues in accordion
@@ -110,6 +110,31 @@ export function CompactSessionCard({
             {session.lastMessage}
           </p>
         )}
+      </div>
+      <ChevronRight className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+    </Link>
+  );
+}
+
+// CompactPlanningCard - for active planning sessions in mobile accordion
+interface CompactPlanningCardProps {
+  session: PlanningSessionInfo;
+  projectId: string;
+}
+
+export function CompactPlanningCard({ session, projectId }: CompactPlanningCardProps) {
+  // Format the display title - remove "Issue #N" prefix if present
+  const displayTitle = session.issueTitle.replace(/^Issue #\d+/, "").trim() || `Planning #${session.issueNumber}`;
+
+  return (
+    <Link
+      href={`/project/${projectId}/planning/${session.issueNumber}`}
+      className="flex items-center gap-3 p-3 rounded-md bg-card border border-border hover:bg-secondary/50 active:bg-secondary min-h-[44px]"
+    >
+      <ClipboardList className="h-4 w-4 text-primary flex-shrink-0" />
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-medium truncate">{displayTitle}</p>
+        <p className="text-xs text-muted-foreground">#{session.issueNumber}</p>
       </div>
       <ChevronRight className="h-4 w-4 text-muted-foreground flex-shrink-0" />
     </Link>
