@@ -231,3 +231,64 @@ export async function POST(
     );
   }
 }
+
+/**
+ * DELETE /api/projects/[id]/planning/[issueNumber]/session
+ * 
+ * Delete the existing planning session for this issue.
+ * This removes the OpenCode session but keeps the worktree intact.
+ * 
+ * Response:
+ * - success: boolean - Whether the deletion was successful
+ */
+export async function DELETE(
+  _request: Request,
+  { params }: { params: Promise<{ id: string; issueNumber: string }> }
+): Promise<Response> {
+  const resolvedParams = await params;
+  const projectId = resolvedParams.id;
+  const issueNumber = parseInt(resolvedParams.issueNumber, 10);
+
+  // Validate issue number
+  if (isNaN(issueNumber) || issueNumber <= 0) {
+    return Response.json(
+      { error: "Invalid issue number" },
+      { status: 400 }
+    );
+  }
+
+  // Get project from config
+  const project = await configService.getProject(projectId);
+  if (!project) {
+    return Response.json(
+      { error: "Project not found" },
+      { status: 404 }
+    );
+  }
+
+  try {
+    // Check for existing worktree to get the path
+    const worktree = await worktreeService.getWorktree(project.path, issueNumber);
+    
+    // Check for existing session
+    const existingSession = await sessionStorage.getPlanningSession(
+      projectId,
+      issueNumber
+    );
+
+    if (existingSession && worktree) {
+      // Delete the OpenCode session
+      await openCodeService.deleteSession(worktree.path, existingSession.sessionId);
+      // Remove from session storage
+      await sessionStorage.removeSession(projectId, issueNumber, 'planning');
+    }
+
+    return Response.json({ success: true });
+  } catch (err) {
+    console.error("Error deleting planning session:", err);
+    return Response.json(
+      { error: "Failed to delete planning session" },
+      { status: 500 }
+    );
+  }
+}

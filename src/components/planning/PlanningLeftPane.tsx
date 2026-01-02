@@ -183,6 +183,45 @@ export function PlanningLeftPane({
     );
   }, []);
 
+  // Start a new session (delete existing and create fresh)
+  const handleNewSession = useCallback(async () => {
+    if (!sessionInfo?.sessionId) return;
+
+    try {
+      // Delete existing session
+      await fetch(
+        `/api/projects/${projectId}/planning/${issueNumber}/session`,
+        { method: "DELETE" }
+      );
+
+      // Clear local state
+      setSessionInfo(null);
+
+      // Create new session via POST
+      const postRes = await fetch(
+        `/api/projects/${projectId}/planning/${issueNumber}/session`,
+        { method: "POST" }
+      );
+
+      if (!postRes.ok) {
+        const data = await postRes.json();
+        throw new Error(data.error || "Failed to create session");
+      }
+
+      const { sessionId: newSessionId, worktreePath: newWorktreePath } = await postRes.json();
+      setSessionInfo({
+        sessionId: newSessionId,
+        worktreePath: newWorktreePath,
+        isInitialPromptPending: false,
+      });
+    } catch (err) {
+      console.error("Failed to start new session:", err);
+      setSetupError(
+        err instanceof Error ? err.message : "Failed to start new session"
+      );
+    }
+  }, [projectId, issueNumber, sessionInfo?.sessionId]);
+
   // Toggle setup section collapse
   const toggleSetupCollapse = useCallback(() => {
     setSetupCollapsed((prev) => !prev);
@@ -252,6 +291,7 @@ export function PlanningLeftPane({
               onClearContext={onClearContext}
               isInitialPromptPending={sessionInfo.isInitialPromptPending}
               onInitialPromptComplete={handleInitialPromptComplete}
+              onNewSession={handleNewSession}
             />
           ) : (
             <div className="flex-1 flex items-center justify-center text-muted-foreground text-sm">
@@ -319,6 +359,7 @@ export function PlanningLeftPane({
           onClearContext={onClearContext}
           isInitialPromptPending={sessionInfo?.isInitialPromptPending}
           onInitialPromptComplete={handleInitialPromptComplete}
+          onNewSession={handleNewSession}
         />
       </div>
     </div>

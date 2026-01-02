@@ -35,6 +35,7 @@ import {
   MessageSquare,
   AlertCircle,
   RefreshCw,
+  RotateCcw,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useMessagesWatch } from "@/lib/hooks/useMessagesWatch";
@@ -60,6 +61,7 @@ interface PlanningChatProps {
   onClearContext: () => void;
   isInitialPromptPending?: boolean;
   onInitialPromptComplete?: () => void;
+  onNewSession?: () => void;
 }
 
 interface StreamState {
@@ -76,6 +78,7 @@ export function PlanningChat({
   onClearContext,
   isInitialPromptPending = false,
   onInitialPromptComplete,
+  onNewSession,
 }: PlanningChatProps) {
   const [input, setInput] = useState("");
   const [streamState, setStreamState] = useState<StreamState>({
@@ -527,6 +530,24 @@ export function PlanningChat({
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
+      {/* Header with actions */}
+      {onNewSession && (
+        <div className="flex items-center justify-between px-3 py-2 border-b border-border bg-card/50">
+          <span className="text-xs font-medium text-muted-foreground">
+            Planning Chat
+          </span>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            onClick={onNewSession}
+            disabled={streamState.isStreaming || isInitialPromptPending}
+            title="Start new session"
+          >
+            <RotateCcw className="h-4 w-4" />
+          </Button>
+        </div>
+      )}
+
       {/* Messages */}
       <Conversation className="flex-1">
         <ConversationContent className="gap-4">
