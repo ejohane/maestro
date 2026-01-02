@@ -11,6 +11,7 @@ import {
   BeadsError,
   CreateBeadOptions,
 } from "@/lib/services/beads";
+import { findEpicBead, filterBeadsByEpic } from "@/lib/services/beads-utils";
 
 interface BeadsListResponse {
   tree: BeadTree | null;
@@ -24,37 +25,6 @@ interface BeadCreateResponse {
 interface ErrorResponse {
   error: string;
   code?: string;
-}
-
-/**
- * Find the epic bead for this issue.
- * Searches for beads that:
- * - Have type === 'epic'
- * - OR have title containing the issue number pattern
- */
-function findEpicBead(beads: Bead[], issueNumber: number): Bead | null {
-  // First, try to find an epic type that mentions the issue number
-  const epicWithIssue = beads.find(
-    (b) =>
-      b.type === "epic" &&
-      (b.title.includes(`#${issueNumber}`) ||
-        b.title.toLowerCase().includes(`issue ${issueNumber}`) ||
-        b.title.toLowerCase().includes(`issue-${issueNumber}`))
-  );
-  if (epicWithIssue) return epicWithIssue;
-
-  // Fall back to any epic type
-  const anyEpic = beads.find((b) => b.type === "epic");
-  if (anyEpic) return anyEpic;
-
-  // Fall back to bead with issue number in title (any type)
-  const withIssueNum = beads.find(
-    (b) =>
-      b.title.includes(`#${issueNumber}`) ||
-      b.title.toLowerCase().includes(`issue ${issueNumber}`) ||
-      b.title.toLowerCase().includes(`issue-${issueNumber}`)
-  );
-  return withIssueNum || null;
 }
 
 /**
@@ -109,19 +79,30 @@ export async function GET(
       );
     }
 
-    // Fetch beads
-    const beads = await beadsService.list(worktree.path);
+    // Fetch all beads from the shared database
+    const allBeads = await beadsService.list(worktree.path);
 
-    // Build tree if we can find an epic
-    let tree: BeadTree | null = null;
-    const epic = findEpicBead(beads, issueNumber);
-    if (epic) {
-      tree = buildTree(beads, epic);
+    // Find the epic for this specific issue
+    const epic = findEpicBead(allBeads, issueNumber);
+    
+    // If no epic found for this issue, return empty - don't show other issues' beads
+    if (!epic) {
+      const response: BeadsListResponse = {
+        tree: null,
+        flat: [],
+      };
+      return Response.json(response);
     }
+
+    // Filter to only beads that belong to this issue's epic tree
+    const issueBeads = filterBeadsByEpic(allBeads, epic);
+    
+    // Build the tree structure
+    const tree = buildTree(issueBeads, epic);
 
     const response: BeadsListResponse = {
       tree,
-      flat: beads,
+      flat: issueBeads,
     };
 
     return Response.json(response);

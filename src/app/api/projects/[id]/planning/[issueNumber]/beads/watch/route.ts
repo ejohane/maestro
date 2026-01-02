@@ -1,19 +1,34 @@
 // Beads Watch API - Server-Sent Events for real-time bead updates
 // GET /api/projects/{id}/planning/{issueNumber}/beads/watch
 //
-// This endpoint uses file system watching on the `.beads/` directory to detect
-// when the AI agent creates or modifies beads, enabling real-time UI updates.
+// This endpoint uses the `bd activity --follow` subprocess to receive real-time
+// bead mutation events. When the AI agent creates or modifies beads, events are
+// streamed via NDJSON and trigger UI updates.
+//
+// Architecture:
+// - Spawns `bd activity --follow --json --since 0s` subprocess
+// - Parses NDJSON events (one JSON object per line)
+// - Triggers debounced bead list refresh on any mutation event
+// - Automatic restart with backoff on subprocess failure
+// - Falls back to 5-second polling if subprocess repeatedly fails
+//
+// Why subprocess instead of fs.watch:
+// - Worktrees share the main repo's .beads/ directory (no local .beads/)
+// - bd activity watches SQLite mutations directly, not file exports
+// - No platform-specific inotify/FSEvents issues
+// - Semantic events (create/update/delete) instead of raw file changes
 
-import { watch, FSWatcher } from "fs";
-import { access, constants } from "fs/promises";
-import path from "path";
+import { spawn, ChildProcess } from "child_process";
 import { configService } from "@/lib/services/config";
 import { worktreeService } from "@/lib/services/worktree";
 import { beadsService, Bead, BeadsError } from "@/lib/services/beads";
+import { getBeadsForIssue } from "@/lib/services/beads-utils";
 
 // Constants
 const DEBOUNCE_MS = 100;
 const POLL_INTERVAL_MS = 5000;
+const RESTART_DELAY_MS = 1000;      // Base delay before restart
+const MAX_RESTART_ATTEMPTS = 5;      // Max restarts before polling fallback
 
 interface BeadsUpdateEvent {
   type: "update";
@@ -33,18 +48,6 @@ interface BeadsConnectedEvent {
 }
 
 type BeadsEvent = BeadsUpdateEvent | BeadsErrorEvent | BeadsConnectedEvent;
-
-/**
- * Check if a directory exists and is accessible
- */
-async function directoryExists(dirPath: string): Promise<boolean> {
-  try {
-    await access(dirPath, constants.R_OK);
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 /**
  * GET /api/projects/{id}/planning/{issueNumber}/beads/watch
@@ -90,7 +93,6 @@ export async function GET(
   }
 
   const worktreePath = worktree.path;
-  const beadsDir = path.join(worktreePath, ".beads");
 
   // Create SSE stream
   const stream = new ReadableStream({
@@ -101,7 +103,10 @@ export async function GET(
       let isCleanedUp = false;
       let debounceTimer: NodeJS.Timeout | null = null;
       let pollInterval: NodeJS.Timeout | null = null;
-      let watcher: FSWatcher | null = null;
+      // Subprocess tracking
+      let activityProc: ChildProcess | null = null;  // Subprocess handle
+      let lineBuffer = "";                           // Buffer for incomplete NDJSON lines
+      let restartAttempts = 0;                       // Track restart attempts for backoff
 
       /**
        * Send an SSE event to the client
@@ -120,15 +125,22 @@ export async function GET(
 
       /**
        * Fetch current beads and send update event
+       * Only sends beads that belong to this issue's epic tree
        */
       async function sendBeadsUpdate(): Promise<void> {
         if (isCleanedUp) return;
 
         try {
-          const beads = await beadsService.list(worktreePath);
+          // Fetch all beads from shared database
+          const allBeads = await beadsService.list(worktreePath);
+          
+          // Filter to only beads that belong to this issue's epic
+          // Returns empty array if no epic found yet (don't show other issues' beads)
+          const issueBeads = getBeadsForIssue(allBeads, issueNumber);
+          
           sendEvent({
             type: "update",
-            beads,
+            beads: issueBeads,
             timestamp: new Date().toISOString(),
           });
         } catch (error) {
@@ -182,13 +194,10 @@ export async function GET(
           pollInterval = null;
         }
 
-        if (watcher) {
-          try {
-            watcher.close();
-          } catch {
-            // Ignore close errors
-          }
-          watcher = null;
+        // Kill the activity subprocess
+        if (activityProc) {
+          activityProc.kill("SIGTERM");
+          activityProc = null;
         }
 
         try {
@@ -204,7 +213,7 @@ export async function GET(
       function startPolling(): void {
         if (isCleanedUp || pollInterval) return;
 
-        console.log(`[beads-watch] File watching unavailable, falling back to polling (${POLL_INTERVAL_MS}ms)`);
+        console.log(`[beads-watch] Falling back to polling (${POLL_INTERVAL_MS}ms)`);
 
         pollInterval = setInterval(() => {
           if (!isCleanedUp) {
@@ -214,65 +223,93 @@ export async function GET(
       }
 
       /**
-       * Set up file watcher for the .beads directory
+       * Start bd activity subprocess for real-time bead updates
        */
-      async function setupWatcher(): Promise<void> {
-        // Check if .beads directory exists
-        const beadsDirExists = await directoryExists(beadsDir);
+      function startActivityStream(): void {
+        if (isCleanedUp) return;
 
-        if (!beadsDirExists) {
-          // Directory doesn't exist yet - start polling until it's created
-          // This handles the case where planning hasn't started yet
-          console.log(`[beads-watch] .beads directory doesn't exist yet, waiting...`);
-          startPolling();
-          return;
-        }
+        // Use --since 0s to skip historical events, only receive new ones
+        activityProc = spawn("bd", ["activity", "--follow", "--json", "--since", "0s"], {
+          cwd: worktreePath,
+          stdio: ["ignore", "pipe", "pipe"],
+        });
 
-        try {
-          // Watch for changes in the .beads directory
-          watcher = watch(beadsDir, { recursive: true }, (eventType, filename) => {
-            // Ignore non-relevant events
-            if (!filename) return;
+        // Track successful operation to reset restart counter
+        let hasReceivedData = false;
 
-            // Only react to .json file changes (beads data files)
-            if (filename.endsWith(".json") || filename.endsWith(".jsonl")) {
+        // Handle stdout (NDJSON event stream)
+        activityProc.stdout?.on("data", (data: Buffer) => {
+          if (isCleanedUp) return;
+
+          // First data received = process is working, reset restart counter
+          if (!hasReceivedData) {
+            hasReceivedData = true;
+            restartAttempts = 0;  // Reset on successful operation
+          }
+
+          // Append to line buffer and parse complete lines
+          lineBuffer += data.toString();
+          const lines = lineBuffer.split("\n");
+          
+          // Keep incomplete last line in buffer
+          lineBuffer = lines.pop() || "";
+
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed) continue;
+
+            try {
+              // Parse to validate JSON
+              // Any valid event means something changed - trigger refresh
+              JSON.parse(trimmed);
               debouncedSendBeads();
+            } catch {
+              // Not valid JSON - might be a partial line or log message
+              // Ignore silently
             }
-          });
+          }
+        });
 
-          // Handle watcher errors
-          watcher.on("error", (error) => {
-            console.error("[beads-watch] Watcher error:", error);
+        // Handle stderr (warnings/errors from bd)
+        activityProc.stderr?.on("data", (data: Buffer) => {
+          // Log but don't treat as fatal - bd may output warnings
+          console.warn("[beads-watch] bd stderr:", data.toString().trim());
+        });
 
-            // Close the broken watcher
-            if (watcher) {
-              try {
-                watcher.close();
-              } catch {
-                // Ignore
-              }
-              watcher = null;
-            }
+        // Handle spawn error (e.g., bd not found)
+        activityProc.on("error", (err) => {
+          console.error("[beads-watch] Activity process spawn error:", err);
+          activityProc = null;
 
-            // Fall back to polling
+          if (!isCleanedUp) {
+            sendEvent({ type: "error", error: "Activity stream failed to start" });
             startPolling();
-          });
+          }
+        });
 
-          // Handle watcher close
-          watcher.on("close", () => {
-            watcher = null;
-            // If not cleaned up, this was unexpected - start polling
-            if (!isCleanedUp) {
-              startPolling();
-            }
-          });
+        // Handle process exit
+        activityProc.on("close", (code) => {
+          activityProc = null;
+          if (isCleanedUp) return;
 
-          console.log(`[beads-watch] Watching ${beadsDir}`);
-        } catch (error) {
-          console.error("[beads-watch] Failed to set up watcher:", error);
-          // Fall back to polling
-          startPolling();
-        }
+          console.log(`[beads-watch] Activity process exited with code ${code}`);
+
+          // Attempt restart with linear backoff
+          if (restartAttempts < MAX_RESTART_ATTEMPTS) {
+            restartAttempts++;
+            const delay = RESTART_DELAY_MS * restartAttempts;
+            console.log(`[beads-watch] Restarting in ${delay}ms (attempt ${restartAttempts}/${MAX_RESTART_ATTEMPTS})`);
+            
+            setTimeout(() => {
+              if (!isCleanedUp) startActivityStream();
+            }, delay);
+          } else {
+            console.error("[beads-watch] Max restart attempts reached, falling back to polling");
+            startPolling();
+          }
+        });
+
+        console.log(`[beads-watch] Started bd activity --follow for ${worktreePath}`);
       }
 
       // Handle request abort (client disconnect)
@@ -290,8 +327,8 @@ export async function GET(
       // Send initial beads state
       await sendBeadsUpdate();
 
-      // Set up file watching (or polling fallback)
-      await setupWatcher();
+      // Start the bd activity stream for real-time updates
+      startActivityStream();
     },
   });
 
