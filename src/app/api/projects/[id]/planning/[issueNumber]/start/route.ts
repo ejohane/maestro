@@ -1,4 +1,5 @@
 import { configService } from "@/lib/services/config";
+import { addPlanningLabel } from "@/lib/services/github-labels";
 import { openCodeService } from "@/lib/services/opencode";
 import { sessionStorage } from "@/lib/services/sessions";
 import { worktreeService, WorktreeInfo } from "@/lib/services/worktree";
@@ -277,6 +278,19 @@ export async function POST(
               sessionId,
               worktreeInfo.path
             );
+
+            // Add planning label to GitHub issue
+            // This is non-fatal - planning works even if label fails
+            try {
+              await addPlanningLabel(project.path, issueNumber);
+            } catch (err) {
+              // Log warning but dont fail the pipeline
+              // Label is for filtering convenience, not core functionality
+              console.warn(
+                `[Planning Start] Failed to add planning label to issue #${issueNumber}:`,
+                err instanceof Error ? err.message : err
+              );
+            }
 
             // Inject worktree context into the session so the AI knows where to work
             const worktreeContext = `<system-reminder>

@@ -44,6 +44,7 @@ import {
   ClipboardList,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { PLANNING_LABEL } from "@/lib/constants";
 
 // Component to fetch and display planning sessions for a project
 function PlanningSessionsSection({
@@ -134,8 +135,13 @@ function ProjectIssuesSection({
   const { data: issues = [], isLoading } = useProjectIssues(project.id);
   const [isOpen, setIsOpen] = useState(true);
   
-  // Filter to only open issues
-  const openIssues = issues.filter((issue) => issue.state === "OPEN" || issue.state === "open");
+  // Filter to only open issues that are NOT in planning
+  // Issues in planning should only appear in the "Active Planning" section
+  const openIssues = issues.filter(
+    (issue) => 
+      (issue.state === "OPEN" || issue.state === "open") &&
+      !issue.labels?.some(label => label.name === PLANNING_LABEL)
+  );
   
   if (isLoading) {
     return (
