@@ -22,6 +22,7 @@ import { spawn, ChildProcess } from "child_process";
 import { configService } from "@/lib/services/config";
 import { worktreeService } from "@/lib/services/worktree";
 import { beadsService, Bead, BeadsError } from "@/lib/services/beads";
+import { getBeadsForIssue } from "@/lib/services/beads-utils";
 
 // Constants
 const DEBOUNCE_MS = 100;
@@ -124,15 +125,22 @@ export async function GET(
 
       /**
        * Fetch current beads and send update event
+       * Only sends beads that belong to this issue's epic tree
        */
       async function sendBeadsUpdate(): Promise<void> {
         if (isCleanedUp) return;
 
         try {
-          const beads = await beadsService.list(worktreePath);
+          // Fetch all beads from shared database
+          const allBeads = await beadsService.list(worktreePath);
+          
+          // Filter to only beads that belong to this issue's epic
+          // Returns empty array if no epic found yet (don't show other issues' beads)
+          const issueBeads = getBeadsForIssue(allBeads, issueNumber);
+          
           sendEvent({
             type: "update",
-            beads,
+            beads: issueBeads,
             timestamp: new Date().toISOString(),
           });
         } catch (error) {
