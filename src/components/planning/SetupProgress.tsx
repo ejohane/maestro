@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useState, useCallback, useRef } from "react"
+import { useQueryClient } from "@tanstack/react-query"
 import { Circle, Loader2, CheckCircle2, XCircle, RefreshCw } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
@@ -60,6 +61,7 @@ export function SetupProgress({
   onError,
   onSessionCreated,
 }: SetupProgressProps) {
+  const queryClient = useQueryClient()
   const [steps, setSteps] = useState<StepState[]>(INITIAL_STEPS)
   const [pipelineError, setPipelineError] = useState<string | null>(null)
   const [isRetrying, setIsRetrying] = useState(false)
@@ -174,6 +176,9 @@ export function SetupProgress({
                   })
                 }
               } else if (currentEvent === "complete") {
+                // Invalidate the project-issues cache so the issue immediately
+                // disappears from the "Issues" column (it now has maestro:planning label)
+                queryClient.invalidateQueries({ queryKey: ["project-issues", projectId] })
                 onComplete({
                   sessionId: data.sessionId,
                   worktreePath: data.worktreePath,
@@ -201,7 +206,7 @@ export function SetupProgress({
       setPipelineError(message)
       onError({ step: "Connection", error: message })
     }
-  }, [projectId, issueNumber, issueTitle, onComplete, onError])
+  }, [projectId, issueNumber, issueTitle, onComplete, onError, queryClient])
 
   useEffect(() => {
     startPipeline()

@@ -6,6 +6,7 @@ import { useParams } from "next/navigation";
 import { mockEpics, mockSoloSessions } from "@/lib/data/mock";
 import { NewIssueDialog } from "@/components/new-issue-dialog";
 import { useProject, useProjectIssues, usePlanningSessions } from "@/lib/hooks/useProjects";
+import { PLANNING_LABEL } from "@/lib/constants";
 import { CompactSessionCard, CompactIssueCard, CompactEpicCard, CompactSwarmCard, CompactPlanningCard } from "@/components/compact-cards";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -31,6 +32,12 @@ export default function ProjectOverviewPage() {
   const { data: issues = [], isLoading: issuesLoading } = useProjectIssues(projectId);
   const { data: planningSessions = [], isLoading: planningLoading } = usePlanningSessions(projectId);
   const [isNewIssueDialogOpen, setIsNewIssueDialogOpen] = useState(false);
+
+  // Filter out issues that are in planning
+  // These appear in the Planning column/section instead
+  const openIssues = issues.filter(
+    (issue) => !issue.labels?.some(label => label.name === PLANNING_LABEL)
+  );
 
   // Loading state
   if (!project) {
@@ -88,7 +95,7 @@ export default function ProjectOverviewPage() {
                   <CircleDot className="h-4 w-4 text-[hsl(var(--orange))]" />
                   <span className="font-medium">Issues</span>
                   <span className="text-xs text-muted-foreground bg-secondary rounded-full px-2 py-0.5">
-                    {issues.length}
+                    {openIssues.length}
                   </span>
                 </div>
               </AccordionTrigger>
@@ -107,8 +114,8 @@ export default function ProjectOverviewPage() {
                       <Skeleton className="h-16 w-full" />
                       <Skeleton className="h-16 w-full" />
                     </div>
-                  ) : issues.length > 0 ? (
-                    issues.map((issue) => (
+                  ) : openIssues.length > 0 ? (
+                    openIssues.map((issue) => (
                       <CompactIssueCard key={issue.number} issue={issue} projectId={projectId} />
                     ))
                   ) : (
@@ -208,12 +215,12 @@ export default function ProjectOverviewPage() {
               title="Issues"
               icon={<CircleDot className="h-3.5 w-3.5" />}
               iconColor="text-[hsl(var(--orange))]"
-              count={issues.length}
+              count={openIssues.length}
               accentColor="bg-[hsl(var(--orange))]"
               onAddClick={() => setIsNewIssueDialogOpen(true)}
               isLoading={issuesLoading}
             >
-              {issues.map((issue) => (
+              {openIssues.map((issue) => (
                 <IssueCard key={issue.number} issue={issue} projectId={projectId} />
               ))}
             </KanbanColumn>
