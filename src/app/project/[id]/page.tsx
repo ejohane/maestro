@@ -5,12 +5,12 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { mockEpics, mockSoloSessions } from "@/lib/data/mock";
 import { NewIssueDialog } from "@/components/new-issue-dialog";
-import { useProject, useProjectIssues } from "@/lib/hooks/useProjects";
-import { CompactSessionCard, CompactIssueCard, CompactEpicCard, CompactSwarmCard } from "@/components/compact-cards";
+import { useProject, useProjectIssues, usePlanningSessions } from "@/lib/hooks/useProjects";
+import { CompactSessionCard, CompactIssueCard, CompactEpicCard, CompactSwarmCard, CompactPlanningCard } from "@/components/compact-cards";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Skeleton } from "@/components/ui/skeleton";
 import { SidebarTrigger } from "@/components/ui/sidebar";
-import type { GitHubIssue } from "@/lib/types/api";
+import type { GitHubIssue, PlanningSessionInfo } from "@/lib/types/api";
 import {
   ChevronRight,
   Zap,
@@ -18,7 +18,7 @@ import {
   MessageSquare,
   GitBranch,
   AlertCircle,
-  Circle,
+  ClipboardList,
   MoreHorizontal,
   Plus,
   CircleDot,
@@ -29,6 +29,7 @@ export default function ProjectOverviewPage() {
   const projectId = params.id as string;
   const project = useProject(projectId);
   const { data: issues = [], isLoading: issuesLoading } = useProjectIssues(projectId);
+  const { data: planningSessions = [], isLoading: planningLoading } = usePlanningSessions(projectId);
   const [isNewIssueDialogOpen, setIsNewIssueDialogOpen] = useState(false);
 
   // Loading state
@@ -54,7 +55,6 @@ export default function ProjectOverviewPage() {
   const activeSwarms = mockEpics.filter(
     (e) => e.state === "in_progress" && e.subtasks.some((t) => t.assignedAgent)
   );
-  const readyToSwarm = mockEpics.filter((e) => e.state === "planned");
   const completed = mockEpics.filter((e) => e.state === "closed");
 
   return (
@@ -118,25 +118,33 @@ export default function ProjectOverviewPage() {
               </AccordionContent>
             </AccordionItem>
 
-            {/* Ready Section */}
-            <AccordionItem value="ready">
+            {/* Planning Section */}
+            <AccordionItem value="planning">
               <AccordionTrigger className="py-3">
                 <div className="flex items-center gap-2">
-                  <Circle className="h-4 w-4 text-[hsl(var(--info))]" />
-                  <span className="font-medium">Ready</span>
+                  <ClipboardList className="h-4 w-4 text-primary" />
+                  <span className="font-medium">Planning</span>
                   <span className="text-xs text-muted-foreground bg-secondary rounded-full px-2 py-0.5">
-                    {readyToSwarm.length}
+                    {planningLoading ? "..." : planningSessions.length}
                   </span>
                 </div>
               </AccordionTrigger>
               <AccordionContent>
                 <div className="space-y-2">
-                  {readyToSwarm.length > 0 ? (
-                    readyToSwarm.map((epic) => (
-                      <CompactEpicCard key={epic.id} epic={epic} projectId={projectId} />
+                  {planningLoading ? (
+                    <div className="space-y-2">
+                      <Skeleton className="h-16 w-full" />
+                      <Skeleton className="h-16 w-full" />
+                    </div>
+                  ) : planningSessions.length > 0 ? (
+                    planningSessions.map((session) => (
+                      <CompactPlanningCard key={session.issueNumber} session={session} projectId={projectId} />
                     ))
                   ) : (
-                    <p className="text-sm text-muted-foreground text-center py-4">No epics ready to swarm</p>
+                    <div className="text-center py-4">
+                      <p className="text-sm text-muted-foreground">No active planning sessions</p>
+                      <p className="text-xs text-muted-foreground mt-1">Start planning from an issue</p>
+                    </div>
                   )}
                 </div>
               </AccordionContent>
@@ -210,17 +218,25 @@ export default function ProjectOverviewPage() {
               ))}
             </KanbanColumn>
 
-            {/* Ready Column */}
+            {/* Planning Column */}
             <KanbanColumn
-              title="Ready"
-              icon={<Circle className="h-3.5 w-3.5" />}
-              iconColor="text-[hsl(var(--info))]"
-              count={readyToSwarm.length}
-              accentColor="bg-[hsl(var(--info))]"
+              title="Planning"
+              icon={<ClipboardList className="h-3.5 w-3.5" />}
+              iconColor="text-primary"
+              count={planningSessions.length}
+              accentColor="bg-primary"
+              isLoading={planningLoading}
             >
-              {readyToSwarm.map((epic) => (
-                <EpicCard key={epic.id} epic={epic} projectId={projectId} />
-              ))}
+              {planningSessions.length > 0 ? (
+                planningSessions.map((session) => (
+                  <PlanningSessionCard key={session.issueNumber} session={session} projectId={projectId} />
+                ))
+              ) : (
+                <div className="p-4 text-center">
+                  <p className="text-sm text-muted-foreground">No active planning sessions</p>
+                  <p className="text-xs text-muted-foreground mt-1">Start planning from an issue</p>
+                </div>
+              )}
             </KanbanColumn>
 
             {/* Active / Running Column */}
@@ -493,8 +509,9 @@ function SwarmCard({ epic, projectId }: { epic: (typeof mockEpics)[0]; projectId
   );
 }
 
-// Epic Card (Ready items)
-function EpicCard({ epic, projectId }: { epic: (typeof mockEpics)[0]; projectId: string }) {
+// Epic Card (Ready items) - Currently unused after replacing Ready column with Planning
+// Keeping for potential future use
+function _EpicCard({ epic, projectId }: { epic: (typeof mockEpics)[0]; projectId: string }) {
   const total = epic.subtasks.length;
 
   return (
@@ -515,6 +532,35 @@ function EpicCard({ epic, projectId }: { epic: (typeof mockEpics)[0]; projectId:
       <div className="flex items-center justify-between text-xs text-muted-foreground">
         <span>{total} tasks</span>
         <ChevronRight className="h-3.5 w-3.5 opacity-0 group-hover:opacity-100 transition-opacity" />
+      </div>
+    </Link>
+  );
+}
+
+// Planning Session Card (Active planning sessions)
+function PlanningSessionCard({ 
+  session, 
+  projectId 
+}: { 
+  session: PlanningSessionInfo; 
+  projectId: string;
+}) {
+  // Format the display title - remove "Issue #N" prefix if present
+  // API may return "Issue #42" as title, but we show issue number separately
+  const displayTitle = session.issueTitle.replace(/^Issue #\d+/, "").trim() || `Planning #${session.issueNumber}`;
+
+  return (
+    <Link
+      href={`/project/${projectId}/planning/${session.issueNumber}`}
+      className="block p-3 rounded-md bg-card border border-border hover:border-primary/50 transition-colors group"
+    >
+      <div className="flex items-start gap-2 mb-1">
+        <ClipboardList className="h-3.5 w-3.5 text-primary flex-shrink-0 mt-0.5" />
+        <h4 className="font-medium text-sm flex-1">{displayTitle}</h4>
+      </div>
+      <div className="flex items-center justify-between ml-5.5">
+        <span className="text-xs text-muted-foreground font-mono">#{session.issueNumber}</span>
+        <ChevronRight className="h-3.5 w-3.5 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
       </div>
     </Link>
   );
