@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { useParams, useSearchParams } from "next/navigation";
+import { useParams, useSearchParams, useRouter } from "next/navigation";
 import { Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -29,9 +29,13 @@ interface BeadContext {
 export default function PlanningPage() {
   const params = useParams();
   const searchParams = useSearchParams();
+  const router = useRouter();
   const projectId = params.id as string;
   const issueNumber = params.issueNumber as string;
   const autoStart = searchParams.get("autoStart") === "true";
+
+  // Start Swarm state
+  const [isStartingSwarm, setIsStartingSwarm] = useState(false);
 
   // Issue state
   const [issue, setIssue] = useState<GitHubIssue | null>(null);
@@ -85,6 +89,29 @@ export default function PlanningPage() {
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [selectedBead]);
+
+  // Handle Start Swarm
+  const handleStartSwarm = useCallback(async () => {
+    setIsStartingSwarm(true);
+    try {
+      const response = await fetch(
+        `/api/projects/${projectId}/swarm/${issueNumber}/start`,
+        { method: "POST" }
+      );
+      const data = await response.json();
+      
+      if (data.success) {
+        router.push(`/project/${projectId}/swarm/${issueNumber}`);
+      } else {
+        console.error("Failed to start swarm:", data.error);
+        // TODO: Show error toast
+      }
+    } catch (err) {
+      console.error("Error starting swarm:", err);
+    } finally {
+      setIsStartingSwarm(false);
+    }
+  }, [projectId, issueNumber, router]);
 
   // Panel resizing state (percentage-based, 40% default)
   const [leftPanelPercent, setLeftPanelPercent] = useState(() => {
@@ -180,6 +207,9 @@ export default function PlanningPage() {
     );
   }
 
+  // Check if beads exist (for Start Swarm button visibility)
+  const hasBeads = beads.length > 0;
+
   // Error state
   if (issueError && !issue) {
     return (
@@ -189,6 +219,7 @@ export default function PlanningPage() {
           issueNumber={parseInt(issueNumber)}
           issueTitle=""
           projectName="Project"
+          hasBeads={false}
         />
         <div className="flex-1 flex items-center justify-center p-4">
           <div className="text-center">
@@ -208,6 +239,9 @@ export default function PlanningPage() {
           issueNumber={issue?.number || parseInt(issueNumber)}
           issueTitle={issue?.title || ""}
           projectName="Project"
+          hasBeads={hasBeads}
+          onStartSwarm={handleStartSwarm}
+          isStartingSwarm={isStartingSwarm}
         />
 
         <div ref={containerRef} className="flex-1 overflow-hidden flex min-h-0">
@@ -258,6 +292,9 @@ export default function PlanningPage() {
         issueNumber={issue?.number || parseInt(issueNumber)}
         issueTitle={issue?.title || ""}
         projectName="Project"
+        hasBeads={hasBeads}
+        onStartSwarm={handleStartSwarm}
+        isStartingSwarm={isStartingSwarm}
       />
 
       {/* Mobile tabs - min 44px touch targets */}

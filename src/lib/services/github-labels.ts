@@ -14,14 +14,17 @@ import { promisify } from "util";
 import { 
   PLANNING_LABEL, 
   PLANNING_LABEL_COLOR, 
-  PLANNING_LABEL_DESCRIPTION 
+  PLANNING_LABEL_DESCRIPTION,
+  SWARM_LABEL,
+  SWARM_LABEL_COLOR,
+  SWARM_LABEL_DESCRIPTION,
 } from "@/lib/constants";
 import { withRetry } from "@/lib/utils/error-handling";
 
 const execAsync = promisify(exec);
 
 // Re-export constants for server-side convenience
-export { PLANNING_LABEL, PLANNING_LABEL_COLOR };
+export { PLANNING_LABEL, PLANNING_LABEL_COLOR, SWARM_LABEL, SWARM_LABEL_COLOR };
 
 /**
  * Ensure the maestro:planning label exists in the repository.
@@ -269,5 +272,121 @@ export function isGitHubRetryable(error: Error): boolean {
   // - 403 without "rate limit" (permission issue)
   // - 404 Not Found (resource doesnt exist)
   // - 422 Unprocessable Entity (validation error)
+  return false;
+}
+
+// ============================================================================
+// Swarm Label Management
+// ============================================================================
+
+/**
+ * Ensures the maestro:swarming label exists in the repository.
+ * Creates it with the configured color and description if it doesn't exist.
+ * Safe to call multiple times (idempotent).
+ * 
+ * @param projectPath - Absolute path to the git repository
+ * @throws Error if gh CLI fails due to auth/network issues
+ */
+export async function ensureSwarmLabel(projectPath: string): Promise<void> {
+  try {
+    await execAsync(
+      `gh label create "${SWARM_LABEL}" --color "${SWARM_LABEL_COLOR}" --description "${SWARM_LABEL_DESCRIPTION}" --force`,
+      { cwd: projectPath }
+    );
+  } catch (error) {
+    // Label might already exist - only re-throw for actual errors
+    if (!isLabelExistsError(error)) {
+      throw error;
+    }
+  }
+}
+
+/**
+ * Adds the maestro:swarming label to an issue.
+ * Creates the label if it doesn't exist.
+ * 
+ * @param projectPath - Absolute path to the git repository
+ * @param issueNumber - GitHub issue number
+ * @throws Error if gh CLI fails
+ */
+export async function addSwarmLabel(
+  projectPath: string,
+  issueNumber: number
+): Promise<void> {
+  await ensureSwarmLabel(projectPath);
+  await execAsync(
+    `gh issue edit ${issueNumber} --add-label "${SWARM_LABEL}"`,
+    { cwd: projectPath }
+  );
+}
+
+/**
+ * Removes the maestro:swarming label from an issue.
+ * Fails silently if the label is not present (idempotent).
+ * 
+ * @param projectPath - Absolute path to the git repository  
+ * @param issueNumber - GitHub issue number
+ */
+export async function removeSwarmLabel(
+  projectPath: string,
+  issueNumber: number
+): Promise<void> {
+  try {
+    await execAsync(
+      `gh issue edit ${issueNumber} --remove-label "${SWARM_LABEL}"`,
+      { cwd: projectPath }
+    );
+  } catch (error) {
+    // Ignore "label not found" errors - the goal is achieved
+    if (!isLabelNotFoundError(error)) {
+      throw error;
+    }
+  }
+}
+
+/**
+ * Pure function to check if a labels array includes the swarm label.
+ * Works with GitHub API label objects.
+ * 
+ * @param labels - Array of label objects with 'name' property
+ * @returns true if maestro:swarming label is present
+ */
+export function hasSwarmLabel(labels: { name: string }[]): boolean {
+  return labels.some((label) => label.name === SWARM_LABEL);
+}
+
+/**
+ * Alias for hasSwarmLabel for semantic clarity.
+ * Use this when checking "is the issue currently in swarm phase?"
+ * 
+ * @param labels - Array of label objects with 'name' property
+ * @returns true if issue is in swarm execution phase
+ */
+export function isInSwarm(labels: { name: string }[]): boolean {
+  return hasSwarmLabel(labels);
+}
+
+// ============================================================================
+// Helper Functions
+// ============================================================================
+
+/**
+ * Check if an error is a "label not found" error from GitHub CLI.
+ */
+function isLabelNotFoundError(error: unknown): boolean {
+  if (error instanceof Error) {
+    return error.message.includes("not found") || 
+           error.message.includes("label does not exist");
+  }
+  return false;
+}
+
+/**
+ * Check if an error is a "label already exists" error from GitHub CLI.
+ */
+function isLabelExistsError(error: unknown): boolean {
+  if (error instanceof Error) {
+    return error.message.includes("already exists");
+  }
   return false;
 }

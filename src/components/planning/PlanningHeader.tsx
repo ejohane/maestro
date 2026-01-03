@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ChevronLeft, ChevronRight, Square, Loader2 } from "lucide-react";
+import { ChevronLeft, ChevronRight, Square, Loader2, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import {
@@ -24,6 +24,9 @@ interface PlanningHeaderProps {
   issueNumber: number;
   issueTitle: string;
   projectName: string;
+  hasBeads?: boolean;
+  onStartSwarm?: () => void;
+  isStartingSwarm?: boolean;
 }
 
 export function PlanningHeader({
@@ -31,6 +34,9 @@ export function PlanningHeader({
   issueNumber,
   issueTitle,
   projectName,
+  hasBeads,
+  onStartSwarm,
+  isStartingSwarm,
 }: PlanningHeaderProps) {
   const router = useRouter();
   const queryClient = useQueryClient();
@@ -104,6 +110,20 @@ export function PlanningHeader({
 
         {/* Actions */}
         <div className="flex items-center gap-2 flex-shrink-0">
+          {/* Start Swarm Button */}
+          {hasBeads && onStartSwarm && (
+            <Button
+              variant="default"
+              size="sm"
+              onClick={onStartSwarm}
+              disabled={isStartingSwarm}
+              className="bg-green-600 hover:bg-green-700 text-white"
+            >
+              <Zap className="h-4 w-4 mr-2" />
+              {isStartingSwarm ? "Starting..." : "Start Swarm"}
+            </Button>
+          )}
+
           {/* End Planning Button with Confirmation */}
           <AlertDialog open={showDialog} onOpenChange={setShowDialog}>
             <AlertDialogTrigger asChild>

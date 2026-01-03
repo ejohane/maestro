@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useParams, usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
 import { useProjects, useProjectIssues, usePlanningSessions } from "@/lib/hooks/useProjects";
+import { useActiveSwarms } from "@/lib/hooks/useActiveSwarms";
 import { FolderBrowserModal } from "@/components/folder-browser";
 import type { Project } from "@/lib/types/api";
 import {
@@ -42,6 +43,7 @@ import {
   MessageSquare,
   Lightbulb,
   ClipboardList,
+  AlertTriangle,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { PLANNING_LABEL } from "@/lib/constants";
@@ -110,6 +112,87 @@ function PlanningSessionsSection({
                     >
                       <ClipboardList className="h-2.5 w-2.5 text-primary" />
                       <span className="truncate">{truncatedTitle}</span>
+                    </Link>
+                  </SidebarMenuSubButton>
+                </SidebarMenuSubItem>
+              );
+            })}
+          </SidebarMenuSub>
+        </CollapsibleContent>
+      </SidebarMenuSubItem>
+    </Collapsible>
+  );
+}
+
+// Component to display active swarms for a project
+function ActiveSwarmsSection({
+  project,
+  pathname,
+  onNavigate,
+}: {
+  project: Project;
+  pathname: string;
+  onNavigate: () => void;
+}) {
+  const { swarms, isLoading } = useActiveSwarms(project.id);
+  const [isOpen, setIsOpen] = useState(true);
+
+  if (isLoading || swarms.length === 0) {
+    return null;
+  }
+
+  return (
+    <Collapsible open={isOpen} onOpenChange={setIsOpen} className="w-full">
+      <SidebarMenuSubItem>
+        <CollapsibleTrigger asChild>
+          <SidebarMenuSubButton size="sm" className="w-full justify-between pr-2">
+            <span className="flex items-center gap-2">
+              <Zap className="h-3 w-3 text-amber-500" />
+              <span>Active Swarms</span>
+            </span>
+            <span className="flex items-center gap-1">
+              <span className="text-xs text-muted-foreground">{swarms.length}</span>
+              {isOpen ? (
+                <ChevronDown className="h-3 w-3" />
+              ) : (
+                <ChevronRight className="h-3 w-3" />
+              )}
+            </span>
+          </SidebarMenuSubButton>
+        </CollapsibleTrigger>
+        <CollapsibleContent>
+          <SidebarMenuSub>
+            {swarms.map((swarm) => {
+              const isActive = pathname.includes(`/swarm/${swarm.issueNumber}`);
+              const hasBlockedAgents = swarm.agents.blocked > 0;
+              // Build display title with issue number
+              const displayTitle = `#${swarm.issueNumber}: ${swarm.issueTitle}`;
+              const truncatedTitle = displayTitle.length > 25 
+                ? displayTitle.slice(0, 22) + '...' 
+                : displayTitle;
+              
+              return (
+                <SidebarMenuSubItem key={swarm.issueNumber}>
+                  <SidebarMenuSubButton
+                    asChild
+                    size="sm"
+                    isActive={isActive}
+                  >
+                    <Link
+                      href={`/project/${project.id}/swarm/${swarm.issueNumber}`}
+                      onClick={onNavigate}
+                      title={displayTitle}
+                    >
+                      <Zap className="h-2.5 w-2.5 text-amber-500" />
+                      <span className="truncate flex-1">{truncatedTitle}</span>
+                      <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                        <span>[{swarm.progress.completed}/{swarm.progress.total}]</span>
+                        {hasBlockedAgents && (
+                          <span title={`${swarm.agents.blocked} blocked agent(s)`}>
+                            <AlertTriangle className="h-3 w-3 text-amber-500" />
+                          </span>
+                        )}
+                      </span>
                     </Link>
                   </SidebarMenuSubButton>
                 </SidebarMenuSubItem>
@@ -255,6 +338,11 @@ function ProjectItem({
         </CollapsibleTrigger>
         <CollapsibleContent>
           <SidebarMenuSub>
+            <ActiveSwarmsSection
+              project={project}
+              pathname={pathname}
+              onNavigate={onNavigate}
+            />
             <PlanningSessionsSection
               project={project}
               pathname={pathname}
