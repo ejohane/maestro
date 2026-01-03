@@ -1,5 +1,5 @@
 import { configService } from "@/lib/services/config";
-import { addPlanningLabel } from "@/lib/services/github-labels";
+import { addPlanningLabel, hasLabelOnIssue } from "@/lib/services/github-labels";
 import { openCodeService } from "@/lib/services/opencode";
 import { sessionStorage } from "@/lib/services/sessions";
 import { worktreeService, WorktreeInfo } from "@/lib/services/worktree";
@@ -9,7 +9,7 @@ import { promisify } from "util";
 const execAsync = promisify(exec);
 
 // Pipeline step definitions
-type StepId = "create_worktree" | "install_deps" | "create_session" | "send_prompt";
+type StepId = "create_worktree" | "install_deps" | "create_session" | "add_label" | "send_prompt";
 type StepStatus = "pending" | "in_progress" | "completed" | "skipped" | "error";
 
 interface StepEvent {
@@ -36,6 +36,7 @@ const STEPS: Record<StepId, { name: string }> = {
   create_worktree: { name: "Creating git worktree" },
   install_deps: { name: "Installing dependencies" },
   create_session: { name: "Creating OpenCode session" },
+  add_label: { name: "Adding planning label" },
   send_prompt: { name: "Sending initial planning prompt" },
 };
 
@@ -248,6 +249,45 @@ export async function POST(
           });
           sessionId = existingSession.sessionId;
 
+          // ============================================================
+          // Resume path: Attempt to heal missing label (non-blocking)
+          // ============================================================
+          // Check if label is missing and attempt to add it in background
+          // This is best-effort healing - we don't fail if it doesn't work
+          const hasLabel = await hasLabelOnIssue(project.path, issueNumber);
+          if (!hasLabel) {
+            sendStepEvent({
+              id: "add_label",
+              status: "in_progress",
+              name: STEPS.add_label.name,
+            });
+            try {
+              await addPlanningLabel(project.path, issueNumber);
+              sendStepEvent({
+                id: "add_label",
+                status: "completed",
+                name: STEPS.add_label.name,
+              });
+            } catch (err) {
+              // Log warning but don't fail the resume - session still works
+              console.warn(
+                `[Planning Resume] Failed to heal planning label for issue #${issueNumber}:`,
+                err instanceof Error ? err.message : err
+              );
+              sendStepEvent({
+                id: "add_label",
+                status: "skipped",
+                name: STEPS.add_label.name,
+              });
+            }
+          } else {
+            sendStepEvent({
+              id: "add_label",
+              status: "skipped",
+              name: STEPS.add_label.name,
+            });
+          }
+
           // Skip sending prompt since session already exists
           sendStepEvent({
             id: "send_prompt",
@@ -278,19 +318,6 @@ export async function POST(
               sessionId,
               worktreeInfo.path
             );
-
-            // Add planning label to GitHub issue
-            // This is non-fatal - planning works even if label fails
-            try {
-              await addPlanningLabel(project.path, issueNumber);
-            } catch (err) {
-              // Log warning but dont fail the pipeline
-              // Label is for filtering convenience, not core functionality
-              console.warn(
-                `[Planning Start] Failed to add planning label to issue #${issueNumber}:`,
-                err instanceof Error ? err.message : err
-              );
-            }
 
             // Inject worktree context into the session so the AI knows where to work
             const worktreeContext = `<system-reminder>
@@ -337,7 +364,41 @@ When running any commands, ensure you are operating within this worktree path.
           }
 
           // ============================================================
-          // Step 4: Send initial planning prompt
+          // Step 4: Add planning label to GitHub issue
+          // ============================================================
+          // This is now an explicit pipeline step that fails if label cannot be added
+          // (after retries). This ensures UI consistency - no more duplicate issues.
+          sendStepEvent({
+            id: "add_label",
+            status: "in_progress",
+            name: STEPS.add_label.name,
+          });
+
+          try {
+            await addPlanningLabel(project.path, issueNumber);
+            sendStepEvent({
+              id: "add_label",
+              status: "completed",
+              name: STEPS.add_label.name,
+            });
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            sendStepEvent({
+              id: "add_label",
+              status: "error",
+              name: STEPS.add_label.name,
+              error: message,
+            });
+            sendErrorEvent({
+              error: "Failed to add planning label",
+              details: message,
+            });
+            controller.close();
+            return;
+          }
+
+          // ============================================================
+          // Step 5: Send initial planning prompt
           // ============================================================
           sendStepEvent({
             id: "send_prompt",
