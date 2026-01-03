@@ -33,6 +33,7 @@ export function NewIssueDialog({
   const [isCreating, setIsCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
@@ -79,6 +80,23 @@ export function NewIssueDialog({
     }
   };
 
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // Check for Cmd+Enter (macOS) or Ctrl+Enter (Windows/Linux)
+    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+      // Prevent default to avoid newline insertion
+      e.preventDefault();
+
+      // Guard: Do nothing if form would be invalid
+      if (!prompt.trim() || isCreating) return;
+
+      // Submit the form using the native form submission
+      // This ensures the form onSubmit handler is called
+      e.currentTarget.form?.requestSubmit();
+    }
+    // Note: Plain Enter behavior is preserved automatically
+    // (we only handle the case when metaKey/ctrlKey is pressed)
+  };
+
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent>
@@ -99,6 +117,7 @@ export function NewIssueDialog({
               id="issue-prompt"
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
+              onKeyDown={handleKeyDown}
               placeholder="Describe what you want to build or explore..."
               className="mt-2 min-h-[100px] resize-none"
               autoFocus
@@ -125,7 +144,7 @@ export function NewIssueDialog({
                   Creating...
                 </>
               ) : (
-                "Create Issue"
+                <>Create Issue</>
               )}
             </Button>
           </DialogFooter>
