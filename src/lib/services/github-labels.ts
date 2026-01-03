@@ -16,6 +16,7 @@ import {
   PLANNING_LABEL_COLOR, 
   PLANNING_LABEL_DESCRIPTION 
 } from "@/lib/constants";
+import { withRetry } from "@/lib/utils/error-handling";
 
 const execAsync = promisify(exec);
 
@@ -51,14 +52,19 @@ export async function ensurePlanningLabel(projectPath: string): Promise<void> {
  * 
  * This function:
  * 1. Ensures the label exists in the repository
- * 2. Adds the label to the specified issue
+ * 2. Adds the label to the specified issue (with retry logic)
+ * 
+ * Uses withRetry with GitHub-specific retryability logic:
+ * - 3 attempts maximum
+ * - Exponential backoff (1s, 2s, 4s)
+ * - Retries rate limit errors but not permission errors
  * 
  * If the label is already on the issue, GitHub CLI handles this gracefully
  * (no error, just a no-op).
  * 
  * @param projectPath - Absolute path to the git repository
  * @param issueNumber - GitHub issue number to label
- * @throws Error if GitHub CLI fails
+ * @throws Error if GitHub CLI fails after all retry attempts
  * 
  * @example
  * ```typescript
@@ -70,13 +76,28 @@ export async function addPlanningLabel(
   projectPath: string,
   issueNumber: number
 ): Promise<void> {
-  // First ensure the label exists in the repo
+  // First ensure the label exists in the repo (no retry needed - idempotent)
   await ensurePlanningLabel(projectPath);
   
-  // Add the label to the issue
-  await execAsync(
-    `gh issue edit ${issueNumber} --add-label "${PLANNING_LABEL}"`,
-    { cwd: projectPath }
+  // Add the label to the issue with retry logic for transient failures
+  await withRetry(
+    async () => {
+      await execAsync(
+        `gh issue edit ${issueNumber} --add-label "${PLANNING_LABEL}"`,
+        { cwd: projectPath }
+      );
+    },
+    {
+      maxAttempts: 3,
+      backoff: 1000,
+      backoffMultiplier: 2,
+      isRetryable: isGitHubRetryable,
+      onRetry: (attempt, error, nextDelay) => {
+        console.log(
+          `[GitHub Labels] Retry ${attempt}/3 for adding label to issue #${issueNumber}: ${error.message}. Next delay: ${nextDelay}ms`
+        );
+      },
+    }
   );
 }
 
@@ -149,4 +170,104 @@ export function hasPlanningLabel(labels: { name: string }[]): boolean {
  */
 export function isInPlanning(labels: { name: string }[]): boolean {
   return hasPlanningLabel(labels);
+}
+
+/**
+ * Check if a label exists on a GitHub issue by querying the remote.
+ * 
+ * Unlike hasPlanningLabel() which operates on in-memory data, this function
+ * makes a GitHub API call to verify the current state of the issue.
+ * 
+ * @param projectPath - Absolute path to the git repository
+ * @param issueNumber - GitHub issue number to check
+ * @param labelName - Label name to look for (defaults to PLANNING_LABEL)
+ * @returns true if the label exists on the issue, false otherwise
+ * 
+ * @example
+ * ```typescript
+ * // Check if planning label exists on remote
+ * const hasLabel = await hasLabelOnIssue("/Users/me/repo", 42);
+ * if (!hasLabel) {
+ *   await addPlanningLabel("/Users/me/repo", 42);
+ * }
+ * ```
+ */
+export async function hasLabelOnIssue(
+  projectPath: string,
+  issueNumber: number,
+  labelName: string = PLANNING_LABEL
+): Promise<boolean> {
+  try {
+    const { stdout } = await execAsync(
+      `gh issue view ${issueNumber} --json labels --jq ".labels[].name"`,
+      { cwd: projectPath }
+    );
+    // stdout contains one label name per line
+    const labels = stdout.split("\n").map(s => s.trim()).filter(Boolean);
+    return labels.includes(labelName);
+  } catch {
+    // If we cannot determine label state (network error, issue not found, etc.),
+    // assume label is not present. Caller can decide whether to attempt adding it.
+    return false;
+  }
+}
+
+/**
+ * Determines if a GitHub CLI error is retryable.
+ * 
+ * This is GitHub-specific logic that differs from the global defaultIsRetryable():
+ * - Rate limit 403s ARE retryable (we just need to wait)
+ * - Permission 403s are NOT retryable (no amount of waiting helps)
+ * - Gateway errors (502, 503, 504) ARE retryable
+ * - Auth errors (401) are NOT retryable
+ * - Network errors (ETIMEDOUT, ECONNRESET) ARE retryable
+ * 
+ * @param error - The error to evaluate
+ * @returns true if the operation should be retried
+ * 
+ * @example
+ * ```typescript
+ * await withRetry(
+ *   () => addPlanningLabel(path, issueNumber),
+ *   { isRetryable: isGitHubRetryable }
+ * );
+ * ```
+ */
+export function isGitHubRetryable(error: Error): boolean {
+  const msg = error.message.toLowerCase();
+  
+  // Rate limits are always retryable
+  // GitHub rate limit messages include "rate limit" or "API rate limit exceeded"
+  if (msg.includes("rate limit")) {
+    return true;
+  }
+  
+  // Secondary rate limits (abuse detection)
+  // These also include "rate limit" but checking explicitly for completeness
+  if (msg.includes("secondary rate limit")) {
+    return true;
+  }
+  
+  // Gateway errors are retryable (server-side temporary issues)
+  if (/\b50[234]\b/.test(error.message)) {
+    return true;
+  }
+  
+  // Network/connection errors are retryable
+  if (
+    msg.includes("etimedout") ||
+    msg.includes("econnreset") ||
+    msg.includes("econnrefused") ||
+    msg.includes("enotfound") ||
+    msg.includes("timeout")
+  ) {
+    return true;
+  }
+  
+  // Everything else is NOT retryable:
+  // - 401 Unauthorized (auth issue, wont change)
+  // - 403 without "rate limit" (permission issue)
+  // - 404 Not Found (resource doesnt exist)
+  // - 422 Unprocessable Entity (validation error)
+  return false;
 }

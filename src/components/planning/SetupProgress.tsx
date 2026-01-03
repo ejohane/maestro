@@ -6,7 +6,7 @@ import { Circle, Loader2, CheckCircle2, XCircle, RefreshCw } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 
-type StepId = "create_worktree" | "install_deps" | "create_session" | "send_prompt"
+type StepId = "create_worktree" | "install_deps" | "create_session" | "add_label" | "send_prompt"
 type StepStatus = "pending" | "in_progress" | "completed" | "skipped" | "error"
 
 interface StepState {
@@ -32,6 +32,7 @@ const INITIAL_STEPS: StepState[] = [
   { id: "create_worktree", name: "Creating git worktree", status: "pending" },
   { id: "install_deps", name: "Installing dependencies", status: "pending" },
   { id: "create_session", name: "Starting AI session", status: "pending" },
+  { id: "add_label", name: "Adding planning label", status: "pending" },
   { id: "send_prompt", name: "Analyzing issue", status: "pending" },
 ]
 
