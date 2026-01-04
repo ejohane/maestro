@@ -37,17 +37,12 @@ export { PLANNING_LABEL, PLANNING_LABEL_COLOR, SWARM_LABEL, SWARM_LABEL_COLOR };
  * @throws Error if GitHub CLI fails (network, auth, etc.)
  */
 export async function ensurePlanningLabel(projectPath: string): Promise<void> {
-  try {
-    // Check if label already exists
-    await execAsync(`gh label view "${PLANNING_LABEL}"`, { cwd: projectPath });
-    // Label exists, nothing to do
-  } catch {
-    // Label doesnt exist (gh label view returns non-zero), create it
-    await execAsync(
-      `gh label create "${PLANNING_LABEL}" --color "${PLANNING_LABEL_COLOR}" --description "${PLANNING_LABEL_DESCRIPTION}"`,
-      { cwd: projectPath }
-    );
-  }
+  // Use --force to create or update the label idempotently
+  // This avoids the need to check if the label exists first
+  await execAsync(
+    `gh label create "${PLANNING_LABEL}" --color "${PLANNING_LABEL_COLOR}" --description "${PLANNING_LABEL_DESCRIPTION}" --force`,
+    { cwd: projectPath }
+  );
 }
 
 /**

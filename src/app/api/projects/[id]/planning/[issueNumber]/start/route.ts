@@ -100,6 +100,7 @@ export async function POST(
   const stream = new ReadableStream({
     async start(controller) {
       const encoder = new TextEncoder();
+      let isClosed = false;
 
       function sendStepEvent(step: StepEvent) {
         const data = `event: step\ndata: ${JSON.stringify(step)}\n\n`;
@@ -167,6 +168,7 @@ export async function POST(
               error: "Failed to create worktree",
               details: message,
             });
+            isClosed = true;
             controller.close();
             return;
           }
@@ -218,6 +220,7 @@ export async function POST(
               error: "Failed to install dependencies",
               details: message,
             });
+            isClosed = true;
             controller.close();
             return;
           }
@@ -359,6 +362,7 @@ When running any commands, ensure you are operating within this worktree path.
               error: "Failed to create session",
               details: message,
             });
+            isClosed = true;
             controller.close();
             return;
           }
@@ -393,6 +397,7 @@ When running any commands, ensure you are operating within this worktree path.
               error: "Failed to add planning label",
               details: message,
             });
+            isClosed = true;
             controller.close();
             return;
           }
@@ -431,6 +436,7 @@ When running any commands, ensure you are operating within this worktree path.
               error: "Failed to send planning prompt",
               details: message,
             });
+            isClosed = true;
             controller.close();
             return;
           }
@@ -451,7 +457,9 @@ When running any commands, ensure you are operating within this worktree path.
           details: message,
         });
       } finally {
-        controller.close();
+        if (!isClosed) {
+          controller.close();
+        }
       }
     },
   });
