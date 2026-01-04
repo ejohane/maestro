@@ -62,3 +62,16 @@ export function getBeadsForIssue(allBeads: Bead[], issueNumber: number): Bead[] 
   }
   return filterBeadsByEpic(allBeads, epic);
 }
+
+/**
+ * Get beads for a specific epic by ID.
+ * Returns only beads that belong to the epic's tree.
+ * Returns empty array if the epic ID is not found.
+ */
+export function getBeadsForEpic(allBeads: Bead[], epicId: string): Bead[] {
+  const epic = allBeads.find((b) => b.id === epicId);
+  if (!epic) {
+    return [];
+  }
+  return filterBeadsByEpic(allBeads, epic);
+}

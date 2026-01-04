@@ -1,9 +1,10 @@
 import * as fs from "fs/promises";
 import * as path from "path";
 import * as os from "os";
+import type { SwarmStatus } from '@/lib/types/api';
 
 // Types
-export type SessionType = 'discussion' | 'planning';
+export type SessionType = 'discussion' | 'planning' | 'swarm';
 
 export interface SessionMapping {
   projectId: string;       // Project UUID (from Maestro config)
@@ -20,6 +21,17 @@ export interface SessionMapping {
 export interface PlanningSessionMapping extends SessionMapping {
   sessionType: 'planning';
   worktreePath: string;  // Required for planning
+}
+
+/**
+ * Swarm session mapping with additional execution-phase fields.
+ */
+export interface SwarmSessionMapping extends SessionMapping {
+  sessionType: 'swarm';
+  worktreePath: string;
+  epicId: string;
+  status: SwarmStatus;
+  startedAt: string;
 }
 
 export interface SessionStore {
@@ -214,6 +226,139 @@ class SessionStorageService {
     mapping.lastAccessedAt = new Date().toISOString();
     await this.writeStore(store);
     return true;
+  }
+
+  // ============================================================================
+  // Swarm Session Methods
+  // ============================================================================
+
+  /**
+   * Save a swarm session mapping.
+   * Removes any existing swarm session for the same issue first (only one swarm per issue).
+   */
+  async saveSwarmSession(
+    projectId: string,
+    projectPath: string,
+    issueNumber: number,
+    sessionId: string,
+    worktreePath: string,
+    epicId: string
+  ): Promise<SwarmSessionMapping> {
+    const store = await this.readStore();
+    const now = new Date().toISOString();
+
+    // Remove any existing swarm session for this project/issue (only one swarm per issue)
+    store.mappings = store.mappings.filter(
+      (m) => !(m.projectId === projectId && 
+               m.issueNumber === issueNumber &&
+               m.sessionType === 'swarm')
+    );
+
+    const mapping: SwarmSessionMapping = {
+      projectId,
+      projectPath,
+      issueNumber,
+      sessionId,
+      sessionType: 'swarm',
+      worktreePath,
+      epicId,
+      status: 'running',
+      startedAt: now,
+      createdAt: now,
+      lastAccessedAt: now,
+    };
+
+    store.mappings.push(mapping);
+    await this.writeStore(store);
+    return mapping;
+  }
+
+  /**
+   * Get a swarm session for a specific project and issue.
+   * @returns The swarm session mapping, or null if not found.
+   */
+  async getSwarmSession(
+    projectId: string,
+    issueNumber: number
+  ): Promise<SwarmSessionMapping | null> {
+    const store = await this.readStore();
+    const session = store.mappings.find(
+      (m) => m.projectId === projectId && 
+             m.issueNumber === issueNumber &&
+             m.sessionType === 'swarm'
+    );
+    
+    if (session && this.isSwarmSession(session)) {
+      return session;
+    }
+    return null;
+  }
+
+  /**
+   * List all swarm sessions for a project, optionally filtered by status.
+   */
+  async listSwarmSessions(
+    projectId: string,
+    status?: SwarmStatus
+  ): Promise<SwarmSessionMapping[]> {
+    const store = await this.readStore();
+    return store.mappings.filter(
+      (m): m is SwarmSessionMapping => 
+        m.projectId === projectId && 
+        m.sessionType === 'swarm' &&
+        this.isSwarmSession(m) &&
+        (status === undefined || m.status === status)
+    );
+  }
+
+  /**
+   * Update the status of a swarm session.
+   * @returns true if the session was found and updated, false otherwise.
+   */
+  async updateSwarmStatus(
+    projectId: string,
+    issueNumber: number,
+    status: SwarmStatus
+  ): Promise<boolean> {
+    const store = await this.readStore();
+    const mapping = store.mappings.find(
+      (m) => m.projectId === projectId && 
+             m.issueNumber === issueNumber &&
+             m.sessionType === 'swarm'
+    );
+
+    if (!mapping || !this.isSwarmSession(mapping)) {
+      return false;
+    }
+
+    mapping.status = status;
+    mapping.lastAccessedAt = new Date().toISOString();
+    await this.writeStore(store);
+    return true;
+  }
+
+  /**
+   * Remove a swarm session.
+   * @returns true if the session was found and removed, false otherwise.
+   */
+  async removeSwarmSession(
+    projectId: string,
+    issueNumber: number
+  ): Promise<boolean> {
+    return this.removeSession(projectId, issueNumber, 'swarm');
+  }
+
+  /**
+   * Type guard to check if a SessionMapping is a SwarmSessionMapping.
+   */
+  private isSwarmSession(mapping: SessionMapping): mapping is SwarmSessionMapping {
+    return (
+      mapping.sessionType === 'swarm' &&
+      typeof (mapping as SwarmSessionMapping).worktreePath === 'string' &&
+      typeof (mapping as SwarmSessionMapping).epicId === 'string' &&
+      typeof (mapping as SwarmSessionMapping).status === 'string' &&
+      typeof (mapping as SwarmSessionMapping).startedAt === 'string'
+    );
   }
 
   /**

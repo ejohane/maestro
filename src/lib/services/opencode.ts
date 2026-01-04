@@ -1,7 +1,17 @@
 // OpenCode SDK Service Wrapper
 // Provides typed methods for interacting with OpenCode AI sessions
 
-import { createOpencodeClient, OpencodeClient, TextPart } from "@opencode-ai/sdk";
+import {
+  createOpencodeClient,
+  OpencodeClient,
+  TextPart,
+  Session,
+  SessionStatus,
+  Permission,
+} from "@opencode-ai/sdk";
+
+// Re-export SDK types for consumers of this service
+export type { Session, SessionStatus, Permission };
 
 // Default model configuration - Claude Opus 4.5
 const DEFAULT_MODEL = {
@@ -382,6 +392,111 @@ export class OpenCodeService {
         controller.close();
       },
     });
+  }
+
+  // ============================================================
+  // Swarm Orchestration Methods
+  // ============================================================
+
+  /**
+   * Get all child sessions of an orchestrator session.
+   * @param projectPath - Absolute path to the project directory
+   * @param sessionId - Parent session ID
+   * @returns Array of child sessions, or empty array if none found
+   */
+  async getChildSessions(projectPath: string, sessionId: string): Promise<Session[]> {
+    try {
+      const result = await this.client.session.children({
+        path: { id: sessionId },
+        query: { directory: projectPath },
+      });
+      return result.data || [];
+    } catch (error) {
+      console.error(`Failed to get child sessions for ${sessionId}:`, error);
+      return [];
+    }
+  }
+
+  /**
+   * Get the current status of all sessions in a project.
+   * @param projectPath - Absolute path to the project directory
+   * @returns Record mapping session IDs to their status
+   */
+  async getSessionStatuses(projectPath: string): Promise<Record<string, SessionStatus>> {
+    try {
+      const result = await this.client.session.status({
+        query: { directory: projectPath },
+      });
+      return result.data || {};
+    } catch (error) {
+      console.error(`Failed to get session statuses:`, error);
+      return {};
+    }
+  }
+
+  /**
+   * Abort an active session.
+   * @param projectPath - Absolute path to the project directory
+   * @param sessionId - Session ID to abort
+   * @returns true if aborted successfully, false otherwise
+   */
+  async abortSession(projectPath: string, sessionId: string): Promise<boolean> {
+    try {
+      await this.client.session.abort({
+        path: { id: sessionId },
+        query: { directory: projectPath },
+      });
+      return true;
+    } catch (error) {
+      console.error(`Failed to abort session ${sessionId}:`, error);
+      return false;
+    }
+  }
+
+  /**
+   * Respond to a permission request.
+   * @param projectPath - Absolute path to the project directory
+   * @param sessionId - Session ID with the permission request
+   * @param permissionId - ID of the permission to respond to
+   * @param response - Response type: "once", "always", or "reject"
+   * @returns true if responded successfully, false otherwise
+   */
+  async respondToPermission(
+    projectPath: string,
+    sessionId: string,
+    permissionId: string,
+    response: "once" | "always" | "reject"
+  ): Promise<boolean> {
+    try {
+      await this.client.postSessionIdPermissionsPermissionId({
+        path: { id: sessionId, permissionID: permissionId },
+        query: { directory: projectPath },
+        body: { response },
+      });
+      return true;
+    } catch (error) {
+      console.error(`Failed to respond to permission ${permissionId}:`, error);
+      return false;
+    }
+  }
+
+  /**
+   * List all pending permission requests for a project.
+   * Note: This SDK version doesn't have a dedicated permissions list endpoint.
+   * Permissions are typically tracked via SSE events (EventPermissionUpdated).
+   * This method returns an empty array - use event subscription for real-time permission tracking.
+   * @param projectPath - Absolute path to the project directory
+   * @returns Empty array (use event subscription for permission tracking)
+   */
+  async listPendingPermissions(_projectPath: string): Promise<Permission[]> {
+    // The v1 SDK doesn't have a permission.list endpoint.
+    // Permissions are tracked via SSE events (EventPermissionUpdated, EventPermissionReplied).
+    // Consumers should subscribe to events to track pending permissions in real-time.
+    console.warn(
+      "listPendingPermissions: SDK v1 does not have a permissions list endpoint. " +
+        "Use event subscription (subscribeToEvents) to track pending permissions."
+    );
+    return [];
   }
 }
 

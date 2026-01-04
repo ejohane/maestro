@@ -6,8 +6,10 @@ import { useParams } from "next/navigation";
 import { mockEpics, mockSoloSessions } from "@/lib/data/mock";
 import { NewIssueDialog } from "@/components/new-issue-dialog";
 import { useProject, useProjectIssues, usePlanningSessions } from "@/lib/hooks/useProjects";
-import { PLANNING_LABEL } from "@/lib/constants";
-import { CompactSessionCard, CompactIssueCard, CompactEpicCard, CompactSwarmCard, CompactPlanningCard } from "@/components/compact-cards";
+import { useActiveSwarms } from "@/lib/hooks/useActiveSwarms";
+import { PLANNING_LABEL, SWARM_LABEL } from "@/lib/constants";
+import type { ActiveSwarm } from "@/lib/types/api";
+import { CompactSessionCard, CompactIssueCard, CompactEpicCard, CompactPlanningCard } from "@/components/compact-cards";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Skeleton } from "@/components/ui/skeleton";
 import { SidebarTrigger } from "@/components/ui/sidebar";
@@ -31,12 +33,25 @@ export default function ProjectOverviewPage() {
   const project = useProject(projectId);
   const { data: issues = [], isLoading: issuesLoading } = useProjectIssues(projectId);
   const { data: planningSessions = [], isLoading: planningLoading } = usePlanningSessions(projectId);
+  const { swarms: activeSwarms, isLoading: swarmsLoading } = useActiveSwarms(projectId);
   const [isNewIssueDialogOpen, setIsNewIssueDialogOpen] = useState(false);
 
-  // Filter out issues that are in planning
-  // These appear in the Planning column/section instead
+  // Helper functions for label checking
+  const hasPlanningLabel = (labels: { name: string }[]) =>
+    labels?.some((label) => label.name === PLANNING_LABEL);
+  const hasSwarmLabel = (labels: { name: string }[]) =>
+    labels?.some((label) => label.name === SWARM_LABEL);
+
+  // Issues column - exclude those with planning OR swarm labels
   const openIssues = issues.filter(
-    (issue) => !issue.labels?.some(label => label.name === PLANNING_LABEL)
+    (issue) => !hasPlanningLabel(issue.labels) && !hasSwarmLabel(issue.labels)
+  );
+
+  // Planning column - has planning but NOT swarm
+  // Note: The Planning column displays planningSessions from API, this filter is
+  // available for future use when planning sessions need issue-based filtering
+  const _planningIssues = issues.filter(
+    (issue) => hasPlanningLabel(issue.labels) && !hasSwarmLabel(issue.labels)
   );
 
   // Loading state
@@ -58,10 +73,7 @@ export default function ProjectOverviewPage() {
     );
   }
 
-  // Categorize epics for kanban columns
-  const activeSwarms = mockEpics.filter(
-    (e) => e.state === "in_progress" && e.subtasks.some((t) => t.assignedAgent)
-  );
+  // Categorize epics for kanban columns (completed still uses mock data for now)
   const completed = mockEpics.filter((e) => e.state === "closed");
 
   return (
@@ -164,15 +176,20 @@ export default function ProjectOverviewPage() {
                   <Zap className="h-4 w-4 text-[hsl(var(--success))]" />
                   <span className="font-medium">Active</span>
                   <span className="text-xs text-muted-foreground bg-secondary rounded-full px-2 py-0.5">
-                    {activeSwarms.length}
+                    {swarmsLoading ? "..." : activeSwarms.length}
                   </span>
                 </div>
               </AccordionTrigger>
               <AccordionContent>
                 <div className="space-y-2">
-                  {activeSwarms.length > 0 ? (
-                    activeSwarms.map((epic) => (
-                      <CompactSwarmCard key={epic.id} epic={epic} projectId={projectId} />
+                  {swarmsLoading ? (
+                    <div className="space-y-2">
+                      <Skeleton className="h-16 w-full" />
+                      <Skeleton className="h-16 w-full" />
+                    </div>
+                  ) : activeSwarms.length > 0 ? (
+                    activeSwarms.map((swarm) => (
+                      <CompactActiveSwarmCard key={swarm.issueNumber} swarm={swarm} projectId={projectId} />
                     ))
                   ) : (
                     <p className="text-sm text-muted-foreground text-center py-4">No active swarms</p>
@@ -253,10 +270,18 @@ export default function ProjectOverviewPage() {
               iconColor="text-[hsl(var(--success))]"
               count={activeSwarms.length}
               accentColor="bg-[hsl(var(--success))]"
+              isLoading={swarmsLoading}
             >
-              {activeSwarms.map((epic) => (
-                <SwarmCard key={epic.id} epic={epic} projectId={projectId} />
-              ))}
+              {activeSwarms.length > 0 ? (
+                activeSwarms.map((swarm) => (
+                  <ActiveSwarmCard key={swarm.issueNumber} swarm={swarm} projectId={projectId} />
+                ))
+              ) : (
+                <div className="p-4 text-center">
+                  <p className="text-sm text-muted-foreground">No active swarms</p>
+                  <p className="text-xs text-muted-foreground mt-1">Start a swarm from the Planning column</p>
+                </div>
+              )}
             </KanbanColumn>
 
             {/* Completed Column */}
@@ -463,8 +488,94 @@ function KanbanColumn({
   );
 }
 
-// Swarm Card (Active items with progress)
-function SwarmCard({ epic, projectId }: { epic: (typeof mockEpics)[0]; projectId: string }) {
+// Active Swarm Card (Desktop - for real swarm data)
+function ActiveSwarmCard({ swarm, projectId }: { swarm: ActiveSwarm; projectId: string }) {
+  const { progress, agents } = swarm;
+  const pct = progress.percentage;
+
+  return (
+    <Link
+      href={`/project/${projectId}/swarm/${swarm.issueNumber}`}
+      className="block p-3 rounded-md bg-card border border-border hover:border-primary/50 transition-colors group"
+    >
+      <div className="flex items-start gap-2 mb-2">
+        <span className="relative flex h-2 w-2 mt-1.5">
+          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[hsl(var(--success))] opacity-75"></span>
+          <span className="relative inline-flex rounded-full h-2 w-2 bg-[hsl(var(--success))]"></span>
+        </span>
+        <span className="font-medium text-sm flex-1">{swarm.issueTitle}</span>
+      </div>
+      
+      <div className="flex items-center gap-1.5 mb-2 ml-4">
+        <span className="text-xs text-muted-foreground font-mono">#{swarm.issueNumber}</span>
+      </div>
+
+      <div className="flex items-center gap-2 text-xs ml-4">
+        {agents.blocked > 0 && (
+          <span className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-status-warning status-warning font-medium">
+            <AlertCircle className="h-3 w-3" />
+            {agents.blocked}
+          </span>
+        )}
+        <span className="text-muted-foreground">{agents.running}/{agents.total} agents</span>
+      </div>
+
+      <div className="mt-3 ml-4">
+        <div className="flex items-center gap-2">
+          <div className="flex-1 h-1.5 bg-secondary rounded-full overflow-hidden">
+            <div 
+              className="h-full bg-[hsl(var(--success))] rounded-full transition-all" 
+              style={{ width: `${pct}%` }}
+            />
+          </div>
+          <span className="text-xs text-muted-foreground w-8 text-right">{pct}%</span>
+        </div>
+      </div>
+    </Link>
+  );
+}
+
+// Compact Active Swarm Card (Mobile - for real swarm data in accordions)
+function CompactActiveSwarmCard({ swarm, projectId }: { swarm: ActiveSwarm; projectId: string }) {
+  const { progress, agents } = swarm;
+  const pct = progress.percentage;
+
+  return (
+    <Link
+      href={`/project/${projectId}/swarm/${swarm.issueNumber}`}
+      className="flex items-center gap-3 p-3 rounded-md bg-card border border-border hover:bg-secondary/50 active:bg-secondary min-h-[44px]"
+    >
+      <div className="relative flex-shrink-0">
+        <span className="relative flex h-2 w-2">
+          <span className="animate-ping absolute h-full w-full rounded-full bg-[hsl(var(--success))] opacity-75" />
+          <span className="relative rounded-full h-2 w-2 bg-[hsl(var(--success))]" />
+        </span>
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-medium truncate">{swarm.issueTitle}</p>
+        <div className="flex items-center gap-2 mt-1">
+          <div className="flex-1 h-1 bg-secondary rounded-full">
+            <div
+              className="h-full bg-[hsl(var(--success))] rounded-full"
+              style={{ width: `${pct}%` }}
+            />
+          </div>
+          <span className="text-xs text-muted-foreground">{pct}%</span>
+          {agents.blocked > 0 && (
+            <span className="flex items-center gap-0.5 text-xs text-status-warning">
+              <AlertCircle className="h-3 w-3" />
+              {agents.blocked}
+            </span>
+          )}
+        </div>
+      </div>
+      <ChevronRight className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+    </Link>
+  );
+}
+
+// Swarm Card (legacy - for mock epic data, kept for potential future use)
+function _SwarmCard({ epic, projectId }: { epic: (typeof mockEpics)[0]; projectId: string }) {
   const done = epic.subtasks.filter((t) => t.status === "done").length;
   const total = epic.subtasks.length;
   const blocked = epic.subtasks.filter((t) => t.status === "blocked").length;
