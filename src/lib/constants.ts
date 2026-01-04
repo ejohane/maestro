@@ -64,4 +64,5 @@ export const SWARM_LABEL_COLOR = "28a745";
 /**
  * Description for the swarm label shown in GitHub label management.
  */
-export const SWARM_LABEL_DESCRIPTION = "Issue is being executed by Maestro swarm";
+export const SWARM_LABEL_DESCRIPTION =
+  "Issue is being executed by Maestro swarm";
