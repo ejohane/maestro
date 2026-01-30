@@ -181,30 +181,20 @@ program
         session.opencodeSessionId = opencodeSessionId;
         await writeSession(repoRoot, conversation.id, session);
       }
-      const rl = readline.createInterface({
-        input: process.stdin,
-        output: process.stdout,
-        terminal: true
-      });
-
-      const promptUser = (): Promise<string> =>
-        new Promise((resolve) => rl.question("maestro> ", resolve));
-
-      console.log("Type /exit to quit.");
-      while (true) {
-        const input = (await promptUser()).trim();
-        if (!input) {
-          continue;
+      const processInput = async (input: string): Promise<boolean> => {
+        const trimmed = input.trim();
+        if (!trimmed) {
+          return true;
         }
-        if (input === "/exit" || input === "/quit") {
-          break;
+        if (trimmed === "/exit" || trimmed === "/quit") {
+          return false;
         }
 
         const ts = nowIso();
         await appendTranscriptEntry(repoRoot, conversation.id, session.id, {
           ts,
           role: "user",
-          content: input,
+          content: trimmed,
           sessionId: session.id,
           conversationId: conversation.id
         });
@@ -214,7 +204,7 @@ program
         for await (const event of client.sendMessage({
           workspacePath: conversation.workspacePath,
           history,
-          message: input,
+          message: trimmed,
           model: session.model,
           sessionId: session.opencodeSessionId,
           sessionTitle: session.title ?? conversation.title
@@ -244,8 +234,40 @@ program
         }
         await updateSessionTimestamp(repoRoot, conversation.id, session);
         await updateConversationTimestamp(repoRoot, conversation);
+        return true;
+      };
+
+      if (process.stdin.isTTY) {
+        const rl = readline.createInterface({
+          input: process.stdin,
+          output: process.stdout,
+          terminal: true
+        });
+        const promptUser = (): Promise<string> =>
+          new Promise((resolve) => rl.question("maestro> ", resolve));
+
+        console.log("Type /exit to quit.");
+        while (true) {
+          const input = await promptUser();
+          const keepGoing = await processInput(input);
+          if (!keepGoing) {
+            break;
+          }
+        }
+        rl.close();
+      } else {
+        const rl = readline.createInterface({
+          input: process.stdin,
+          terminal: false
+        });
+        for await (const line of rl) {
+          const keepGoing = await processInput(line);
+          if (!keepGoing) {
+            break;
+          }
+        }
+        rl.close();
       }
-      rl.close();
     } catch (error) {
       exitWithError(error);
     }
