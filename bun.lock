@@ -1,0 +1,103 @@
+{
+  "lockfileVersion": 1,
+  "configVersion": 1,
+  "workspaces": {
+    "": {
+      "name": "maestro",
+      "devDependencies": {
+        "@types/node": "^20.14.10",
+        "turbo": "^2.0.11",
+        "typescript": "^5.6.3",
+      },
+    },
+    "apps/cli": {
+      "name": "@maestro/cli",
+      "version": "0.0.0",
+      "bin": {
+        "maestro": "./dist/index.js",
+      },
+      "dependencies": {
+        "@maestro/core": "0.0.0",
+        "@maestro/git": "0.0.0",
+        "@maestro/opencode": "0.0.0",
+        "@maestro/storage": "0.0.0",
+        "commander": "^12.1.0",
+      },
+    },
+    "apps/web": {
+      "name": "@maestro/web",
+      "version": "0.0.0",
+    },
+    "packages/config": {
+      "name": "@maestro/config",
+      "version": "0.0.0",
+    },
+    "packages/core": {
+      "name": "@maestro/core",
+      "version": "0.0.0",
+    },
+    "packages/git": {
+      "name": "@maestro/git",
+      "version": "0.0.0",
+    },
+    "packages/opencode": {
+      "name": "@maestro/opencode",
+      "version": "0.0.0",
+      "dependencies": {
+        "@opencode-ai/sdk": "^1.0.0",
+      },
+    },
+    "packages/storage": {
+      "name": "@maestro/storage",
+      "version": "0.0.0",
+      "dependencies": {
+        "@maestro/core": "0.0.0",
+      },
+    },
+    "packages/ui-kit": {
+      "name": "@maestro/ui-kit",
+      "version": "0.0.0",
+    },
+  },
+  "packages": {
+    "@maestro/cli": ["@maestro/cli@workspace:apps/cli"],
+
+    "@maestro/config": ["@maestro/config@workspace:packages/config"],
+
+    "@maestro/core": ["@maestro/core@workspace:packages/core"],
+
+    "@maestro/git": ["@maestro/git@workspace:packages/git"],
+
+    "@maestro/opencode": ["@maestro/opencode@workspace:packages/opencode"],
+
+    "@maestro/storage": ["@maestro/storage@workspace:packages/storage"],
+
+    "@maestro/ui-kit": ["@maestro/ui-kit@workspace:packages/ui-kit"],
+
+    "@maestro/web": ["@maestro/web@workspace:apps/web"],
+
+    "@opencode-ai/sdk": ["@opencode-ai/sdk@1.1.44", "", {}, "sha512-coQgtSSCbY46/GY+M5zG0rChiLSJWSjPERRt5L1hbjvDWvErelVV0ILPbd1+3CwJLFTedBYgotby2TcO8U0IfQ=="],
+
+    "@types/node": ["@types/node@20.19.30", "", { "dependencies": { "undici-types": "~6.21.0" } }, "sha512-WJtwWJu7UdlvzEAUm484QNg5eAoq5QR08KDNx7g45Usrs2NtOPiX8ugDqmKdXkyL03rBqU5dYNYVQetEpBHq2g=="],
+
+    "commander": ["commander@12.1.0", "", {}, "sha512-Vw8qHK3bZM9y/P10u3Vib8o/DdkvA2OtPtZvD871QKjy74Wj1WSKFILMPRPSdUSx5RFK1arlJzEtA4PkFgnbuA=="],
+
+    "turbo": ["turbo@2.8.0", "", { "optionalDependencies": { "turbo-darwin-64": "2.8.0", "turbo-darwin-arm64": "2.8.0", "turbo-linux-64": "2.8.0", "turbo-linux-arm64": "2.8.0", "turbo-windows-64": "2.8.0", "turbo-windows-arm64": "2.8.0" }, "bin": { "turbo": "bin/turbo" } }, "sha512-hYbxnLEdvJF+DLALS+Ia+PbfNtn0sDP0hH2u9AFoskSUDmcVHSrtwHpzdX94MrRJKo9D9tYxY3MyP20gnlrWyA=="],
+
+    "turbo-darwin-64": ["turbo-darwin-64@2.8.0", "", { "os": "darwin", "cpu": "x64" }, "sha512-N7f4PYqz25yk8c5kituk09bJ89tE4wPPqKXgYccT6nbEQnGnrdvlyCHLyqViNObTgjjrddqjb1hmDkv7VcxE0g=="],
+
+    "turbo-darwin-arm64": ["turbo-darwin-arm64@2.8.0", "", { "os": "darwin", "cpu": "arm64" }, "sha512-eVzejaP5fn51gmJAPW68U6mSjFaAZ26rPiE36mMdk+tMC4XBGmJHT/fIgrhcrXMvINCl27RF8VmguRe+MBlSuQ=="],
+
+    "turbo-linux-64": ["turbo-linux-64@2.8.0", "", { "os": "linux", "cpu": "x64" }, "sha512-ILR45zviYae3icf4cmUISdj8X17ybNcMh3Ms4cRdJF5sS50qDDTv8qeWqO/lPeHsu6r43gVWDofbDZYVuXYL7Q=="],
+
+    "turbo-linux-arm64": ["turbo-linux-arm64@2.8.0", "", { "os": "linux", "cpu": "arm64" }, "sha512-z9pUa8ENFuHmadPfjEYMRWlXO82t1F/XBDx2XTg+cWWRZHf85FnEB6D4ForJn/GoKEEvwdPhFLzvvhOssom2ug=="],
+
+    "turbo-windows-64": ["turbo-windows-64@2.8.0", "", { "os": "win32", "cpu": "x64" }, "sha512-J6juRSRjmSErEqJCv7nVIq2DgZ2NHXqyeV8NQTFSyIvrThKiWe7FDOO6oYpuR06+C1NW82aoN4qQt4/gYvz25w=="],
+
+    "turbo-windows-arm64": ["turbo-windows-arm64@2.8.0", "", { "os": "win32", "cpu": "arm64" }, "sha512-qarBZvCu6uka35739TS+y/3CBU3zScrVAfohAkKHG+So+93Wn+5tKArs8HrO2fuTaGou8fMIeTV7V5NgzCVkSQ=="],
+
+    "typescript": ["typescript@5.9.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw=="],
+
+    "undici-types": ["undici-types@6.21.0", "", {}, "sha512-iwDZqg0QAGrg9Rav5H4n0M64c3mkR59cJ6wQp+7C4nI0gsmExaedaYLNO44eT4AtBBwjbTiGPMlt2Md0T9H9JQ=="],
+  }
+}

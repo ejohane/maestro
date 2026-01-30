@@ -1,0 +1,19 @@
+{
+  "name": "@maestro/cli",
+  "version": "0.0.0",
+  "type": "module",
+  "bin": {
+    "maestro": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "bun tsc -p tsconfig.json",
+    "dev": "bun run src/index.ts"
+  },
+  "dependencies": {
+    "@maestro/core": "0.0.0",
+    "@maestro/git": "0.0.0",
+    "@maestro/opencode": "0.0.0",
+    "@maestro/storage": "0.0.0",
+    "commander": "^12.1.0"
+  }
+}

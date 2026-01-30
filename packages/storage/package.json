@@ -1,0 +1,19 @@
+{
+  "name": "@maestro/storage",
+  "version": "0.0.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "bun tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@maestro/core": "0.0.0"
+  }
+}
