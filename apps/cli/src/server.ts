@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import {
   Conversation,
+  GitProvider,
   Project,
   Session,
   createProject,
@@ -135,6 +136,107 @@ const buildSessionTitle = (options: {
   }
   const timestamp = formatTimestamp(options.createdAt);
   return `${timestamp} - ${options.model ?? "default"}`;
+};
+
+const normalizeGitProvider = (value?: string | null): GitProvider | undefined => {
+  const normalized = value?.trim().toLowerCase();
+  if (normalized === "github" || normalized === "gitlab") {
+    return normalized as GitProvider;
+  }
+  return undefined;
+};
+
+const normalizeRepoUrl = (value?: string | null): string | undefined => {
+  const trimmed = value?.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+  let candidate = trimmed;
+  if (candidate.startsWith("git+")) {
+    candidate = candidate.slice(4);
+  }
+  if (candidate.startsWith("github:")) {
+    return `https://github.com/${candidate.slice("github:".length)}`.replace(/\.git$/, "");
+  }
+  if (candidate.startsWith("gitlab:")) {
+    return `https://gitlab.com/${candidate.slice("gitlab:".length)}`.replace(/\.git$/, "");
+  }
+  const sshMatch = candidate.match(/^git@([^:]+):(.+)$/);
+  if (sshMatch) {
+    const host = sshMatch[1];
+    const repoPath = sshMatch[2].replace(/\.git$/, "");
+    return `https://${host}/${repoPath}`;
+  }
+  try {
+    const parsed = new URL(candidate);
+    if (parsed.protocol === "ssh:") {
+      const repoPath = parsed.pathname.replace(/^\/+/, "").replace(/\.git$/, "");
+      return `https://${parsed.hostname}/${repoPath}`;
+    }
+    return candidate.replace(/\.git$/, "");
+  } catch {
+    return candidate.replace(/\.git$/, "");
+  }
+};
+
+const inferGitProvider = (repoUrl?: string): GitProvider | undefined => {
+  if (!repoUrl) {
+    return undefined;
+  }
+  const lower = repoUrl.toLowerCase();
+  try {
+    const parsed = new URL(repoUrl);
+    const host = parsed.hostname.toLowerCase();
+    if (host.includes("github")) {
+      return "github";
+    }
+    if (host.includes("gitlab")) {
+      return "gitlab";
+    }
+  } catch {
+    if (lower.includes("github.com")) {
+      return "github";
+    }
+    if (lower.includes("gitlab.com")) {
+      return "gitlab";
+    }
+  }
+  return undefined;
+};
+
+const readPackageJson = async (repoRoot: string): Promise<Record<string, unknown> | null> => {
+  try {
+    const raw = await fs.readFile(path.join(repoRoot, "package.json"), "utf-8");
+    return JSON.parse(raw) as Record<string, unknown>;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return null;
+    }
+    throw error;
+  }
+};
+
+const detectRepoInfoFromPackageJson = async (
+  repoRoot: string
+): Promise<{ repoUrl?: string; gitProvider?: GitProvider }> => {
+  const pkg = await readPackageJson(repoRoot);
+  if (!pkg) {
+    return {};
+  }
+  const repository = pkg.repository;
+  const bugs = pkg.bugs as { url?: string } | undefined;
+  const homepage = typeof pkg.homepage === "string" ? pkg.homepage : undefined;
+  let repoCandidate: string | undefined;
+  if (typeof repository === "string") {
+    repoCandidate = repository;
+  } else if (repository && typeof repository === "object") {
+    const repoObj = repository as { url?: string };
+    repoCandidate = repoObj.url;
+  }
+  repoCandidate = repoCandidate ?? bugs?.url ?? homepage;
+  const repoUrl = normalizeRepoUrl(repoCandidate ?? undefined);
+  const gitProvider = inferGitProvider(repoUrl);
+  return { repoUrl, gitProvider };
 };
 
 const parseSegments = (pathname: string): string[] => {
@@ -282,15 +384,25 @@ const handleApi = async (req: IncomingMessage, res: ServerResponse, repoRoot: st
 
   if (req.method === "POST" && segments.length === 2 && segments[1] === "projects") {
     try {
-      const body = await readJsonBody<{ name?: string; defaultBranch?: string; repoPath?: string }>(
-        req
-      );
+      const body = await readJsonBody<{
+        name?: string;
+        defaultBranch?: string;
+        repoPath?: string;
+        gitProvider?: string | null;
+        repoUrl?: string | null;
+      }>(req);
       const name = body.name?.trim();
       if (!name) {
         sendBadRequest(res, "Project name is required.");
         return;
       }
       const defaultBranch = body.defaultBranch?.trim() || "main";
+      const repoUrl = normalizeRepoUrl(body.repoUrl);
+      const providedProvider = normalizeGitProvider(body.gitProvider ?? undefined);
+      if (body.gitProvider && !providedProvider) {
+        sendBadRequest(res, "Git provider must be github or gitlab.");
+        return;
+      }
       let targetRoot = requestRepoRoot;
       if (body.repoPath) {
         try {
@@ -300,10 +412,15 @@ const handleApi = async (req: IncomingMessage, res: ServerResponse, repoRoot: st
           return;
         }
       }
+      const detected = repoUrl ? {} : await detectRepoInfoFromPackageJson(targetRoot);
+      const resolvedRepoUrl = repoUrl ?? detected.repoUrl;
+      const gitProvider = providedProvider ?? inferGitProvider(resolvedRepoUrl) ?? detected.gitProvider;
       const project = createProject({
         name,
         repoPath: targetRoot,
-        defaultBranch
+        defaultBranch,
+        gitProvider,
+        repoUrl: resolvedRepoUrl
       });
       await writeProject(targetRoot, project);
       sendJson(res, 201, project);
@@ -320,9 +437,16 @@ const handleApi = async (req: IncomingMessage, res: ServerResponse, repoRoot: st
 
   if (req.method === "POST" && segments.length === 3 && segments[1] === "projects") {
     try {
-      const body = await readJsonBody<{ icon?: string | null }>(req);
-      if (!Object.prototype.hasOwnProperty.call(body, "icon")) {
-        sendBadRequest(res, "Project icon is required.");
+      const body = await readJsonBody<{
+        icon?: string | null;
+        repoUrl?: string | null;
+        gitProvider?: string | null;
+      }>(req);
+      const hasIcon = Object.prototype.hasOwnProperty.call(body, "icon");
+      const hasRepoUrl = Object.prototype.hasOwnProperty.call(body, "repoUrl");
+      const hasGitProvider = Object.prototype.hasOwnProperty.call(body, "gitProvider");
+      if (!hasIcon && !hasRepoUrl && !hasGitProvider) {
+        sendBadRequest(res, "Project update requires icon, repoUrl, or gitProvider.");
         return;
       }
       let project: Project;
@@ -335,12 +459,88 @@ const handleApi = async (req: IncomingMessage, res: ServerResponse, repoRoot: st
         }
         throw error;
       }
+      let updated = false;
 
-      const trimmedIcon = typeof body.icon === "string" ? body.icon.trim() : "";
-      project.icon = trimmedIcon || undefined;
+      if (hasIcon) {
+        const trimmedIcon = typeof body.icon === "string" ? body.icon.trim() : "";
+        project.icon = trimmedIcon || undefined;
+        updated = true;
+      }
+
+      if (hasRepoUrl) {
+        const repoUrl = normalizeRepoUrl(body.repoUrl ?? null);
+        project.repoUrl = repoUrl;
+        if (!repoUrl && !hasGitProvider) {
+          project.gitProvider = undefined;
+        }
+        updated = true;
+      }
+
+      if (hasGitProvider) {
+        const provider = normalizeGitProvider(body.gitProvider ?? undefined);
+        if (body.gitProvider && !provider) {
+          sendBadRequest(res, "Git provider must be github or gitlab.");
+          return;
+        }
+        project.gitProvider = provider;
+        updated = true;
+      } else if (hasRepoUrl) {
+        const inferred = inferGitProvider(project.repoUrl);
+        if (inferred) {
+          project.gitProvider = inferred;
+          updated = true;
+        }
+      }
+
+      if (updated) {
+        project.updatedAt = nowIso();
+        await writeProject(requestRepoRoot, project);
+      }
+      sendJson(res, 200, project);
+      return;
+    } catch (error) {
+      if (error instanceof SyntaxError) {
+        sendBadRequest(res, "Invalid JSON body.");
+        return;
+      }
+      sendError(res, error);
+      return;
+    }
+  }
+
+  if (
+    req.method === "POST" &&
+    segments.length === 4 &&
+    segments[1] === "projects" &&
+    segments[3] === "detect-repo"
+  ) {
+    try {
+      let project: Project;
+      try {
+        project = await readProjectById(requestRepoRoot, segments[2]);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+          sendNotFound(res);
+          return;
+        }
+        throw error;
+      }
+      const detected = await detectRepoInfoFromPackageJson(project.repoPath);
+      if (!detected.repoUrl && !detected.gitProvider) {
+        sendBadRequest(res, "No repository metadata found in package.json.");
+        return;
+      }
+      if (detected.repoUrl) {
+        project.repoUrl = detected.repoUrl;
+      }
+      if (detected.gitProvider) {
+        project.gitProvider = detected.gitProvider;
+      } else if (detected.repoUrl) {
+        project.gitProvider = inferGitProvider(detected.repoUrl) ?? project.gitProvider;
+      }
       project.updatedAt = nowIso();
       await writeProject(requestRepoRoot, project);
-      sendJson(res, 200, project);
+      sendJson(res, 200, { project, detected: true });
       return;
     } catch (error) {
       if (error instanceof SyntaxError) {

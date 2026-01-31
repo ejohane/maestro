@@ -1,4 +1,5 @@
 import * as React from "react"
+import { Moon, Sun } from "lucide-react"
 
 import { AppSidebar } from "./components/app-sidebar"
 import {
@@ -26,6 +27,7 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from "./components/ui/breadcrumb"
+import { Badge } from "./components/ui/badge"
 import { Button } from "./components/ui/button"
 import {
   Card,
@@ -43,6 +45,9 @@ import {
   SidebarRail,
   SidebarTrigger,
 } from "./components/ui/sidebar"
+import { useTheme } from "./hooks/use-theme"
+
+type GitProvider = "github" | "gitlab"
 
 type ApiProject = {
   id: string
@@ -50,6 +55,8 @@ type ApiProject = {
   icon?: string
   repoPath: string
   defaultBranch: string
+  gitProvider?: GitProvider
+  repoUrl?: string
   createdAt: string
   updatedAt: string
 }
@@ -101,6 +108,8 @@ type Project = {
   icon?: string
   repoPath: string
   defaultBranch: string
+  gitProvider?: GitProvider
+  repoUrl?: string
   createdAt: string
   updatedAt: string
   workspaces: Workspace[]
@@ -114,6 +123,7 @@ type ChatMessage = {
 }
 
 const App = () => {
+  const { theme, toggleTheme } = useTheme()
   const [projects, setProjects] = React.useState<Project[]>([])
   const [isLoading, setIsLoading] = React.useState(true)
   const [error, setError] = React.useState<string | null>(null)
@@ -129,6 +139,8 @@ const App = () => {
     name: "",
     repoPath: "",
     defaultBranch: "main",
+    gitProvider: "",
+    repoUrl: "",
   })
   const [isCreatingProject, setIsCreatingProject] = React.useState(false)
   const [isSelectingDirectory, setIsSelectingDirectory] = React.useState(false)
@@ -148,6 +160,14 @@ const App = () => {
   const [projectIconDraft, setProjectIconDraft] = React.useState("")
   const [isUpdatingProjectIcon, setIsUpdatingProjectIcon] = React.useState(false)
   const [projectIconError, setProjectIconError] = React.useState<string | null>(null)
+  const [projectRepoForm, setProjectRepoForm] = React.useState({
+    repoUrl: "",
+    gitProvider: "",
+  })
+  const [isUpdatingProjectRepo, setIsUpdatingProjectRepo] = React.useState(false)
+  const [projectRepoError, setProjectRepoError] = React.useState<string | null>(null)
+  const [isDetectingRepo, setIsDetectingRepo] = React.useState(false)
+  const [detectRepoError, setDetectRepoError] = React.useState<string | null>(null)
   const [isDeletingWorkspace, setIsDeletingWorkspace] = React.useState(false)
   const [deleteWorkspaceError, setDeleteWorkspaceError] = React.useState<string | null>(null)
   const [messages, setMessages] = React.useState<ChatMessage[]>([])
@@ -229,6 +249,8 @@ const App = () => {
           icon: project.icon,
           repoPath: project.repoPath,
           defaultBranch: project.defaultBranch,
+          gitProvider: project.gitProvider,
+          repoUrl: project.repoUrl,
           createdAt: project.createdAt,
           updatedAt: project.updatedAt,
           workspaces,
@@ -384,6 +406,15 @@ const App = () => {
   }, [selectedProject])
 
   React.useEffect(() => {
+    setProjectRepoForm({
+      repoUrl: selectedProject?.repoUrl ?? "",
+      gitProvider: selectedProject?.gitProvider ?? "",
+    })
+    setProjectRepoError(null)
+    setDetectRepoError(null)
+  }, [selectedProject])
+
+  React.useEffect(() => {
     setDeleteWorkspaceError(null)
   }, [selectedWorkspaceId])
 
@@ -424,9 +455,16 @@ const App = () => {
   }
 
   const handleProjectFormChange = (field: keyof typeof projectForm) => {
-    return (event: React.ChangeEvent<HTMLInputElement>) => {
+    return (event: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
       const value = event.target.value
       setProjectForm((prev) => ({ ...prev, [field]: value }))
+    }
+  }
+
+  const handleProjectRepoFormChange = (field: keyof typeof projectRepoForm) => {
+    return (event: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+      const value = event.target.value
+      setProjectRepoForm((prev) => ({ ...prev, [field]: value }))
     }
   }
 
@@ -498,6 +536,8 @@ const App = () => {
           name,
           defaultBranch,
           repoPath: repoPath || undefined,
+          gitProvider: projectForm.gitProvider || undefined,
+          repoUrl: projectForm.repoUrl.trim() || undefined,
         }),
       })
       if (!response.ok) {
@@ -513,7 +553,13 @@ const App = () => {
         throw new Error(message)
       }
       const createdProject = (await response.json()) as ApiProject
-      setProjectForm({ name: "", repoPath: "", defaultBranch: defaultBranch })
+      setProjectForm({
+        name: "",
+        repoPath: "",
+        defaultBranch: defaultBranch,
+        gitProvider: "",
+        repoUrl: "",
+      })
       setIsProjectsView(false)
       setSelectedProjectId(createdProject.id)
       setSelectedWorkspaceId(null)
@@ -605,6 +651,76 @@ const App = () => {
       )
     } finally {
       setIsUpdatingProjectIcon(false)
+    }
+  }
+
+  const handleUpdateProjectRepo = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!selectedProject) {
+      return
+    }
+    setIsUpdatingProjectRepo(true)
+    setProjectRepoError(null)
+    try {
+      const response = await fetch(`/api/projects/${selectedProject.id}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          repoUrl: projectRepoForm.repoUrl.trim() || null,
+          gitProvider: projectRepoForm.gitProvider || undefined,
+        }),
+      })
+      if (!response.ok) {
+        let message = "Failed to update repository settings."
+        try {
+          const payload = (await response.json()) as { error?: string }
+          if (payload.error) {
+            message = payload.error
+          }
+        } catch {
+          // Ignore parsing errors
+        }
+        throw new Error(message)
+      }
+      await loadProjects()
+    } catch (err) {
+      setProjectRepoError(
+        err instanceof Error ? err.message : "Failed to update repository settings."
+      )
+    } finally {
+      setIsUpdatingProjectRepo(false)
+    }
+  }
+
+  const handleDetectProjectRepo = async () => {
+    if (!selectedProject) {
+      return
+    }
+    setIsDetectingRepo(true)
+    setDetectRepoError(null)
+    try {
+      const response = await fetch(`/api/projects/${selectedProject.id}/detect-repo`, {
+        method: "POST",
+      })
+      if (!response.ok) {
+        let message = "Failed to detect repository metadata."
+        try {
+          const payload = (await response.json()) as { error?: string }
+          if (payload.error) {
+            message = payload.error
+          }
+        } catch {
+          // Ignore parsing errors
+        }
+        throw new Error(message)
+      }
+      await loadProjects()
+    } catch (err) {
+      setDetectRepoError(
+        err instanceof Error ? err.message : "Failed to detect repository metadata."
+      )
+    } finally {
+      setIsDetectingRepo(false)
     }
   }
 
@@ -942,6 +1058,11 @@ const App = () => {
   const projectIconDirty = projectIconDraft.trim() !== projectIconValue
   const promptDisabled =
     isChatStreaming || !selectedWorkspace || !selectedChat || isTranscriptLoading
+  const projectRepoUrlValue = selectedProject?.repoUrl?.trim() ?? ""
+  const projectRepoProviderValue = selectedProject?.gitProvider ?? ""
+  const projectRepoDirty =
+    projectRepoForm.repoUrl.trim() !== projectRepoUrlValue ||
+    projectRepoForm.gitProvider !== projectRepoProviderValue
 
   const viewLabel = isChatView
     ? "Chat Session"
@@ -963,7 +1084,7 @@ const App = () => {
       : selectedWorkspace
         ? "Workspace activity, members, and recent sessions."
         : selectedProject
-          ? `Repo: ${selectedProject.repoPath}`
+          ? `Repo: ${selectedProject.repoUrl?.trim() || selectedProject.repoPath}`
           : isLoading
             ? "Fetching projects, workspaces, and sessions."
             : error
@@ -992,6 +1113,11 @@ const App = () => {
             ? selectedProject?.workspaces.map((workspace) => workspace.name) ?? []
             : projects.map((project) => project.name)
   const showWorkspaceCreator = Boolean(isProjectView && selectedProject)
+  const projectRepoLabel = selectedProject?.repoUrl?.trim() || selectedProject?.repoPath
+  const projectRepoHref =
+    selectedProject?.repoUrl?.trim() && selectedProject.repoUrl.trim().startsWith("http")
+      ? selectedProject.repoUrl.trim()
+      : null
   return (
     <SidebarProvider>
       <AppSidebar
@@ -1080,6 +1206,19 @@ const App = () => {
               ) : null}
             </BreadcrumbList>
           </Breadcrumb>
+          <div className="ml-auto flex items-center gap-2">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              onClick={toggleTheme}
+              aria-label="Toggle dark mode"
+              title="Toggle dark mode"
+            >
+              {theme === "dark" ? <Sun /> : <Moon />}
+              <span className="sr-only">Toggle dark mode</span>
+            </Button>
+          </div>
         </header>
         <div className="flex flex-1 flex-col gap-4 p-6">
           <div className="rounded-xl border bg-card p-6 shadow-sm">
@@ -1097,6 +1236,28 @@ const App = () => {
             <div className="mt-2 max-w-2xl text-sm text-muted-foreground">
               {viewDescription}
             </div>
+            {isProjectView && selectedProject ? (
+              <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
+                <span className="text-muted-foreground">Repository</span>
+                {projectRepoHref ? (
+                  <a
+                    className="font-medium text-primary hover:underline"
+                    href={projectRepoHref}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Open repo
+                  </a>
+                ) : (
+                  <span className="text-foreground">{projectRepoLabel}</span>
+                )}
+                {selectedProject.gitProvider ? (
+                  <Badge variant="secondary">
+                    {selectedProject.gitProvider === "github" ? "GitHub" : "GitLab"}
+                  </Badge>
+                ) : null}
+              </div>
+            ) : null}
             {isWorkspaceView ? (
               <div className="mt-4 flex flex-wrap items-center gap-3">
                 <Button
@@ -1145,6 +1306,30 @@ const App = () => {
                         onChange={handleProjectFormChange("repoPath")}
                         placeholder="/path/to/repo (optional)"
                       />
+                    </div>
+                    <div className="grid gap-2">
+                      <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                        Repo URL
+                      </label>
+                      <Input
+                        value={projectForm.repoUrl}
+                        onChange={handleProjectFormChange("repoUrl")}
+                        placeholder="https://github.com/org/repo (optional)"
+                      />
+                    </div>
+                    <div className="grid gap-2">
+                      <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                        Git provider
+                      </label>
+                      <select
+                        value={projectForm.gitProvider}
+                        onChange={handleProjectFormChange("gitProvider")}
+                        className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-base ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 md:text-sm"
+                      >
+                        <option value="">Auto-detect</option>
+                        <option value="github">GitHub</option>
+                        <option value="gitlab">GitLab</option>
+                      </select>
                     </div>
                     <div className="grid gap-2">
                       <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
@@ -1206,7 +1391,7 @@ const App = () => {
                             <span>{project.name}</span>
                           </CardTitle>
                           <CardDescription className="truncate">
-                            {project.repoPath}
+                            {project.repoUrl?.trim() || project.repoPath}
                           </CardDescription>
                         </CardHeader>
                         <CardContent className="grid gap-2 text-sm text-muted-foreground">
@@ -1313,6 +1498,81 @@ const App = () => {
                         variant="outline"
                         onClick={() => setProjectIconDraft(projectIconValue)}
                         disabled={!projectIconDirty || isUpdatingProjectIcon}
+                      >
+                        Reset
+                      </Button>
+                    </CardFooter>
+                  </form>
+                </Card>
+                <Card>
+                  <form onSubmit={handleUpdateProjectRepo}>
+                    <CardHeader>
+                      <CardTitle>Repository settings</CardTitle>
+                      <CardDescription>
+                        Link this project to a GitHub or GitLab repository.
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent className="grid gap-3">
+                      <div className="grid gap-2">
+                        <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                          Repo URL
+                        </label>
+                        <Input
+                          value={projectRepoForm.repoUrl}
+                          onChange={handleProjectRepoFormChange("repoUrl")}
+                          placeholder="https://github.com/org/repo"
+                        />
+                      </div>
+                      <div className="grid gap-2">
+                        <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                          Git provider
+                        </label>
+                        <select
+                          value={projectRepoForm.gitProvider}
+                          onChange={handleProjectRepoFormChange("gitProvider")}
+                          className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-base ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 md:text-sm"
+                        >
+                          <option value="">Auto-detect</option>
+                          <option value="github">GitHub</option>
+                          <option value="gitlab">GitLab</option>
+                        </select>
+                      </div>
+                      {projectRepoError ? (
+                        <div className="rounded-md border border-destructive/50 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+                          {projectRepoError}
+                        </div>
+                      ) : null}
+                      {detectRepoError ? (
+                        <div className="rounded-md border border-destructive/50 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+                          {detectRepoError}
+                        </div>
+                      ) : null}
+                    </CardContent>
+                    <CardFooter className="flex flex-wrap items-center gap-3">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={handleDetectProjectRepo}
+                        disabled={isDetectingRepo || isUpdatingProjectRepo}
+                      >
+                        {isDetectingRepo ? "Detecting..." : "Detect from package.json"}
+                      </Button>
+                      <Button
+                        type="submit"
+                        disabled={!projectRepoDirty || isUpdatingProjectRepo}
+                      >
+                        {isUpdatingProjectRepo ? "Saving..." : "Save repo settings"}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        onClick={() =>
+                          setProjectRepoForm({
+                            repoUrl: projectRepoUrlValue,
+                            gitProvider: projectRepoProviderValue,
+                          })
+                        }
+                        disabled={!projectRepoDirty || isUpdatingProjectRepo}
                       >
                         Reset
                       </Button>
