@@ -1,11 +1,15 @@
 export type IdPrefix = "p" | "c" | "s";
 
+export type GitProvider = "github" | "gitlab";
+
 export interface Project {
   id: string;
   name: string;
   icon?: string;
   repoPath: string;
   defaultBranch: string;
+  gitProvider?: GitProvider;
+  repoUrl?: string;
   createdAt: string;
   updatedAt: string;
 }
