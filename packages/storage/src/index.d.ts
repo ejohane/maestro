@@ -10,7 +10,9 @@ export declare const getMaestroPaths: (repoRoot: string) => MaestroPaths;
 export declare const ensureMaestroRoot: (repoRoot: string) => Promise<MaestroPaths>;
 export declare const writeProject: (repoRoot: string, project: Project) => Promise<void>;
 export declare const readProjectById: (repoRoot: string, projectId: string) => Promise<Project>;
-export declare const listProjects: (repoRoot: string) => Promise<Project[]>;
+export declare const listProjects: (repoRoot: string, options?: {
+    includeAll?: boolean;
+}) => Promise<Project[]>;
 export declare const findProject: (repoRoot: string, nameOrId: string) => Promise<Project | undefined>;
 export declare const writeConversation: (repoRoot: string, conversation: Conversation) => Promise<void>;
 export declare const readConversation: (repoRoot: string, conversationId: string) => Promise<Conversation>;

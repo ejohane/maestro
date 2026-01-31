@@ -1,5 +1,6 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import os from "node:os";
 import {
   Conversation,
   CurrentContext,
@@ -16,8 +17,8 @@ export interface MaestroPaths {
   currentFile: string;
 }
 
-export const getMaestroPaths = (repoRoot: string): MaestroPaths => {
-  const root = path.join(repoRoot, ".maestro");
+export const getMaestroPaths = (_repoRoot: string): MaestroPaths => {
+  const root = path.join(os.homedir(), ".maestro");
   return {
     root,
     projectsDir: path.join(root, "projects"),
@@ -60,7 +61,10 @@ export const readProjectById = async (repoRoot: string, projectId: string): Prom
   return readJson<Project>(path.join(projectsDir, `${projectId}.json`));
 };
 
-export const listProjects = async (repoRoot: string): Promise<Project[]> => {
+export const listProjects = async (
+  repoRoot: string,
+  options?: { includeAll?: boolean }
+): Promise<Project[]> => {
   const { projectsDir } = getMaestroPaths(repoRoot);
   try {
     const entries = await fs.readdir(projectsDir);
@@ -69,7 +73,10 @@ export const listProjects = async (repoRoot: string): Promise<Project[]> => {
         .filter((entry) => entry.endsWith(".json"))
         .map((entry) => readJson<Project>(path.join(projectsDir, entry)))
     );
-    return projects;
+    if (options?.includeAll) {
+      return projects;
+    }
+    return projects.filter((project) => project.repoPath === repoRoot);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
       return [];
@@ -271,6 +278,24 @@ export const readTranscriptHistory = async (
   }
 };
 
+export const readTranscriptEntries = async (
+  repoRoot: string,
+  conversationId: string,
+  sessionId: string
+): Promise<unknown[]> => {
+  const filePath = getTranscriptPath(repoRoot, conversationId, sessionId);
+  return readNdjsonFile(filePath);
+};
+
+export const readEventEntries = async (
+  repoRoot: string,
+  conversationId: string,
+  sessionId: string
+): Promise<unknown[]> => {
+  const filePath = getEventsPath(repoRoot, conversationId, sessionId);
+  return readNdjsonFile(filePath);
+};
+
 const getTranscriptPath = (repoRoot: string, conversationId: string, sessionId: string): string => {
   const { conversationsDir } = getMaestroPaths(repoRoot);
   return path.join(conversationsDir, conversationId, "sessions", sessionId, "transcript.ndjson");
@@ -306,5 +331,24 @@ const ensureEvents = async (
     await fs.access(filePath);
   } catch {
     await fs.writeFile(filePath, "", "utf-8");
+  }
+};
+
+const readNdjsonFile = async (filePath: string): Promise<unknown[]> => {
+  try {
+    const raw = await fs.readFile(filePath, "utf-8");
+    if (!raw.trim()) {
+      return [];
+    }
+    return raw
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line) => JSON.parse(line));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return [];
+    }
+    throw error;
   }
 };

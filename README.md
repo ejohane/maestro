@@ -1,6 +1,6 @@
 # Maestro
 
-Maestro is a workspace-aware CLI for running AI-assisted coding sessions against local git repositories. It keeps track of projects, conversations, and sessions, creates isolated git worktrees per conversation, and stores session history and event streams alongside your repo in a `.maestro` directory.
+Maestro is a workspace-aware CLI for running AI-assisted coding sessions against local git repositories. It keeps track of projects, conversations, and sessions, creates isolated git worktrees per conversation, and stores session history and event streams in `~/.maestro`.
 
 This repo is an early MVP that wires together:
 
@@ -26,7 +26,7 @@ This repo is an early MVP that wires together:
 - `packages/core` - Shared types + ID/time helpers.
 - `packages/git` - Git helpers (repo discovery, worktrees, stashing).
 - `packages/opencode` - OpenCode SDK client wrapper.
-- `packages/storage` - File-based storage in `.maestro`.
+- `packages/storage` - File-based storage in `~/.maestro`.
 - `packages/ui-kit` - Placeholder for shared UI components.
 - `packages/config` - Placeholder for shared configuration.
 
@@ -44,10 +44,10 @@ Each object is timestamped (`createdAt`, `updatedAt`) and uses a short prefixed 
 
 ### Storage layout
 
-Data is stored inside the target repo under `.maestro`:
+Data is stored in `~/.maestro`:
 
 ```
-.maestro/
+~/.maestro/
   current.json
   projects/
     p_XXXX.json
@@ -78,7 +78,7 @@ When starting a conversation, the CLI:
 2. Optionally stashes dirty changes (`--stash`).
 3. Resolves a base ref (`origin/<defaultBranch>` if present, else the local default branch).
 4. Creates a branch named `conv/<conversationId>` at the base SHA.
-5. Adds a git worktree at `.maestro/workspaces/<conversationId>`.
+5. Adds a git worktree at `~/.maestro/workspaces/<conversationId>`.
 
 This produces isolated working directories per conversation while keeping the main repo clean.
 
@@ -154,6 +154,23 @@ Switch the current conversation:
 maestro use <conversationId>
 ```
 
+### Web UI (local)
+
+Serve the local web UI:
+
+```
+bun run --cwd apps/web build
+maestro serve
+```
+
+The UI runs locally and reads from `~/.maestro`.
+
+For UI development (web + API server):
+
+```
+bun run dev
+```
+
 ## Environment variables
 
 - `MAESTRO_MODEL` - Default model ID used by the session.
@@ -186,9 +203,10 @@ Pass CLI arguments after `--`:
 bun run apps/cli/src/index.ts -- --help
 ```
 
-You can also use the app-level dev script:
+You can also use the app-level dev scripts:
 
 ```
+bun run --cwd apps/cli cli
 bun run --cwd apps/cli dev
 ```
 

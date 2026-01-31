@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { promises as fs } from "node:fs";
 import { promisify } from "node:util";
 import path from "node:path";
+import os from "node:os";
 
 const execFileAsync = promisify(execFile);
 
@@ -123,7 +124,7 @@ export const prepareWorkspace = async (options: {
 
   const branch = `conv/${conversationId}`;
   await createBranch(repoRoot, branch, baseSha);
-  const worktreePath = path.join(repoRoot, ".maestro", "workspaces", conversationId);
+  const worktreePath = path.join(os.homedir(), ".maestro", "workspaces", conversationId);
   await createWorktree(repoRoot, worktreePath, branch);
 
   return { branch, worktreePath, baseRef, baseSha, stashRef };

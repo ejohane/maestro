@@ -1,0 +1,479 @@
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { execFile } from "node:child_process";
+import { promises as fs } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
+import {
+  Conversation,
+  Project,
+  Session,
+  createProject,
+  generateId,
+  nowIso
+} from "@maestro/core";
+import {
+  getMaestroPaths,
+  listConversations,
+  listProjects,
+  listSessions,
+  readConversation,
+  readCurrentContext,
+  readSession,
+  readTranscriptHistory,
+  setCurrentContext,
+  writeConversation,
+  writeProject,
+  writeSession
+} from "@maestro/storage";
+import { prepareWorkspace, resolveRepoRoot } from "@maestro/git";
+
+type ServerOptions = {
+  port: number;
+  host: string;
+};
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const webRoot = path.resolve(__dirname, "../../web/dist");
+const execFileAsync = promisify(execFile);
+
+const mimeTypes: Record<string, string> = {
+  ".html": "text/html; charset=utf-8",
+  ".js": "text/javascript; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".svg": "image/svg+xml",
+  ".png": "image/png",
+  ".ico": "image/x-icon"
+};
+
+const sendJson = (res: ServerResponse, status: number, payload: unknown): void => {
+  res.writeHead(status, {
+    "Content-Type": "application/json; charset=utf-8",
+    "Cache-Control": "no-store"
+  });
+  res.end(JSON.stringify(payload));
+};
+
+const sendBadRequest = (res: ServerResponse, message: string): void => {
+  sendJson(res, 400, { error: message });
+};
+
+const sendNotFound = (res: ServerResponse): void => {
+  sendJson(res, 404, { error: "Not Found" });
+};
+
+const sendError = (res: ServerResponse, error: unknown): void => {
+  const message = error instanceof Error ? error.message : String(error);
+  sendJson(res, 500, { error: message });
+};
+
+const parseSegments = (pathname: string): string[] => {
+  return pathname.split("/").filter(Boolean);
+};
+
+const resolveRepoRootFromQuery = async (
+  url: URL,
+  fallbackRoot: string
+): Promise<string> => {
+  const repoParam = url.searchParams.get("repoPath");
+  if (!repoParam) {
+    return fallbackRoot;
+  }
+  return resolveRepoRoot(path.resolve(repoParam));
+};
+
+const escapeAppleScriptString = (value: string): string => {
+  return value.replace(/\\/g, "\\\\").replace(/\"/g, "\\\"");
+};
+
+const selectDirectory = async (prompt: string, startPath?: string): Promise<string> => {
+  if (process.platform !== "darwin") {
+    throw new Error("Folder picker only supported on macOS.");
+  }
+  const escapedPrompt = escapeAppleScriptString(prompt);
+  const lines: string[] = [];
+  if (startPath) {
+    const resolvedPath = path.resolve(startPath);
+    const escapedPath = escapeAppleScriptString(resolvedPath);
+    lines.push(
+      `set chosenFolder to (choose folder with prompt "${escapedPrompt}" default location (POSIX file "${escapedPath}"))`
+    );
+  } else {
+    lines.push(`set chosenFolder to (choose folder with prompt "${escapedPrompt}")`);
+  }
+  lines.push("POSIX path of chosenFolder");
+  const args = lines.flatMap((line) => ["-e", line]);
+  const { stdout } = await execFileAsync("osascript", args);
+  const selected = stdout.trim();
+  if (!selected) {
+    throw new Error("No folder selected.");
+  }
+  return path.resolve(selected);
+};
+
+const readJsonBody = async <T>(req: IncomingMessage): Promise<T> => {
+  const chunks: Uint8Array[] = [];
+  for await (const chunk of req) {
+    chunks.push(typeof chunk === "string" ? Buffer.from(chunk) : chunk);
+  }
+  const raw = Buffer.concat(chunks).toString("utf-8").trim();
+  if (!raw) {
+    return {} as T;
+  }
+  return JSON.parse(raw) as T;
+};
+
+const readEventsFile = async (
+  repoRoot: string,
+  conversationId: string,
+  sessionId: string
+): Promise<unknown[]> => {
+  const { conversationsDir } = getMaestroPaths(repoRoot);
+  const filePath = path.join(
+    conversationsDir,
+    conversationId,
+    "sessions",
+    sessionId,
+    "events.ndjson"
+  );
+  try {
+    const raw = await fs.readFile(filePath, "utf-8");
+    if (!raw.trim()) {
+      return [];
+    }
+    return raw
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line) => JSON.parse(line));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return [];
+    }
+    throw error;
+  }
+};
+
+const handleApi = async (req: IncomingMessage, res: ServerResponse, repoRoot: string) => {
+  if (!req.url) {
+    sendNotFound(res);
+    return;
+  }
+  const url = new URL(req.url, "http://localhost");
+  const segments = parseSegments(url.pathname);
+
+  if (req.method !== "GET" && req.method !== "POST") {
+    sendJson(res, 405, { error: "Method Not Allowed" });
+    return;
+  }
+
+  if (req.method === "GET" && segments.length === 3 && segments[1] === "fs" && segments[2] === "root") {
+    sendJson(res, 200, { path: repoRoot });
+    return;
+  }
+
+  if (
+    req.method === "POST" &&
+    segments.length === 3 &&
+    segments[1] === "fs" &&
+    segments[2] === "select-directory"
+  ) {
+    try {
+      const body = await readJsonBody<{ startPath?: string }>(req);
+      const selectedPath = await selectDirectory("Select project folder", body.startPath);
+      sendJson(res, 200, { path: selectedPath });
+      return;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (message.toLowerCase().includes("cancel")) {
+        sendBadRequest(res, "Selection cancelled.");
+        return;
+      }
+      if (message.toLowerCase().includes("macos")) {
+        sendJson(res, 501, { error: message });
+        return;
+      }
+      sendError(res, error);
+      return;
+    }
+  }
+
+  let requestRepoRoot = repoRoot;
+  try {
+    requestRepoRoot = await resolveRepoRootFromQuery(url, repoRoot);
+  } catch (error) {
+    sendBadRequest(res, "Invalid repo path.");
+    return;
+  }
+
+  if (req.method === "POST" && segments.length === 2 && segments[1] === "projects") {
+    try {
+      const body = await readJsonBody<{ name?: string; defaultBranch?: string; repoPath?: string }>(
+        req
+      );
+      const name = body.name?.trim();
+      if (!name) {
+        sendBadRequest(res, "Project name is required.");
+        return;
+      }
+      const defaultBranch = body.defaultBranch?.trim() || "main";
+      let targetRoot = requestRepoRoot;
+      if (body.repoPath) {
+        try {
+          targetRoot = await resolveRepoRoot(path.resolve(body.repoPath));
+        } catch {
+          sendBadRequest(res, "Selected folder is not a git repository.");
+          return;
+        }
+      }
+      const project = createProject({
+        name,
+        repoPath: targetRoot,
+        defaultBranch
+      });
+      await writeProject(targetRoot, project);
+      sendJson(res, 201, project);
+      return;
+    } catch (error) {
+      if (error instanceof SyntaxError) {
+        sendBadRequest(res, "Invalid JSON body.");
+        return;
+      }
+      sendError(res, error);
+      return;
+    }
+  }
+
+  if (req.method === "POST" && segments.length === 2 && segments[1] === "conversations") {
+    try {
+      const body = await readJsonBody<{
+        projectId?: string;
+        projectName?: string;
+        repoPath?: string;
+        title?: string;
+        fromRef?: string;
+        stash?: boolean;
+      }>(req);
+      const projectId = body.projectId?.trim();
+      const projectName = body.projectName?.trim();
+      const repoPath = body.repoPath?.trim();
+
+      let project: Project | undefined;
+      if (projectId || projectName) {
+        const projects = await listProjects(requestRepoRoot, { includeAll: true });
+        project = projects.find(
+          (candidate) => candidate.id === projectId || candidate.name === projectName
+        );
+      } else if (repoPath) {
+        const targetRoot = await resolveRepoRoot(path.resolve(repoPath));
+        const projects = await listProjects(targetRoot, { includeAll: true });
+        project = projects.find((candidate) => candidate.repoPath === targetRoot);
+      } else {
+        const projects = await listProjects(requestRepoRoot);
+        project = projects.length === 1 ? projects[0] : undefined;
+      }
+
+      if (!project) {
+        sendBadRequest(res, "Project is required to start a conversation.");
+        return;
+      }
+
+      const conversationId = generateId("c");
+      const workspace = await prepareWorkspace({
+        repoRoot: project.repoPath,
+        conversationId,
+        defaultBranch: project.defaultBranch,
+        fromRef: body.fromRef?.trim() || undefined,
+        stash: body.stash ?? false
+      });
+
+      const ts = nowIso();
+      const conversation: Conversation = {
+        id: conversationId,
+        projectId: project.id,
+        title: body.title?.trim() || undefined,
+        branch: workspace.branch,
+        workspacePath: workspace.worktreePath,
+        baseRef: workspace.baseRef,
+        baseSha: workspace.baseSha,
+        stashRef: workspace.stashRef,
+        createdAt: ts,
+        updatedAt: ts
+      };
+      await writeConversation(project.repoPath, conversation);
+
+      const sessionId = generateId("s");
+      const session: Session = {
+        id: sessionId,
+        conversationId: conversation.id,
+        title: undefined,
+        model: process.env.MAESTRO_MODEL,
+        createdAt: ts,
+        updatedAt: ts
+      };
+      await writeSession(project.repoPath, conversation.id, session);
+      await setCurrentContext(project.repoPath, {
+        projectId: project.id,
+        conversationId: conversation.id,
+        sessionId: session.id
+      });
+
+      sendJson(res, 201, { project, conversation, session });
+      return;
+    } catch (error) {
+      if (error instanceof SyntaxError) {
+        sendBadRequest(res, "Invalid JSON body.");
+        return;
+      }
+      sendError(res, error);
+      return;
+    }
+  }
+
+  if (segments.length === 2 && segments[1] === "health") {
+    sendJson(res, 200, { ok: true });
+    return;
+  }
+
+  if (segments.length === 2 && segments[1] === "current") {
+    const current = await readCurrentContext(requestRepoRoot);
+    sendJson(res, 200, current);
+    return;
+  }
+
+  if (segments.length === 2 && segments[1] === "projects") {
+    const includeAll = url.searchParams.get("all") === "1" || url.searchParams.get("all") === "true";
+    const projects = await listProjects(requestRepoRoot, { includeAll });
+    sendJson(res, 200, projects);
+    return;
+  }
+
+  if (segments.length === 2 && segments[1] === "conversations") {
+    const conversations = await listConversations(requestRepoRoot);
+    sendJson(res, 200, conversations);
+    return;
+  }
+
+  if (segments.length === 3 && segments[1] === "conversations") {
+    const conversation = await readConversation(requestRepoRoot, segments[2]);
+    sendJson(res, 200, conversation);
+    return;
+  }
+
+  if (segments.length === 4 && segments[1] === "conversations" && segments[3] === "sessions") {
+    const sessions = await listSessions(requestRepoRoot, segments[2]);
+    sendJson(res, 200, sessions);
+    return;
+  }
+
+  if (
+    segments.length === 5 &&
+    segments[1] === "conversations" &&
+    segments[3] === "sessions"
+  ) {
+    const session = await readSession(requestRepoRoot, segments[2], segments[4]);
+    sendJson(res, 200, session);
+    return;
+  }
+
+  if (
+    segments.length === 6 &&
+    segments[1] === "conversations" &&
+    segments[3] === "sessions" &&
+    segments[5] === "transcript"
+  ) {
+    const transcript = await readTranscriptHistory(requestRepoRoot, segments[2], segments[4]);
+    sendJson(res, 200, transcript);
+    return;
+  }
+
+  if (
+    segments.length === 6 &&
+    segments[1] === "conversations" &&
+    segments[3] === "sessions" &&
+    segments[5] === "events"
+  ) {
+    const events = await readEventsFile(requestRepoRoot, segments[2], segments[4]);
+    sendJson(res, 200, events);
+    return;
+  }
+
+  sendNotFound(res);
+};
+
+const serveIndex = async (res: ServerResponse) => {
+  const indexPath = path.join(webRoot, "index.html");
+  try {
+    const data = await fs.readFile(indexPath);
+    res.writeHead(200, {
+      "Content-Type": "text/html; charset=utf-8",
+      "Cache-Control": "no-store"
+    });
+    res.end(data);
+  } catch (error) {
+    sendError(res, new Error("Web UI not built. Run `bun run --cwd apps/web build` first."));
+  }
+};
+
+const serveStatic = async (req: IncomingMessage, res: ServerResponse) => {
+  if (!req.url) {
+    sendNotFound(res);
+    return;
+  }
+  const url = new URL(req.url, "http://localhost");
+  let pathname = url.pathname;
+  if (pathname === "/") {
+    pathname = "/index.html";
+  }
+
+  const normalizedPath = path.normalize(pathname);
+  const filePath = path.resolve(webRoot, `.${normalizedPath}`);
+  if (!filePath.startsWith(webRoot)) {
+    sendNotFound(res);
+    return;
+  }
+
+  try {
+    const stat = await fs.stat(filePath);
+    if (stat.isDirectory()) {
+      await serveIndex(res);
+      return;
+    }
+    const ext = path.extname(filePath).toLowerCase();
+    const contentType = mimeTypes[ext] ?? "application/octet-stream";
+    const data = await fs.readFile(filePath);
+    res.writeHead(200, {
+      "Content-Type": contentType,
+      "Cache-Control": "no-store"
+    });
+    res.end(data);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      await serveIndex(res);
+      return;
+    }
+    sendError(res, error);
+  }
+};
+
+export const startWebServer = async ({ port, host }: ServerOptions): Promise<void> => {
+  const repoRoot = await resolveRepoRoot(process.cwd());
+  const server = createServer(async (req, res) => {
+    try {
+      if (req.url?.startsWith("/api/")) {
+        await handleApi(req, res, repoRoot);
+        return;
+      }
+      await serveStatic(req, res);
+    } catch (error) {
+      sendError(res, error);
+    }
+  });
+
+  await new Promise<void>((resolve) => {
+    server.listen(port, host, () => resolve());
+  });
+
+  console.log(`Maestro web UI: http://${host}:${port}`);
+};

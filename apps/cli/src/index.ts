@@ -14,6 +14,7 @@ import {
   appendTranscriptEntry,
   findProject,
   listConversations,
+  listProjects,
   listSessions,
   readConversation,
   readCurrentContext,
@@ -33,6 +34,7 @@ import {
   resolveRepoRoot
 } from "@maestro/git";
 import { DirectSDKClient } from "@maestro/opencode";
+import { startWebServer } from "./server.js";
 
 const program = new Command();
 
@@ -74,6 +76,38 @@ projectCommand
       };
       await writeProject(repoRoot, project);
       console.log(`Added project ${project.name} (${project.id})`);
+    } catch (error) {
+      exitWithError(error);
+    }
+  });
+
+projectCommand
+  .command("list")
+  .option("--repo <path>", "Filter by repo path")
+  .description("List registered projects")
+  .action(async (options) => {
+    try {
+      let repoRoot: string | undefined;
+      if (options.repo) {
+        repoRoot = await resolveRepoRoot(path.resolve(options.repo));
+      }
+
+      const projects = await listProjects(repoRoot ?? process.cwd(), {
+        includeAll: !repoRoot
+      });
+
+      if (projects.length === 0) {
+        console.log("No projects found.");
+        return;
+      }
+
+      projects
+        .sort((a, b) => a.name.localeCompare(b.name))
+        .forEach((project) => {
+          console.log(
+            `${project.id} "${project.name}" - ${project.repoPath} (${project.defaultBranch})`
+          );
+        });
     } catch (error) {
       exitWithError(error);
     }
@@ -360,6 +394,23 @@ program
       });
       console.log(`Conversation: ${conversation.id}`);
       console.log(`Session: ${session.id}`);
+    } catch (error) {
+      exitWithError(error);
+    }
+  });
+
+program
+  .command("serve")
+  .description("Serve the local web UI")
+  .option("--port <port>", "Port to listen on", "4173")
+  .option("--host <host>", "Host to bind", "127.0.0.1")
+  .action(async (options) => {
+    try {
+      const port = Number(options.port);
+      if (!Number.isFinite(port) || port <= 0) {
+        throw new Error("Port must be a positive number.");
+      }
+      await startWebServer({ port, host: options.host });
     } catch (error) {
       exitWithError(error);
     }
