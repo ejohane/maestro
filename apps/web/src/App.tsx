@@ -1,4 +1,5 @@
 import * as React from "react"
+import { Moon, Sun } from "lucide-react"
 
 import { AppSidebar } from "./components/app-sidebar"
 import {
@@ -27,6 +28,7 @@ import {
   SidebarRail,
   SidebarTrigger,
 } from "./components/ui/sidebar"
+import { useTheme } from "./hooks/use-theme"
 
 type GitProvider = "github" | "gitlab"
 
@@ -92,6 +94,7 @@ type Project = {
 }
 
 const App = () => {
+  const { theme, toggleTheme } = useTheme()
   const [projects, setProjects] = React.useState<Project[]>([])
   const [isLoading, setIsLoading] = React.useState(true)
   const [error, setError] = React.useState<string | null>(null)
@@ -798,6 +801,19 @@ const App = () => {
               ) : null}
             </BreadcrumbList>
           </Breadcrumb>
+          <div className="ml-auto flex items-center gap-2">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              onClick={toggleTheme}
+              aria-label="Toggle dark mode"
+              title="Toggle dark mode"
+            >
+              {theme === "dark" ? <Sun /> : <Moon />}
+              <span className="sr-only">Toggle dark mode</span>
+            </Button>
+          </div>
         </header>
         <div className="flex flex-1 flex-col gap-4 p-6">
           <div className="rounded-xl border bg-card p-6 shadow-sm">
