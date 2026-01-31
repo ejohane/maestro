@@ -63,6 +63,18 @@ type ApiSession = {
   updatedAt: string
 }
 
+type ApiPullRequest = {
+  id: string
+  title: string
+  url: string
+  author?: string
+  sourceBranch?: string
+  targetBranch?: string
+  updatedAt?: string
+  provider: GitProvider
+  repo: string
+}
+
 type CreateConversationResponse = {
   project: ApiProject
   conversation: ApiConversation
@@ -72,12 +84,16 @@ type CreateConversationResponse = {
 type ChatSession = {
   id: string
   name: string
+  createdAt?: string
+  updatedAt?: string
 }
 
 type Workspace = {
   id: string
   name: string
   chats: ChatSession[]
+  createdAt?: string
+  updatedAt?: string
 }
 
 type Project = {
@@ -91,6 +107,21 @@ type Project = {
   createdAt: string
   updatedAt: string
   workspaces: Workspace[]
+}
+
+type RecentSession = {
+  id: string
+  name: string
+  projectId: string
+  projectName: string
+  workspaceId: string
+  workspaceName: string
+  updatedAt?: string
+}
+
+type OpenPullRequest = ApiPullRequest & {
+  projectId: string
+  projectName: string
 }
 
 const App = () => {
@@ -136,6 +167,10 @@ const App = () => {
   const [detectRepoError, setDetectRepoError] = React.useState<string | null>(null)
   const [isDeletingWorkspace, setIsDeletingWorkspace] = React.useState(false)
   const [deleteWorkspaceError, setDeleteWorkspaceError] = React.useState<string | null>(null)
+  const [openPullRequests, setOpenPullRequests] = React.useState<OpenPullRequest[]>([])
+  const [isLoadingPullRequests, setIsLoadingPullRequests] = React.useState(false)
+  const [pullRequestsError, setPullRequestsError] = React.useState<string | null>(null)
+  const recentSessionsLimit = 6
 
   const loadProjects = React.useCallback(async () => {
     setIsLoading(true)
@@ -192,7 +227,11 @@ const App = () => {
             chats: sessions.map((session) => ({
               id: session.id,
               name: session.title?.trim() || session.model || session.id,
+              createdAt: session.createdAt,
+              updatedAt: session.updatedAt,
             })),
+            createdAt: conversation.createdAt,
+            updatedAt: conversation.updatedAt,
           }
         })
 
@@ -274,6 +313,63 @@ const App = () => {
     [selectedWorkspace, selectedChatId]
   )
 
+  const recentSessions = React.useMemo(() => {
+    const sessions: RecentSession[] = []
+    projects.forEach((project) => {
+      project.workspaces.forEach((workspace) => {
+        workspace.chats.forEach((chat) => {
+          sessions.push({
+            id: chat.id,
+            name: chat.name,
+            projectId: project.id,
+            projectName: project.name,
+            workspaceId: workspace.id,
+            workspaceName: workspace.name,
+            updatedAt: chat.updatedAt ?? chat.createdAt,
+          })
+        })
+      })
+    })
+    return sessions
+      .sort((a, b) => {
+        const aTime = a.updatedAt ? new Date(a.updatedAt).getTime() : 0
+        const bTime = b.updatedAt ? new Date(b.updatedAt).getTime() : 0
+        return bTime - aTime
+      })
+      .slice(0, recentSessionsLimit)
+  }, [projects, recentSessionsLimit])
+
+  const allWorkspaces = React.useMemo(() => {
+    return projects
+      .flatMap((project) =>
+        project.workspaces.map((workspace) => ({
+          id: workspace.id,
+          name: workspace.name,
+          projectId: project.id,
+          projectName: project.name,
+          updatedAt: workspace.updatedAt ?? workspace.createdAt,
+        }))
+      )
+      .sort((a, b) => {
+        const aTime = a.updatedAt ? new Date(a.updatedAt).getTime() : 0
+        const bTime = b.updatedAt ? new Date(b.updatedAt).getTime() : 0
+        return bTime - aTime
+      })
+  }, [projects])
+
+  const sortedPullRequests = React.useMemo(() => {
+    return [...openPullRequests].sort((a, b) => {
+      const aTime = a.updatedAt ? new Date(a.updatedAt).getTime() : 0
+      const bTime = b.updatedAt ? new Date(b.updatedAt).getTime() : 0
+      return bTime - aTime
+    })
+  }, [openPullRequests])
+
+  const hasRepoProjects = React.useMemo(
+    () => projects.some((project) => project.repoUrl?.trim()),
+    [projects]
+  )
+
   React.useEffect(() => {
     setProjectIconDraft(selectedProject?.icon ?? "")
     setProjectIconError(null)
@@ -291,6 +387,75 @@ const App = () => {
   React.useEffect(() => {
     setDeleteWorkspaceError(null)
   }, [selectedWorkspaceId])
+
+  React.useEffect(() => {
+    if (!projects.length) {
+      setOpenPullRequests([])
+      setPullRequestsError(null)
+      return
+    }
+    let isActive = true
+    const loadPullRequests = async () => {
+      const targets = projects.filter((project) => project.repoUrl?.trim())
+      if (!targets.length) {
+        if (isActive) {
+          setOpenPullRequests([])
+          setPullRequestsError(null)
+          setIsLoadingPullRequests(false)
+        }
+        return
+      }
+      setIsLoadingPullRequests(true)
+      setPullRequestsError(null)
+      const errors: string[] = []
+      const results = await Promise.all(
+        targets.map(async (project) => {
+          try {
+            const response = await fetch(
+              `/api/projects/${project.id}/pull-requests?limit=10`
+            )
+            if (!response.ok) {
+              let message = `Failed to load pull requests for ${project.name}.`
+              try {
+                const payload = (await response.json()) as { error?: string }
+                if (payload.error) {
+                  message = payload.error
+                }
+              } catch {
+                // Ignore parsing errors
+              }
+              errors.push(message)
+              return [] as OpenPullRequest[]
+            }
+            const payload = (await response.json()) as ApiPullRequest[]
+            return payload.map((item) => ({
+              ...item,
+              projectId: project.id,
+              projectName: project.name,
+            }))
+          } catch (err) {
+            errors.push(
+              err instanceof Error
+                ? err.message
+                : `Failed to load pull requests for ${project.name}.`
+            )
+            return [] as OpenPullRequest[]
+          }
+        })
+      )
+      if (!isActive) {
+        return
+      }
+      const flattened = results.flat()
+      setOpenPullRequests(flattened)
+      setPullRequestsError(flattened.length ? null : errors[0] ?? null)
+      setIsLoadingPullRequests(false)
+    }
+    void loadPullRequests()
+    return () => {
+      isActive = false
+    }
+  }, [projects])
 
   const handleSelectProjectsView = () => {
     setIsProjectsView(true)
@@ -644,6 +809,20 @@ const App = () => {
     return new Intl.DateTimeFormat("en-US", { dateStyle: "medium" }).format(date)
   }
 
+  const formatDateTime = (value?: string) => {
+    if (!value) {
+      return "Unknown"
+    }
+    const date = new Date(value)
+    if (Number.isNaN(date.getTime())) {
+      return "Unknown"
+    }
+    return new Intl.DateTimeFormat("en-US", {
+      dateStyle: "medium",
+      timeStyle: "short",
+    }).format(date)
+  }
+
   const isProjectView = Boolean(
     selectedProject && !selectedWorkspace && !selectedChat && !isProjectsView
   )
@@ -871,144 +1050,286 @@ const App = () => {
               </div>
             ) : null}
           </div>
+          <div className="rounded-xl border bg-background p-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <div className="text-sm font-semibold text-foreground">Recent sessions</div>
+                <div className="text-xs text-muted-foreground">
+                  Last {recentSessionsLimit} sessions across your workspaces.
+                </div>
+              </div>
+            </div>
+            <div className="mt-4 flex gap-3 overflow-x-auto pb-2">
+              {recentSessions.length ? (
+                recentSessions.map((session) => (
+                  <button
+                    key={session.id}
+                    type="button"
+                    onClick={() =>
+                      handleSelectChat(
+                        session.projectId,
+                        session.workspaceId,
+                        session.id
+                      )
+                    }
+                    className="min-w-[220px] rounded-lg border bg-muted/20 px-4 py-3 text-left transition hover:border-primary/60 hover:bg-muted/40"
+                  >
+                    <div className="text-sm font-semibold text-foreground">
+                      {session.name}
+                    </div>
+                    <div className="mt-1 text-xs text-muted-foreground">
+                      {session.projectName} · {session.workspaceName}
+                    </div>
+                    <div className="mt-2 text-xs text-muted-foreground">
+                      Updated {formatDateTime(session.updatedAt)}
+                    </div>
+                  </button>
+                ))
+              ) : (
+                <div className="rounded-lg border border-dashed px-4 py-3 text-sm text-muted-foreground">
+                  No sessions yet. Create a workspace to start chatting.
+                </div>
+              )}
+            </div>
+          </div>
           {isProjectsView ? (
             <div className="grid gap-4 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
-              <Card className="border-dashed">
-                <form onSubmit={handleCreateProject}>
+              <div className="grid gap-4">
+                <Card className="border-dashed">
+                  <form onSubmit={handleCreateProject}>
+                    <CardHeader>
+                      <CardTitle>Create a new project</CardTitle>
+                      <CardDescription>
+                        Connect a repo, set the default branch, and start a workspace.
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent className="grid gap-3">
+                      <div className="grid gap-2">
+                        <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                          Project name
+                        </label>
+                        <Input
+                          value={projectForm.name}
+                          onChange={handleProjectFormChange("name")}
+                          placeholder="e.g. Marketing site"
+                        />
+                      </div>
+                      <div className="grid gap-2">
+                        <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                          Repo path
+                        </label>
+                        <Input
+                          value={projectForm.repoPath}
+                          onChange={handleProjectFormChange("repoPath")}
+                          placeholder="/path/to/repo (optional)"
+                        />
+                      </div>
+                      <div className="grid gap-2">
+                        <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                          Repo URL
+                        </label>
+                        <Input
+                          value={projectForm.repoUrl}
+                          onChange={handleProjectFormChange("repoUrl")}
+                          placeholder="https://github.com/org/repo (optional)"
+                        />
+                      </div>
+                      <div className="grid gap-2">
+                        <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                          Git provider
+                        </label>
+                        <select
+                          value={projectForm.gitProvider}
+                          onChange={handleProjectFormChange("gitProvider")}
+                          className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-base ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 md:text-sm"
+                        >
+                          <option value="">Auto-detect</option>
+                          <option value="github">GitHub</option>
+                          <option value="gitlab">GitLab</option>
+                        </select>
+                      </div>
+                      <div className="grid gap-2">
+                        <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                          Default branch
+                        </label>
+                        <Input
+                          value={projectForm.defaultBranch}
+                          onChange={handleProjectFormChange("defaultBranch")}
+                          placeholder="main"
+                        />
+                      </div>
+                      {createProjectError ? (
+                        <div className="rounded-md border border-destructive/50 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+                          {createProjectError}
+                        </div>
+                      ) : null}
+                    </CardContent>
+                    <CardFooter className="flex flex-wrap items-center gap-3">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={handleSelectDirectory}
+                        disabled={isSelectingDirectory}
+                      >
+                        {isSelectingDirectory ? "Selecting folder..." : "Select folder"}
+                      </Button>
+                      <Button
+                        type="submit"
+                        disabled={!projectForm.name.trim() || isCreatingProject}
+                      >
+                        {isCreatingProject ? "Creating project..." : "Create project"}
+                      </Button>
+                    </CardFooter>
+                  </form>
+                </Card>
+                <Card>
                   <CardHeader>
-                    <CardTitle>Create a new project</CardTitle>
+                    <CardTitle>All workspaces</CardTitle>
                     <CardDescription>
-                      Connect a repo, set the default branch, and start a workspace.
+                      Active workspaces across every project.
                     </CardDescription>
                   </CardHeader>
                   <CardContent className="grid gap-3">
-                    <div className="grid gap-2">
-                      <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                        Project name
-                      </label>
-                      <Input
-                        value={projectForm.name}
-                        onChange={handleProjectFormChange("name")}
-                        placeholder="e.g. Marketing site"
-                      />
-                    </div>
-                    <div className="grid gap-2">
-                      <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                        Repo path
-                      </label>
-                      <Input
-                        value={projectForm.repoPath}
-                        onChange={handleProjectFormChange("repoPath")}
-                        placeholder="/path/to/repo (optional)"
-                      />
-                    </div>
-                    <div className="grid gap-2">
-                      <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                        Repo URL
-                      </label>
-                      <Input
-                        value={projectForm.repoUrl}
-                        onChange={handleProjectFormChange("repoUrl")}
-                        placeholder="https://github.com/org/repo (optional)"
-                      />
-                    </div>
-                    <div className="grid gap-2">
-                      <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                        Git provider
-                      </label>
-                      <select
-                        value={projectForm.gitProvider}
-                        onChange={handleProjectFormChange("gitProvider")}
-                        className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-base ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 md:text-sm"
-                      >
-                        <option value="">Auto-detect</option>
-                        <option value="github">GitHub</option>
-                        <option value="gitlab">GitLab</option>
-                      </select>
-                    </div>
-                    <div className="grid gap-2">
-                      <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                        Default branch
-                      </label>
-                      <Input
-                        value={projectForm.defaultBranch}
-                        onChange={handleProjectFormChange("defaultBranch")}
-                        placeholder="main"
-                      />
-                    </div>
-                    {createProjectError ? (
-                      <div className="rounded-md border border-destructive/50 bg-destructive/5 px-3 py-2 text-sm text-destructive">
-                        {createProjectError}
+                    {allWorkspaces.length ? (
+                      allWorkspaces.map((workspace) => (
+                        <button
+                          key={workspace.id}
+                          type="button"
+                          onClick={() =>
+                            handleSelectWorkspace(workspace.projectId, workspace.id)
+                          }
+                          className="rounded-lg border bg-muted/20 px-4 py-3 text-left transition hover:border-primary/60 hover:bg-muted/40"
+                        >
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div>
+                              <div className="text-sm font-semibold text-foreground">
+                                {workspace.name}
+                              </div>
+                              <div className="text-xs text-muted-foreground">
+                                {workspace.projectName}
+                              </div>
+                            </div>
+                            <div className="text-xs text-muted-foreground">
+                              Updated {formatDateTime(workspace.updatedAt)}
+                            </div>
+                          </div>
+                        </button>
+                      ))
+                    ) : (
+                      <div className="rounded-lg border border-dashed px-4 py-3 text-sm text-muted-foreground">
+                        No workspaces yet. Create one from a project.
                       </div>
-                    ) : null}
+                    )}
                   </CardContent>
-                  <CardFooter className="flex flex-wrap items-center gap-3">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={handleSelectDirectory}
-                      disabled={isSelectingDirectory}
-                    >
-                      {isSelectingDirectory ? "Selecting folder..." : "Select folder"}
-                    </Button>
-                    <Button
-                      type="submit"
-                      disabled={!projectForm.name.trim() || isCreatingProject}
-                    >
-                      {isCreatingProject ? "Creating project..." : "Create project"}
-                    </Button>
-                  </CardFooter>
-                </form>
-              </Card>
-              <div className="grid gap-4 sm:grid-cols-2">
-                {isLoading ? (
-                  <Card className="flex items-center justify-center border-dashed p-6 text-sm text-muted-foreground">
-                    Loading projects...
-                  </Card>
-                ) : error ? (
-                  <Card className="flex items-center justify-center border-destructive/40 bg-destructive/5 p-6 text-sm text-destructive">
-                    {error}
-                  </Card>
-                ) : projects.length ? (
-                  projects.map((project) => (
-                    <button
-                      key={project.id}
-                      type="button"
-                      onClick={() => handleSelectProject(project.id)}
-                      className="text-left"
-                    >
-                      <Card className="h-full transition hover:border-primary/60 hover:shadow-md">
-                        <CardHeader>
-                          <CardTitle className="flex items-center gap-2">
-                            {project.icon ? (
-                              <span className="text-xl leading-none">{project.icon}</span>
-                            ) : null}
-                            <span>{project.name}</span>
-                          </CardTitle>
-                          <CardDescription className="truncate">
-                            {project.repoUrl?.trim() || project.repoPath}
-                          </CardDescription>
-                        </CardHeader>
-                        <CardContent className="grid gap-2 text-sm text-muted-foreground">
-                          <div>
-                            <span className="font-medium text-foreground">
-                              {project.workspaces.length}
-                            </span>{" "}
-                            workspaces
+                </Card>
+              </div>
+              <div className="grid gap-4">
+                <div className="grid gap-4 sm:grid-cols-2">
+                  {isLoading ? (
+                    <Card className="flex items-center justify-center border-dashed p-6 text-sm text-muted-foreground">
+                      Loading projects...
+                    </Card>
+                  ) : error ? (
+                    <Card className="flex items-center justify-center border-destructive/40 bg-destructive/5 p-6 text-sm text-destructive">
+                      {error}
+                    </Card>
+                  ) : projects.length ? (
+                    projects.map((project) => (
+                      <button
+                        key={project.id}
+                        type="button"
+                        onClick={() => handleSelectProject(project.id)}
+                        className="text-left"
+                      >
+                        <Card className="h-full transition hover:border-primary/60 hover:shadow-md">
+                          <CardHeader>
+                            <CardTitle className="flex items-center gap-2">
+                              {project.icon ? (
+                                <span className="text-xl leading-none">{project.icon}</span>
+                              ) : null}
+                              <span>{project.name}</span>
+                            </CardTitle>
+                            <CardDescription className="truncate">
+                              {project.repoUrl?.trim() || project.repoPath}
+                            </CardDescription>
+                          </CardHeader>
+                          <CardContent className="grid gap-2 text-sm text-muted-foreground">
+                            <div>
+                              <span className="font-medium text-foreground">
+                                {project.workspaces.length}
+                              </span>{" "}
+                              workspaces
+                            </div>
+                            <div>
+                              Default branch: {project.defaultBranch || "main"}
+                            </div>
+                            <div>Updated {formatDate(project.updatedAt)}</div>
+                          </CardContent>
+                        </Card>
+                      </button>
+                    ))
+                  ) : (
+                    <Card className="flex items-center justify-center border-dashed p-6 text-sm text-muted-foreground">
+                      No projects yet. Create your first one.
+                    </Card>
+                  )}
+                </div>
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Open PRs and MRs</CardTitle>
+                    <CardDescription>
+                      Pull requests for GitHub repos and merge requests for GitLab.
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="grid gap-3">
+                    {isLoadingPullRequests ? (
+                      <div className="rounded-lg border border-dashed px-4 py-3 text-sm text-muted-foreground">
+                        Loading open pull requests...
+                      </div>
+                    ) : pullRequestsError ? (
+                      <div className="rounded-lg border border-destructive/50 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+                        {pullRequestsError}
+                      </div>
+                    ) : sortedPullRequests.length ? (
+                      sortedPullRequests.map((item) => (
+                        <a
+                          key={`${item.projectId}-${item.id}`}
+                          href={item.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="rounded-lg border bg-muted/20 px-4 py-3 transition hover:border-primary/60 hover:bg-muted/40"
+                        >
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div className="text-sm font-semibold text-foreground">
+                              {item.title}
+                            </div>
+                            <Badge variant="secondary">
+                              {item.provider === "github" ? "PR" : "MR"}
+                            </Badge>
                           </div>
-                          <div>
-                            Default branch: {project.defaultBranch || "main"}
+                          <div className="mt-1 text-xs text-muted-foreground">
+                            {item.projectName} · {item.repo}
                           </div>
-                          <div>Updated {formatDate(project.updatedAt)}</div>
-                        </CardContent>
-                      </Card>
-                    </button>
-                  ))
-                ) : (
-                  <Card className="flex items-center justify-center border-dashed p-6 text-sm text-muted-foreground">
-                    No projects yet. Create your first one.
-                  </Card>
-                )}
+                          <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                            {item.author ? `@${item.author}` : "Unknown author"}
+                            {item.sourceBranch && item.targetBranch
+                              ? `${item.sourceBranch} → ${item.targetBranch}`
+                              : null}
+                            <span>Updated {formatDateTime(item.updatedAt)}</span>
+                          </div>
+                        </a>
+                      ))
+                    ) : hasRepoProjects ? (
+                      <div className="rounded-lg border border-dashed px-4 py-3 text-sm text-muted-foreground">
+                        No open pull requests right now.
+                      </div>
+                    ) : (
+                      <div className="rounded-lg border border-dashed px-4 py-3 text-sm text-muted-foreground">
+                        Add a repo URL to projects to see open PRs or MRs here.
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
               </div>
             </div>
           ) : showWorkspaceCreator ? (
