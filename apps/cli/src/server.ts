@@ -15,16 +15,21 @@ import {
 } from "@maestro/core";
 import {
   deleteConversation,
+  deleteSession,
   getMaestroPaths,
   listConversations,
   listProjects,
   listSessions,
+  appendEventEntry,
+  appendTranscriptEntry,
   readConversation,
   readCurrentContext,
   readProjectById,
   readSession,
   readTranscriptHistory,
   setCurrentContext,
+  updateConversationTimestamp,
+  updateSessionTimestamp,
   writeConversation,
   writeProject,
   writeSession
@@ -36,6 +41,13 @@ import {
   removeWorktree,
   resolveRepoRoot
 } from "@maestro/git";
+import {
+  DirectSDKClient,
+  buildSystemMessage,
+  createAuthedOpencodeClient,
+  extractAssistantResponse,
+  parseModel
+} from "@maestro/opencode";
 
 type ServerOptions = {
   port: number;
@@ -87,6 +99,15 @@ const sendNotFound = (res: ServerResponse): void => {
 const sendError = (res: ServerResponse, error: unknown): void => {
   const message = error instanceof Error ? error.message : String(error);
   sendJson(res, 500, { error: message });
+};
+
+const getDefaultModel = (): string => {
+  return process.env.MAESTRO_MODEL ?? "openai/gpt-5.2-codex";
+};
+
+const sendSseEvent = (res: ServerResponse, event: string, payload: unknown): void => {
+  res.write(`event: ${event}\n`);
+  res.write(`data: ${JSON.stringify(payload)}\n\n`);
 };
 
 const formatTimestamp = (iso: string): string => {
@@ -440,6 +461,10 @@ const readEventsFile = async (
   }
 };
 
+const createAssistantMessageId = (): string => {
+  return `m_${Math.random().toString(36).slice(2, 10)}`;
+};
+
 const handleApi = async (req: IncomingMessage, res: ServerResponse, repoRoot: string) => {
   if (!req.url) {
     sendNotFound(res);
@@ -785,6 +810,18 @@ const handleApi = async (req: IncomingMessage, res: ServerResponse, repoRoot: st
         updatedAt: ts
       };
       await writeSession(project.repoPath, conversation.id, session);
+
+      const client = new DirectSDKClient();
+      const opencodeSessionId = await client.ensureSession({
+        sessionId: session.opencodeSessionId,
+        title: session.title ?? conversation.title,
+        workspacePath: conversation.workspacePath
+      } as any);
+      if (opencodeSessionId !== session.opencodeSessionId) {
+        session.opencodeSessionId = opencodeSessionId;
+        await writeSession(project.repoPath, conversation.id, session);
+      }
+
       await setCurrentContext(project.repoPath, {
         projectId: project.id,
         conversationId: conversation.id,
@@ -865,6 +902,101 @@ const handleApi = async (req: IncomingMessage, res: ServerResponse, repoRoot: st
   }
 
   if (
+    req.method === "POST" &&
+    segments.length === 4 &&
+    segments[1] === "conversations" &&
+    segments[3] === "sessions"
+  ) {
+    try {
+      const body = await readJsonBody<{ title?: string; model?: string }>(req);
+      let conversation: Conversation;
+      try {
+        conversation = await readConversation(requestRepoRoot, segments[2]);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+          sendNotFound(res);
+          return;
+        }
+        throw error;
+      }
+      const ts = nowIso();
+      const model = body.model?.trim() || getDefaultModel();
+      const sessionTitle = buildSessionTitle({
+        createdAt: ts,
+        model,
+        title: body.title
+      });
+      const session: Session = {
+        id: generateId("s"),
+        conversationId: conversation.id,
+        title: sessionTitle,
+        model,
+        createdAt: ts,
+        updatedAt: ts
+      };
+      await writeSession(requestRepoRoot, conversation.id, session);
+      const client = new DirectSDKClient();
+      const opencodeSessionId = await client.ensureSession({
+        sessionId: session.opencodeSessionId,
+        title: session.title ?? conversation.title,
+        workspacePath: conversation.workspacePath
+      } as any);
+      if (opencodeSessionId !== session.opencodeSessionId) {
+        session.opencodeSessionId = opencodeSessionId;
+        await writeSession(requestRepoRoot, conversation.id, session);
+      }
+      await updateConversationTimestamp(requestRepoRoot, conversation);
+      await setCurrentContext(requestRepoRoot, {
+        projectId: conversation.projectId,
+        conversationId: conversation.id,
+        sessionId: session.id
+      });
+      sendJson(res, 201, session);
+      return;
+    } catch (error) {
+      if (error instanceof SyntaxError) {
+        sendBadRequest(res, "Invalid JSON body.");
+        return;
+      }
+      sendError(res, error);
+      return;
+    }
+  }
+
+  if (
+    req.method === "DELETE" &&
+    segments.length === 5 &&
+    segments[1] === "conversations" &&
+    segments[3] === "sessions"
+  ) {
+    const confirm = url.searchParams.get("confirm");
+    if (confirm !== "true" && confirm !== "1") {
+      sendBadRequest(res, "Deletion requires confirm=true.");
+      return;
+    }
+    try {
+      let conversation: Conversation;
+      try {
+        conversation = await readConversation(requestRepoRoot, segments[2]);
+        await readSession(requestRepoRoot, segments[2], segments[4]);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+          sendNotFound(res);
+          return;
+        }
+        throw error;
+      }
+      await deleteSession(requestRepoRoot, segments[2], segments[4]);
+      await updateConversationTimestamp(requestRepoRoot, conversation);
+      sendJson(res, 200, { ok: true });
+      return;
+    } catch (error) {
+      sendError(res, error);
+      return;
+    }
+  }
+
+  if (
     req.method === "GET" &&
     segments.length === 5 &&
     segments[1] === "conversations" &&
@@ -873,6 +1005,164 @@ const handleApi = async (req: IncomingMessage, res: ServerResponse, repoRoot: st
     const session = await readSession(requestRepoRoot, segments[2], segments[4]);
     sendJson(res, 200, session);
     return;
+  }
+
+  if (
+    req.method === "POST" &&
+    segments.length === 7 &&
+    segments[1] === "conversations" &&
+    segments[3] === "sessions" &&
+    segments[5] === "chat" &&
+    segments[6] === "stream"
+  ) {
+    try {
+      const body = await readJsonBody<{ message?: string }>(req);
+      const message = body.message?.trim();
+      if (!message) {
+        sendBadRequest(res, "Message is required.");
+        return;
+      }
+      let conversation: Conversation;
+      let session: Session;
+      try {
+        conversation = await readConversation(requestRepoRoot, segments[2]);
+        session = await readSession(requestRepoRoot, segments[2], segments[4]);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+          sendNotFound(res);
+          return;
+        }
+        throw error;
+      }
+
+      if (!session.model) {
+        session.model = getDefaultModel();
+        await writeSession(requestRepoRoot, conversation.id, session);
+      }
+
+      const directClient = new DirectSDKClient();
+      const opencodeSessionId = await directClient.ensureSession({
+        sessionId: session.opencodeSessionId,
+        title: session.title ?? conversation.title,
+        workspacePath: conversation.workspacePath
+      } as any);
+      if (opencodeSessionId !== session.opencodeSessionId) {
+        session.opencodeSessionId = opencodeSessionId;
+        await writeSession(requestRepoRoot, conversation.id, session);
+      }
+
+      const ts = nowIso();
+      await appendTranscriptEntry(requestRepoRoot, conversation.id, session.id, {
+        ts,
+        role: "user",
+        content: message,
+        sessionId: session.id,
+        conversationId: conversation.id
+      });
+
+      const history = await readTranscriptHistory(requestRepoRoot, conversation.id, session.id);
+      const system = buildSystemMessage(conversation.workspacePath, history);
+
+      res.writeHead(200, {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-store",
+        Connection: "keep-alive"
+      });
+
+      const assistantMessageId = createAssistantMessageId();
+      sendSseEvent(res, "message_start", { id: assistantMessageId, role: "assistant" });
+
+      const streamController = new AbortController();
+      const closeHandler = () => streamController.abort();
+      req.on("close", closeHandler);
+
+      const client = createAuthedOpencodeClient();
+      const eventResponse = await client.event.subscribe({
+        query: { directory: conversation.workspacePath },
+        signal: streamController.signal
+      });
+
+      let assistantContent = "";
+      const eventTask = (async () => {
+        for await (const event of eventResponse.stream) {
+          await appendEventEntry(requestRepoRoot, conversation.id, session.id, {
+            ts: nowIso(),
+            type: "sdk_event",
+            data: event,
+            sessionId: session.id,
+            conversationId: conversation.id
+          });
+          if (event?.type !== "message.part.updated") {
+            continue;
+          }
+          const part = (event as any).properties?.part;
+          const delta = (event as any).properties?.delta;
+          if (!part || part.type !== "text" || part.sessionID !== opencodeSessionId) {
+            continue;
+          }
+          if (typeof delta === "string" && delta.length > 0) {
+            assistantContent += delta;
+            sendSseEvent(res, "message_delta", { delta });
+          }
+        }
+      })();
+
+      try {
+        const resolvedModel = parseModel(session.model) ?? parseModel(getDefaultModel());
+        const response = await client.session.prompt({
+          path: { id: opencodeSessionId },
+          body: {
+            model: resolvedModel ?? undefined,
+            system: system ?? undefined,
+            parts: [{ type: "text", text: message }]
+          },
+          query: { directory: conversation.workspacePath }
+        });
+        if (!assistantContent) {
+          const extracted = extractAssistantResponse(response);
+          assistantContent = extracted.content;
+        }
+      } finally {
+        streamController.abort();
+        req.off("close", closeHandler);
+        try {
+          await eventTask;
+        } catch {
+          // ignore
+        }
+      }
+
+      if (assistantContent.length > 0) {
+        await appendTranscriptEntry(requestRepoRoot, conversation.id, session.id, {
+          ts: nowIso(),
+          role: "assistant",
+          content: assistantContent,
+          sessionId: session.id,
+          conversationId: conversation.id
+        });
+      }
+
+      await updateSessionTimestamp(requestRepoRoot, conversation.id, session);
+      await updateConversationTimestamp(requestRepoRoot, conversation);
+
+      sendSseEvent(res, "message_end", { id: assistantMessageId, content: assistantContent });
+      res.end();
+      return;
+    } catch (error) {
+      if (res.headersSent) {
+        sendSseEvent(res, "error", {
+          message: error instanceof Error ? error.message : String(error)
+        });
+        res.end();
+        return;
+      }
+      if (error instanceof SyntaxError) {
+        sendBadRequest(res, "Invalid JSON body.");
+        return;
+      }
+      sendError(res, error);
+      return;
+    }
   }
 
   if (

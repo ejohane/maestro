@@ -198,6 +198,23 @@ export const listSessions = async (
   }
 };
 
+export const deleteSession = async (
+  repoRoot: string,
+  conversationId: string,
+  sessionId: string
+): Promise<void> => {
+  const { conversationsDir } = getMaestroPaths(repoRoot);
+  const sessionDir = path.join(conversationsDir, conversationId, "sessions", sessionId);
+  await fs.rm(sessionDir, { recursive: true, force: true });
+  const current = await readCurrentContext(repoRoot);
+  if (current.conversationId === conversationId && current.sessionId === sessionId) {
+    await setCurrentContext(repoRoot, {
+      projectId: current.projectId,
+      conversationId
+    });
+  }
+};
+
 export const updateConversationTimestamp = async (
   repoRoot: string,
   conversation: Conversation

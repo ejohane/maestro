@@ -3,6 +3,23 @@ import { Moon, Sun } from "lucide-react"
 
 import { AppSidebar } from "./components/app-sidebar"
 import {
+  Conversation,
+  ConversationContent,
+  ConversationScrollButton,
+} from "./components/ai-elements/conversation"
+import { Loader } from "./components/ai-elements/loader"
+import {
+  Message,
+  MessageContent,
+  MessageResponse,
+} from "./components/ai-elements/message"
+import {
+  PromptInput,
+  PromptInputFooter,
+  PromptInputSubmit,
+  PromptInputTextarea,
+} from "./components/ai-elements/prompt-input"
+import {
   Breadcrumb,
   BreadcrumbItem,
   BreadcrumbLink,
@@ -75,6 +92,11 @@ type ApiPullRequest = {
   repo: string
 }
 
+type ApiTranscriptEntry = {
+  role: "user" | "assistant" | "system"
+  content: string
+}
+
 type CreateConversationResponse = {
   project: ApiProject
   conversation: ApiConversation
@@ -124,6 +146,13 @@ type OpenPullRequest = ApiPullRequest & {
   projectName: string
 }
 
+type ChatMessage = {
+  id: string
+  role: "user" | "assistant" | "system"
+  content: string
+  isStreaming?: boolean
+}
+
 const App = () => {
   const { theme, toggleTheme } = useTheme()
   const [projects, setProjects] = React.useState<Project[]>([])
@@ -154,6 +183,11 @@ const App = () => {
   const [createWorkspaceError, setCreateWorkspaceError] = React.useState<string | null>(
     null
   )
+  const [sessionForm, setSessionForm] = React.useState({ title: "" })
+  const [isCreatingSession, setIsCreatingSession] = React.useState(false)
+  const [createSessionError, setCreateSessionError] = React.useState<string | null>(null)
+  const [deletingSessionId, setDeletingSessionId] = React.useState<string | null>(null)
+  const [deleteSessionError, setDeleteSessionError] = React.useState<string | null>(null)
   const [projectIconDraft, setProjectIconDraft] = React.useState("")
   const [isUpdatingProjectIcon, setIsUpdatingProjectIcon] = React.useState(false)
   const [projectIconError, setProjectIconError] = React.useState<string | null>(null)
@@ -167,6 +201,19 @@ const App = () => {
   const [detectRepoError, setDetectRepoError] = React.useState<string | null>(null)
   const [isDeletingWorkspace, setIsDeletingWorkspace] = React.useState(false)
   const [deleteWorkspaceError, setDeleteWorkspaceError] = React.useState<string | null>(null)
+  const [messages, setMessages] = React.useState<ChatMessage[]>([])
+  const [chatStatus, setChatStatus] = React.useState<"idle" | "streaming" | "error">(
+    "idle"
+  )
+  const [chatError, setChatError] = React.useState<string | null>(null)
+  const [promptValue, setPromptValue] = React.useState("")
+  const [isTranscriptLoading, setIsTranscriptLoading] = React.useState(false)
+  const [isAwaitingFirstToken, setIsAwaitingFirstToken] = React.useState(false)
+  const [showScrollButton, setShowScrollButton] = React.useState(false)
+  const scrollContainerRef = React.useRef<HTMLDivElement | null>(null)
+  const streamAbortRef = React.useRef<AbortController | null>(null)
+  const transcriptAbortRef = React.useRef<AbortController | null>(null)
+  const autoScrollRef = React.useRef(true)
   const [openPullRequests, setOpenPullRequests] = React.useState<OpenPullRequest[]>([])
   const [isLoadingPullRequests, setIsLoadingPullRequests] = React.useState(false)
   const [pullRequestsError, setPullRequestsError] = React.useState<string | null>(null)
@@ -369,6 +416,84 @@ const App = () => {
     () => projects.some((project) => project.repoUrl?.trim()),
     [projects]
   )
+  const createLocalMessageId = React.useCallback(() => {
+    return `m_${Math.random().toString(36).slice(2, 10)}`
+  }, [])
+
+  const scrollToBottom = React.useCallback(() => {
+    const container = scrollContainerRef.current
+    if (!container) {
+      return
+    }
+    container.scrollTop = container.scrollHeight
+  }, [])
+
+  const handleScroll = React.useCallback(() => {
+    const container = scrollContainerRef.current
+    if (!container) {
+      return
+    }
+    const distanceFromBottom =
+      container.scrollHeight - container.scrollTop - container.clientHeight
+    const shouldAutoScroll = distanceFromBottom < 32
+    autoScrollRef.current = shouldAutoScroll
+    setShowScrollButton(!shouldAutoScroll)
+  }, [])
+
+  React.useEffect(() => {
+    streamAbortRef.current?.abort()
+    transcriptAbortRef.current?.abort()
+    setMessages([])
+    setPromptValue("")
+    setChatStatus("idle")
+    setChatError(null)
+    setIsAwaitingFirstToken(false)
+    setShowScrollButton(false)
+    autoScrollRef.current = true
+    const conversationId = selectedWorkspace?.id
+    const sessionId = selectedChat?.id
+    if (!conversationId || !sessionId) {
+      setIsTranscriptLoading(false)
+      return
+    }
+    const controller = new AbortController()
+    transcriptAbortRef.current = controller
+    setIsTranscriptLoading(true)
+    fetch(`/api/conversations/${conversationId}/sessions/${sessionId}/transcript`, {
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error("Failed to load transcript.")
+        }
+        const transcript = (await response.json()) as ApiTranscriptEntry[]
+        setMessages(
+          transcript.map((entry) => ({
+            id: createLocalMessageId(),
+            role: entry.role,
+            content: entry.content,
+          }))
+        )
+      })
+      .catch((err) => {
+        if (controller.signal.aborted) {
+          return
+        }
+        setChatError(err instanceof Error ? err.message : "Failed to load transcript.")
+        setMessages([])
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) {
+          setIsTranscriptLoading(false)
+        }
+      })
+  }, [selectedWorkspace?.id, selectedChat?.id, createLocalMessageId])
+
+  React.useEffect(() => {
+    if (autoScrollRef.current) {
+      scrollToBottom()
+    }
+  }, [messages, isTranscriptLoading, scrollToBottom])
 
   React.useEffect(() => {
     setProjectIconDraft(selectedProject?.icon ?? "")
@@ -386,6 +511,10 @@ const App = () => {
 
   React.useEffect(() => {
     setDeleteWorkspaceError(null)
+  }, [selectedWorkspaceId])
+
+  React.useEffect(() => {
+    setDeleteSessionError(null)
   }, [selectedWorkspaceId])
 
   React.useEffect(() => {
@@ -506,6 +635,11 @@ const App = () => {
   const handleWorkspaceFormChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const value = event.target.value
     setWorkspaceForm({ title: value })
+  }
+
+  const handleSessionFormChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const value = event.target.value
+    setSessionForm({ title: value })
   }
 
   const handleProjectIconChange = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -798,6 +932,273 @@ const App = () => {
     }
   }
 
+  const handleCreateSession = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!selectedProject || !selectedWorkspace) {
+      return
+    }
+    const title = sessionForm.title.trim()
+    setIsCreatingSession(true)
+    setCreateSessionError(null)
+    try {
+      const response = await fetch(
+        `/api/conversations/${selectedWorkspace.id}/sessions`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ title: title || undefined }),
+        }
+      )
+      if (!response.ok) {
+        let message = "Failed to create session."
+        try {
+          const payload = (await response.json()) as { error?: string }
+          if (payload.error) {
+            message = payload.error
+          }
+        } catch {
+          // Ignore parsing errors
+        }
+        throw new Error(message)
+      }
+      const session = (await response.json()) as ApiSession
+      setSessionForm({ title: "" })
+      setIsProjectsView(false)
+      setSelectedProjectId(selectedProject.id)
+      setSelectedWorkspaceId(selectedWorkspace.id)
+      setSelectedChatId(session.id)
+      await loadProjects()
+    } catch (err) {
+      setCreateSessionError(
+        err instanceof Error ? err.message : "Failed to create session."
+      )
+    } finally {
+      setIsCreatingSession(false)
+    }
+  }
+
+  const handleDeleteSession = async (sessionId: string) => {
+    if (!selectedProject || !selectedWorkspace) {
+      return
+    }
+    const sessionLabel =
+      selectedWorkspace.chats.find((chat) => chat.id === sessionId)?.name || sessionId
+    const confirmed = window.confirm(`Delete session "${sessionLabel}"?`)
+    if (!confirmed) {
+      return
+    }
+    setDeletingSessionId(sessionId)
+    setDeleteSessionError(null)
+    try {
+      const response = await fetch(
+        `/api/conversations/${selectedWorkspace.id}/sessions/${sessionId}?confirm=true`,
+        {
+          method: "DELETE",
+        }
+      )
+      if (!response.ok) {
+        let message = "Failed to delete session."
+        try {
+          const payload = (await response.json()) as { error?: string }
+          if (payload.error) {
+            message = payload.error
+          }
+        } catch {
+          // Ignore parsing errors
+        }
+        throw new Error(message)
+      }
+      if (selectedChatId === sessionId) {
+        setSelectedChatId(null)
+      }
+      await loadProjects()
+    } catch (err) {
+      setDeleteSessionError(
+        err instanceof Error ? err.message : "Failed to delete session."
+      )
+    } finally {
+      setDeletingSessionId((current) => (current === sessionId ? null : current))
+    }
+  }
+
+  const handlePromptChange = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setPromptValue(event.target.value)
+  }
+
+  const handlePromptKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault()
+      void handlePromptSubmit(event)
+    }
+  }
+
+  const handlePromptSubmit = async (
+    event: React.FormEvent<HTMLFormElement> | React.KeyboardEvent<HTMLTextAreaElement>
+  ) => {
+    event.preventDefault()
+    if (!selectedWorkspace || !selectedChat) {
+      return
+    }
+    if (chatStatus === "streaming") {
+      return
+    }
+    const content = promptValue.trim()
+    if (!content) {
+      return
+    }
+
+    const conversationId = selectedWorkspace.id
+    const sessionId = selectedChat.id
+    const userMessageId = createLocalMessageId()
+    const assistantMessageId = createLocalMessageId()
+
+    setPromptValue("")
+    setChatError(null)
+    setIsAwaitingFirstToken(true)
+    autoScrollRef.current = true
+    setChatStatus("streaming")
+    setMessages((prev) => [
+      ...prev,
+      { id: userMessageId, role: "user", content },
+      { id: assistantMessageId, role: "assistant", content: "", isStreaming: true },
+    ])
+
+    const controller = new AbortController()
+    streamAbortRef.current = controller
+
+    try {
+      const response = await fetch(
+        `/api/conversations/${conversationId}/sessions/${sessionId}/chat/stream`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ message: content }),
+          signal: controller.signal,
+        }
+      )
+      if (!response.ok || !response.body) {
+        throw new Error("Failed to start streaming response.")
+      }
+
+      const reader = response.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ""
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) {
+          break
+        }
+        buffer += decoder.decode(value, { stream: true })
+        const parts = buffer.split("\n\n")
+        buffer = parts.pop() ?? ""
+
+        for (const part of parts) {
+          const lines = part.split("\n").filter(Boolean)
+          if (!lines.length) {
+            continue
+          }
+          let eventName = "message"
+          const dataLines: string[] = []
+          for (const line of lines) {
+            if (line.startsWith("event:")) {
+              eventName = line.replace(/^event:\s*/, "")
+            } else if (line.startsWith("data:")) {
+              dataLines.push(line.replace(/^data:\s*/, ""))
+            }
+          }
+          const rawData = dataLines.join("\n")
+          let data: any = rawData
+          if (rawData) {
+            try {
+              data = JSON.parse(rawData)
+            } catch {
+              data = rawData
+            }
+          }
+
+          if (eventName === "message_delta" && typeof data?.delta === "string") {
+            setIsAwaitingFirstToken(false)
+            setMessages((prev) =>
+              prev.map((message) =>
+                message.id === assistantMessageId
+                  ? {
+                      ...message,
+                      content: message.content + data.delta,
+                      isStreaming: true,
+                    }
+                  : message
+              )
+            )
+            continue
+          }
+
+          if (eventName === "message_end") {
+            setIsAwaitingFirstToken(false)
+            setChatStatus("idle")
+            setMessages((prev) =>
+              prev.map((message) =>
+                message.id === assistantMessageId
+                  ? {
+                      ...message,
+                      content:
+                        typeof data?.content === "string" ? data.content : message.content,
+                      isStreaming: false,
+                    }
+                  : message
+              )
+            )
+            continue
+          }
+
+          if (eventName === "error") {
+            setIsAwaitingFirstToken(false)
+            setChatStatus("error")
+            setChatError(
+              typeof data?.message === "string"
+                ? data.message
+                : "Streaming failed."
+            )
+            setMessages((prev) =>
+              prev.map((message) =>
+                message.id === assistantMessageId
+                  ? { ...message, isStreaming: false }
+                  : message
+              )
+            )
+          }
+        }
+      }
+    } catch (err) {
+      if (controller.signal.aborted) {
+        return
+      }
+      setIsAwaitingFirstToken(false)
+      setChatStatus("error")
+      setChatError(err instanceof Error ? err.message : "Streaming failed.")
+      setMessages((prev) =>
+        prev.map((message) =>
+          message.id === assistantMessageId
+            ? { ...message, isStreaming: false }
+            : message
+        )
+      )
+    } finally {
+      if (!controller.signal.aborted) {
+        setIsAwaitingFirstToken(false)
+        setChatStatus((status) => (status === "streaming" ? "idle" : status))
+        setMessages((prev) =>
+          prev.map((message) =>
+            message.id === assistantMessageId
+              ? { ...message, isStreaming: false }
+              : message
+          )
+        )
+      }
+      streamAbortRef.current = null
+    }
+  }
+
   const formatDate = (value?: string) => {
     if (!value) {
       return "Unknown"
@@ -828,10 +1229,13 @@ const App = () => {
   )
   const isWorkspaceView = Boolean(selectedWorkspace && !selectedChat)
   const isChatView = Boolean(selectedChat)
+  const isChatStreaming = chatStatus === "streaming"
   const projectIconValue = selectedProject?.icon?.trim() ?? ""
   const projectIconPreview =
     projectIconDraft.trim() || selectedProject?.name?.slice(0, 1).toUpperCase() || "?"
   const projectIconDirty = projectIconDraft.trim() !== projectIconValue
+  const promptDisabled =
+    isChatStreaming || !selectedWorkspace || !selectedChat || isTranscriptLoading
   const projectRepoUrlValue = selectedProject?.repoUrl?.trim() ?? ""
   const projectRepoProviderValue = selectedProject?.gitProvider ?? ""
   const projectRepoDirty =
@@ -1518,6 +1922,171 @@ const App = () => {
                 </div>
               </div>
             </div>
+          ) : isWorkspaceView ? (
+            <div className="grid gap-4 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+              <Card className="border-dashed">
+                <form onSubmit={handleCreateSession}>
+                  <CardHeader>
+                    <CardTitle>Create a new session</CardTitle>
+                    <CardDescription>
+                      Start a focused chat within this workspace.
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="grid gap-3">
+                    <div className="grid gap-2">
+                      <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                        Session name
+                      </label>
+                      <Input
+                        value={sessionForm.title}
+                        onChange={handleSessionFormChange}
+                        placeholder="e.g. Bug bash follow-up"
+                      />
+                    </div>
+                    {createSessionError ? (
+                      <div className="rounded-md border border-destructive/50 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+                        {createSessionError}
+                      </div>
+                    ) : null}
+                  </CardContent>
+                  <CardFooter>
+                    <Button type="submit" disabled={isCreatingSession}>
+                      {isCreatingSession ? "Creating session..." : "Create session"}
+                    </Button>
+                  </CardFooter>
+                </form>
+              </Card>
+              <Card>
+                <CardHeader>
+                  <CardTitle>Chat sessions</CardTitle>
+                  <CardDescription>Jump back into any active thread.</CardDescription>
+                </CardHeader>
+                <CardContent className="grid gap-3">
+                  {selectedWorkspace?.chats.length ? (
+                    selectedWorkspace.chats.map((chat) => {
+                      const isDeleting = deletingSessionId === chat.id
+                      return (
+                        <div
+                          key={chat.id}
+                          className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-muted/30 px-4 py-3 text-sm"
+                        >
+                          <div className="min-w-0 flex-1">
+                            <div className="truncate font-medium text-foreground">
+                              {chat.name}
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() => {
+                                if (!selectedProject || !selectedWorkspace) {
+                                  return
+                                }
+                                handleSelectChat(selectedProject.id, selectedWorkspace.id, chat.id)
+                              }}
+                            >
+                              Open
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleDeleteSession(chat.id)}
+                              disabled={isDeleting}
+                            >
+                              {isDeleting ? "Deleting..." : "Delete"}
+                            </Button>
+                          </div>
+                        </div>
+                      )
+                    })
+                  ) : (
+                    <div className="rounded-lg border border-dashed px-4 py-3 text-sm text-muted-foreground">
+                      No sessions yet. Create your first one.
+                    </div>
+                  )}
+                  {deleteSessionError ? (
+                    <div className="rounded-md border border-destructive/50 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+                      {deleteSessionError}
+                    </div>
+                  ) : null}
+                </CardContent>
+              </Card>
+            </div>
+          ) : isChatView ? (
+            <Conversation className="min-h-[520px]">
+              <ConversationContent
+                ref={scrollContainerRef}
+                onScroll={handleScroll}
+                className="space-y-4"
+              >
+                {isTranscriptLoading ? (
+                  <div className="flex h-full min-h-[320px] items-center justify-center text-sm text-muted-foreground">
+                    <Loader className="mr-2" /> Loading transcript...
+                  </div>
+                ) : messages.length ? (
+                  messages.map((message) => (
+                    <Message key={message.id} role={message.role}>
+                      <MessageContent>
+                        {message.role === "assistant" ? (
+                          <MessageResponse>
+                            {message.content}
+                            {message.isStreaming && message.content ? (
+                              <span className="ml-1 inline-block h-3 w-1 animate-pulse rounded-sm bg-muted-foreground/60" />
+                            ) : null}
+                            {message.isStreaming && !message.content && isAwaitingFirstToken ? (
+                              <span className="inline-flex items-center gap-2">
+                                <Loader /> Waiting for response...
+                              </span>
+                            ) : null}
+                          </MessageResponse>
+                        ) : (
+                          message.content
+                        )}
+                      </MessageContent>
+                    </Message>
+                  ))
+                ) : (
+                  <div className="flex h-full min-h-[320px] items-center justify-center text-sm text-muted-foreground">
+                    Ask a question to start the session.
+                  </div>
+                )}
+              </ConversationContent>
+              {showScrollButton ? (
+                <ConversationScrollButton onClick={scrollToBottom}>
+                  Jump to latest
+                </ConversationScrollButton>
+              ) : null}
+              <div className="border-t bg-background/80 p-4">
+                <PromptInput onSubmit={handlePromptSubmit}>
+                  <PromptInputTextarea
+                    value={promptValue}
+                    onChange={handlePromptChange}
+                    onKeyDown={handlePromptKeyDown}
+                    placeholder="Ask for a review, summary, or next steps..."
+                    disabled={promptDisabled}
+                  />
+                  <PromptInputFooter>
+                    <div className="text-xs text-muted-foreground">
+                      Shift + Enter for a new line
+                    </div>
+                    <PromptInputSubmit
+                      type="submit"
+                      disabled={promptDisabled || !promptValue.trim()}
+                    >
+                      {isChatStreaming ? "Streaming..." : "Send"}
+                    </PromptInputSubmit>
+                  </PromptInputFooter>
+                </PromptInput>
+                {chatError ? (
+                  <div className="mt-3 rounded-md border border-destructive/50 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+                    {chatError}
+                  </div>
+                ) : null}
+              </div>
+            </Conversation>
           ) : (
             <div className="rounded-xl border bg-background p-6">
               <div className="text-sm font-semibold text-foreground">

@@ -21,6 +21,7 @@ export declare const deleteConversation: (repoRoot: string, conversationId: stri
 export declare const writeSession: (repoRoot: string, conversationId: string, session: Session) => Promise<void>;
 export declare const readSession: (repoRoot: string, conversationId: string, sessionId: string) => Promise<Session>;
 export declare const listSessions: (repoRoot: string, conversationId: string) => Promise<Session[]>;
+export declare const deleteSession: (repoRoot: string, conversationId: string, sessionId: string) => Promise<void>;
 export declare const updateConversationTimestamp: (repoRoot: string, conversation: Conversation) => Promise<void>;
 export declare const updateSessionTimestamp: (repoRoot: string, conversationId: string, session: Session) => Promise<void>;
 export declare const setCurrentContext: (repoRoot: string, context: CurrentContext) => Promise<void>;
