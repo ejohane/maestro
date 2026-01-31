@@ -156,6 +156,26 @@ export const createWorktree = async (
   await runGit(repoRoot, ["worktree", "add", worktreePath, branch]);
 };
 
+export const removeWorktree = async (repoRoot: string, worktreePath: string): Promise<void> => {
+  try {
+    const stat = await fs.stat(worktreePath);
+    if (!stat.isDirectory()) {
+      return;
+    }
+  } catch {
+    await runGit(repoRoot, ["worktree", "prune"]);
+    return;
+  }
+  await runGit(repoRoot, ["worktree", "remove", "--force", worktreePath]);
+};
+
+export const deleteBranch = async (repoRoot: string, branch: string): Promise<void> => {
+  if (!(await refExists(repoRoot, branch))) {
+    return;
+  }
+  await runGit(repoRoot, ["branch", "-D", branch]);
+};
+
 export const stashChanges = async (
   repoRoot: string,
   conversationId: string

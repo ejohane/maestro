@@ -141,6 +141,16 @@ export const listConversations = async (repoRoot: string): Promise<Conversation[
   }
 };
 
+export const deleteConversation = async (repoRoot: string, conversationId: string): Promise<void> => {
+  const { conversationsDir } = getMaestroPaths(repoRoot);
+  const conversationDir = path.join(conversationsDir, conversationId);
+  await fs.rm(conversationDir, { recursive: true, force: true });
+  const current = await readCurrentContext(repoRoot);
+  if (current.conversationId === conversationId) {
+    await setCurrentContext(repoRoot, { projectId: current.projectId });
+  }
+};
+
 export const writeSession = async (
   repoRoot: string,
   conversationId: string,

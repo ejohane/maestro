@@ -17,6 +17,7 @@ export declare const findProject: (repoRoot: string, nameOrId: string) => Promis
 export declare const writeConversation: (repoRoot: string, conversation: Conversation) => Promise<void>;
 export declare const readConversation: (repoRoot: string, conversationId: string) => Promise<Conversation>;
 export declare const listConversations: (repoRoot: string) => Promise<Conversation[]>;
+export declare const deleteConversation: (repoRoot: string, conversationId: string) => Promise<void>;
 export declare const writeSession: (repoRoot: string, conversationId: string, session: Session) => Promise<void>;
 export declare const readSession: (repoRoot: string, conversationId: string, sessionId: string) => Promise<Session>;
 export declare const listSessions: (repoRoot: string, conversationId: string) => Promise<Session[]>;
