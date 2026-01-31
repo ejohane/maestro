@@ -54,6 +54,18 @@ type ServerOptions = {
   host: string;
 };
 
+type PullRequestInfo = {
+  id: string;
+  title: string;
+  url: string;
+  author?: string;
+  sourceBranch?: string;
+  targetBranch?: string;
+  updatedAt?: string;
+  provider: GitProvider;
+  repo: string;
+};
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const webRoot = path.resolve(__dirname, "../../web/dist");
@@ -202,6 +214,129 @@ const inferGitProvider = (repoUrl?: string): GitProvider | undefined => {
     }
   }
   return undefined;
+};
+
+const parseRepoUrl = (repoUrl: string): { host: string; path: string } | null => {
+  try {
+    const parsed = new URL(repoUrl);
+    const host = parsed.hostname;
+    const pathName = parsed.pathname.replace(/^\/+/, "").replace(/\.git$/, "");
+    if (!host || !pathName) {
+      return null;
+    }
+    return { host, path: pathName.replace(/\/+$/, "") };
+  } catch {
+    return null;
+  }
+};
+
+const buildGitHubApiBase = (host: string): string => {
+  if (host === "github.com") {
+    return "https://api.github.com";
+  }
+  return `https://${host}/api/v3`;
+};
+
+const buildGitLabApiBase = (host: string): string => {
+  return `https://${host}/api/v4`;
+};
+
+const fetchGitHubPullRequests = async (
+  repoUrl: string,
+  limit: number
+): Promise<PullRequestInfo[]> => {
+  const parsed = parseRepoUrl(repoUrl);
+  if (!parsed) {
+    throw new Error("Invalid GitHub repository URL.");
+  }
+  const [owner, repo] = parsed.path.split("/");
+  if (!owner || !repo) {
+    throw new Error("GitHub repository URL must include owner and repo.");
+  }
+  const apiBase = buildGitHubApiBase(parsed.host);
+  const url = new URL(`${apiBase}/repos/${owner}/${repo}/pulls`);
+  url.searchParams.set("state", "open");
+  url.searchParams.set("per_page", String(limit));
+  const headers: Record<string, string> = {
+    Accept: "application/vnd.github+json",
+    "User-Agent": "Maestro"
+  };
+  const token = process.env.GITHUB_TOKEN;
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+  const response = await fetch(url.toString(), { headers });
+  if (!response.ok) {
+    throw new Error(`GitHub API error (${response.status}).`);
+  }
+  const payload = (await response.json()) as Array<{
+    id: number;
+    title: string;
+    html_url: string;
+    updated_at?: string;
+    user?: { login?: string };
+    head?: { ref?: string };
+    base?: { ref?: string };
+  }>;
+  return payload.map((item) => ({
+    id: String(item.id),
+    title: item.title,
+    url: item.html_url,
+    author: item.user?.login,
+    sourceBranch: item.head?.ref,
+    targetBranch: item.base?.ref,
+    updatedAt: item.updated_at,
+    provider: "github",
+    repo: `${owner}/${repo}`
+  }));
+};
+
+const fetchGitLabMergeRequests = async (
+  repoUrl: string,
+  limit: number
+): Promise<PullRequestInfo[]> => {
+  const parsed = parseRepoUrl(repoUrl);
+  if (!parsed) {
+    throw new Error("Invalid GitLab repository URL.");
+  }
+  const apiBase = buildGitLabApiBase(parsed.host);
+  const url = new URL(
+    `${apiBase}/projects/${encodeURIComponent(parsed.path)}/merge_requests`
+  );
+  url.searchParams.set("state", "opened");
+  url.searchParams.set("per_page", String(limit));
+  const headers: Record<string, string> = {
+    "User-Agent": "Maestro"
+  };
+  const token = process.env.GITLAB_TOKEN;
+  if (token) {
+    headers["PRIVATE-TOKEN"] = token;
+  }
+  const response = await fetch(url.toString(), { headers });
+  if (!response.ok) {
+    throw new Error(`GitLab API error (${response.status}).`);
+  }
+  const payload = (await response.json()) as Array<{
+    id: number;
+    iid?: number;
+    title: string;
+    web_url: string;
+    updated_at?: string;
+    author?: { username?: string };
+    source_branch?: string;
+    target_branch?: string;
+  }>;
+  return payload.map((item) => ({
+    id: String(item.iid ?? item.id),
+    title: item.title,
+    url: item.web_url,
+    author: item.author?.username,
+    sourceBranch: item.source_branch,
+    targetBranch: item.target_branch,
+    updatedAt: item.updated_at,
+    provider: "gitlab",
+    repo: parsed.path
+  }));
 };
 
 const readPackageJson = async (repoRoot: string): Promise<Record<string, unknown> | null> => {
@@ -547,6 +682,49 @@ const handleApi = async (req: IncomingMessage, res: ServerResponse, repoRoot: st
         sendBadRequest(res, "Invalid JSON body.");
         return;
       }
+      sendError(res, error);
+      return;
+    }
+  }
+
+  if (
+    req.method === "GET" &&
+    segments.length === 4 &&
+    segments[1] === "projects" &&
+    segments[3] === "pull-requests"
+  ) {
+    try {
+      let project: Project;
+      try {
+        project = await readProjectById(requestRepoRoot, segments[2]);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+          sendNotFound(res);
+          return;
+        }
+        throw error;
+      }
+      const repoUrl = project.repoUrl?.trim();
+      if (!repoUrl) {
+        sendBadRequest(res, "Project repo URL is required.");
+        return;
+      }
+      const provider = project.gitProvider ?? inferGitProvider(repoUrl);
+      if (!provider) {
+        sendBadRequest(res, "Git provider could not be determined.");
+        return;
+      }
+      const limitParam = Number(url.searchParams.get("limit") ?? 10);
+      const limit = Number.isFinite(limitParam)
+        ? Math.min(Math.max(Math.trunc(limitParam), 1), 50)
+        : 10;
+      const pullRequests =
+        provider === "github"
+          ? await fetchGitHubPullRequests(repoUrl, limit)
+          : await fetchGitLabMergeRequests(repoUrl, limit);
+      sendJson(res, 200, pullRequests);
+      return;
+    } catch (error) {
       sendError(res, error);
       return;
     }
