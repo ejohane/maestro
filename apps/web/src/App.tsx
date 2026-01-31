@@ -188,17 +188,6 @@ const App = () => {
   const [createSessionError, setCreateSessionError] = React.useState<string | null>(null)
   const [deletingSessionId, setDeletingSessionId] = React.useState<string | null>(null)
   const [deleteSessionError, setDeleteSessionError] = React.useState<string | null>(null)
-  const [projectIconDraft, setProjectIconDraft] = React.useState("")
-  const [isUpdatingProjectIcon, setIsUpdatingProjectIcon] = React.useState(false)
-  const [projectIconError, setProjectIconError] = React.useState<string | null>(null)
-  const [projectRepoForm, setProjectRepoForm] = React.useState({
-    repoUrl: "",
-    gitProvider: "",
-  })
-  const [isUpdatingProjectRepo, setIsUpdatingProjectRepo] = React.useState(false)
-  const [projectRepoError, setProjectRepoError] = React.useState<string | null>(null)
-  const [isDetectingRepo, setIsDetectingRepo] = React.useState(false)
-  const [detectRepoError, setDetectRepoError] = React.useState<string | null>(null)
   const [isDeletingWorkspace, setIsDeletingWorkspace] = React.useState(false)
   const [deleteWorkspaceError, setDeleteWorkspaceError] = React.useState<string | null>(null)
   const [messages, setMessages] = React.useState<ChatMessage[]>([])
@@ -386,6 +375,33 @@ const App = () => {
       .slice(0, recentSessionsLimit)
   }, [projects, recentSessionsLimit])
 
+  const projectRecentSessions = React.useMemo(() => {
+    if (!selectedProject) {
+      return [] as RecentSession[]
+    }
+    const sessions: RecentSession[] = []
+    selectedProject.workspaces.forEach((workspace) => {
+      workspace.chats.forEach((chat) => {
+        sessions.push({
+          id: chat.id,
+          name: chat.name,
+          projectId: selectedProject.id,
+          projectName: selectedProject.name,
+          workspaceId: workspace.id,
+          workspaceName: workspace.name,
+          updatedAt: chat.updatedAt ?? chat.createdAt,
+        })
+      })
+    })
+    return sessions
+      .sort((a, b) => {
+        const aTime = a.updatedAt ? new Date(a.updatedAt).getTime() : 0
+        const bTime = b.updatedAt ? new Date(b.updatedAt).getTime() : 0
+        return bTime - aTime
+      })
+      .slice(0, recentSessionsLimit)
+  }, [selectedProject, recentSessionsLimit])
+
   const allWorkspaces = React.useMemo(() => {
     return projects
       .flatMap((project) =>
@@ -412,10 +428,18 @@ const App = () => {
     })
   }, [openPullRequests])
 
+  const projectPullRequests = React.useMemo(() => {
+    if (!selectedProject) {
+      return [] as OpenPullRequest[]
+    }
+    return sortedPullRequests.filter((item) => item.projectId === selectedProject.id)
+  }, [sortedPullRequests, selectedProject])
+
   const hasRepoProjects = React.useMemo(
     () => projects.some((project) => project.repoUrl?.trim()),
     [projects]
   )
+  const hasRepoProject = Boolean(selectedProject?.repoUrl?.trim())
   const createLocalMessageId = React.useCallback(() => {
     return `m_${Math.random().toString(36).slice(2, 10)}`
   }, [])
@@ -494,20 +518,6 @@ const App = () => {
       scrollToBottom()
     }
   }, [messages, isTranscriptLoading, scrollToBottom])
-
-  React.useEffect(() => {
-    setProjectIconDraft(selectedProject?.icon ?? "")
-    setProjectIconError(null)
-  }, [selectedProject])
-
-  React.useEffect(() => {
-    setProjectRepoForm({
-      repoUrl: selectedProject?.repoUrl ?? "",
-      gitProvider: selectedProject?.gitProvider ?? "",
-    })
-    setProjectRepoError(null)
-    setDetectRepoError(null)
-  }, [selectedProject])
 
   React.useEffect(() => {
     setDeleteWorkspaceError(null)
@@ -625,13 +635,6 @@ const App = () => {
     }
   }
 
-  const handleProjectRepoFormChange = (field: keyof typeof projectRepoForm) => {
-    return (event: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
-      const value = event.target.value
-      setProjectRepoForm((prev) => ({ ...prev, [field]: value }))
-    }
-  }
-
   const handleWorkspaceFormChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const value = event.target.value
     setWorkspaceForm({ title: value })
@@ -640,10 +643,6 @@ const App = () => {
   const handleSessionFormChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const value = event.target.value
     setSessionForm({ title: value })
-  }
-
-  const handleProjectIconChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    setProjectIconDraft(event.target.value)
   }
 
   const handleSelectDirectory = async () => {
@@ -780,111 +779,6 @@ const App = () => {
       )
     } finally {
       setIsCreatingWorkspace(false)
-    }
-  }
-
-  const handleUpdateProjectIcon = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
-    if (!selectedProject) {
-      return
-    }
-    setIsUpdatingProjectIcon(true)
-    setProjectIconError(null)
-    try {
-      const response = await fetch(`/api/projects/${selectedProject.id}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ icon: projectIconDraft.trim() || null }),
-      })
-      if (!response.ok) {
-        let message = "Failed to update project icon."
-        try {
-          const payload = (await response.json()) as { error?: string }
-          if (payload.error) {
-            message = payload.error
-          }
-        } catch {
-          // Ignore parsing errors
-        }
-        throw new Error(message)
-      }
-      await loadProjects()
-    } catch (err) {
-      setProjectIconError(
-        err instanceof Error ? err.message : "Failed to update project icon."
-      )
-    } finally {
-      setIsUpdatingProjectIcon(false)
-    }
-  }
-
-  const handleUpdateProjectRepo = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
-    if (!selectedProject) {
-      return
-    }
-    setIsUpdatingProjectRepo(true)
-    setProjectRepoError(null)
-    try {
-      const response = await fetch(`/api/projects/${selectedProject.id}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          repoUrl: projectRepoForm.repoUrl.trim() || null,
-          gitProvider: projectRepoForm.gitProvider || undefined,
-        }),
-      })
-      if (!response.ok) {
-        let message = "Failed to update repository settings."
-        try {
-          const payload = (await response.json()) as { error?: string }
-          if (payload.error) {
-            message = payload.error
-          }
-        } catch {
-          // Ignore parsing errors
-        }
-        throw new Error(message)
-      }
-      await loadProjects()
-    } catch (err) {
-      setProjectRepoError(
-        err instanceof Error ? err.message : "Failed to update repository settings."
-      )
-    } finally {
-      setIsUpdatingProjectRepo(false)
-    }
-  }
-
-  const handleDetectProjectRepo = async () => {
-    if (!selectedProject) {
-      return
-    }
-    setIsDetectingRepo(true)
-    setDetectRepoError(null)
-    try {
-      const response = await fetch(`/api/projects/${selectedProject.id}/detect-repo`, {
-        method: "POST",
-      })
-      if (!response.ok) {
-        let message = "Failed to detect repository metadata."
-        try {
-          const payload = (await response.json()) as { error?: string }
-          if (payload.error) {
-            message = payload.error
-          }
-        } catch {
-          // Ignore parsing errors
-        }
-        throw new Error(message)
-      }
-      await loadProjects()
-    } catch (err) {
-      setDetectRepoError(
-        err instanceof Error ? err.message : "Failed to detect repository metadata."
-      )
-    } finally {
-      setIsDetectingRepo(false)
     }
   }
 
@@ -1231,16 +1125,8 @@ const App = () => {
   const isChatView = Boolean(selectedChat)
   const isChatStreaming = chatStatus === "streaming"
   const projectIconValue = selectedProject?.icon?.trim() ?? ""
-  const projectIconPreview =
-    projectIconDraft.trim() || selectedProject?.name?.slice(0, 1).toUpperCase() || "?"
-  const projectIconDirty = projectIconDraft.trim() !== projectIconValue
   const promptDisabled =
     isChatStreaming || !selectedWorkspace || !selectedChat || isTranscriptLoading
-  const projectRepoUrlValue = selectedProject?.repoUrl?.trim() ?? ""
-  const projectRepoProviderValue = selectedProject?.gitProvider ?? ""
-  const projectRepoDirty =
-    projectRepoForm.repoUrl.trim() !== projectRepoUrlValue ||
-    projectRepoForm.gitProvider !== projectRepoProviderValue
 
   const viewLabel = isChatView
     ? "Chat Session"
@@ -1296,6 +1182,7 @@ const App = () => {
     selectedProject?.repoUrl?.trim() && selectedProject.repoUrl.trim().startsWith("http")
       ? selectedProject.repoUrl.trim()
       : null
+  const recentSessionsForView = isProjectView ? projectRecentSessions : recentSessions
   return (
     <SidebarProvider>
       <AppSidebar
@@ -1459,13 +1346,15 @@ const App = () => {
               <div>
                 <div className="text-sm font-semibold text-foreground">Recent sessions</div>
                 <div className="text-xs text-muted-foreground">
-                  Last {recentSessionsLimit} sessions across your workspaces.
+                  {isProjectView
+                    ? `Last ${recentSessionsLimit} sessions in this project.`
+                    : `Last ${recentSessionsLimit} sessions across your workspaces.`}
                 </div>
               </div>
             </div>
             <div className="mt-4 flex gap-3 overflow-x-auto pb-2">
-              {recentSessions.length ? (
-                recentSessions.map((session) => (
+              {recentSessionsForView.length ? (
+                recentSessionsForView.map((session) => (
                   <button
                     key={session.id}
                     type="button"
@@ -1737,7 +1626,7 @@ const App = () => {
               </div>
             </div>
           ) : showWorkspaceCreator ? (
-            <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]">
+            <div className="grid gap-4 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
               <div className="grid gap-4">
                 <Card className="border-dashed">
                   <form onSubmit={handleCreateWorkspace}>
@@ -1774,152 +1663,101 @@ const App = () => {
                   </form>
                 </Card>
                 <Card>
-                  <form onSubmit={handleUpdateProjectIcon}>
-                    <CardHeader>
-                      <CardTitle>Project settings</CardTitle>
-                      <CardDescription>
-                        Update the icon that represents this project.
-                      </CardDescription>
-                    </CardHeader>
-                    <CardContent className="grid gap-3">
-                      <div className="flex flex-wrap items-center gap-4">
-                        <div className="flex h-12 w-12 items-center justify-center rounded-full border bg-muted text-xl">
-                          {projectIconPreview}
-                        </div>
-                        <div className="grid flex-1 gap-2">
-                          <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                            Project icon
-                          </label>
-                          <Input
-                            value={projectIconDraft}
-                            onChange={handleProjectIconChange}
-                            placeholder="Short label"
-                          />
-                          <div className="text-xs text-muted-foreground">
-                            Use an emoji or short text. Leave blank to clear.
-                          </div>
-                        </div>
-                      </div>
-                      {projectIconError ? (
-                        <div className="rounded-md border border-destructive/50 bg-destructive/5 px-3 py-2 text-sm text-destructive">
-                          {projectIconError}
-                        </div>
-                      ) : null}
-                    </CardContent>
-                    <CardFooter className="flex flex-wrap items-center gap-3">
-                      <Button
-                        type="submit"
-                        disabled={!projectIconDirty || isUpdatingProjectIcon}
-                      >
-                        {isUpdatingProjectIcon ? "Saving icon..." : "Save icon"}
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        onClick={() => setProjectIconDraft(projectIconValue)}
-                        disabled={!projectIconDirty || isUpdatingProjectIcon}
-                      >
-                        Reset
-                      </Button>
-                    </CardFooter>
-                  </form>
-                </Card>
-                <Card>
-                  <form onSubmit={handleUpdateProjectRepo}>
-                    <CardHeader>
-                      <CardTitle>Repository settings</CardTitle>
-                      <CardDescription>
-                        Link this project to a GitHub or GitLab repository.
-                      </CardDescription>
-                    </CardHeader>
-                    <CardContent className="grid gap-3">
-                      <div className="grid gap-2">
-                        <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                          Repo URL
-                        </label>
-                        <Input
-                          value={projectRepoForm.repoUrl}
-                          onChange={handleProjectRepoFormChange("repoUrl")}
-                          placeholder="https://github.com/org/repo"
-                        />
-                      </div>
-                      <div className="grid gap-2">
-                        <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                          Git provider
-                        </label>
-                        <select
-                          value={projectRepoForm.gitProvider}
-                          onChange={handleProjectRepoFormChange("gitProvider")}
-                          className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-base ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 md:text-sm"
+                  <CardHeader>
+                    <CardTitle>Workspaces</CardTitle>
+                    <CardDescription>Active workspaces for this project.</CardDescription>
+                  </CardHeader>
+                  <CardContent className="grid gap-3">
+                    {selectedProject?.workspaces.length ? (
+                      selectedProject.workspaces.map((workspace) => (
+                        <button
+                          key={workspace.id}
+                          type="button"
+                          onClick={() =>
+                            handleSelectWorkspace(selectedProject.id, workspace.id)
+                          }
+                          className="rounded-lg border bg-muted/20 px-4 py-3 text-left transition hover:border-primary/60 hover:bg-muted/40"
                         >
-                          <option value="">Auto-detect</option>
-                          <option value="github">GitHub</option>
-                          <option value="gitlab">GitLab</option>
-                        </select>
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div>
+                              <div className="text-sm font-semibold text-foreground">
+                                {workspace.name}
+                              </div>
+                              <div className="text-xs text-muted-foreground">
+                                {selectedProject.name}
+                              </div>
+                            </div>
+                            <div className="text-xs text-muted-foreground">
+                              Updated {formatDateTime(workspace.updatedAt ?? workspace.createdAt)}
+                            </div>
+                          </div>
+                        </button>
+                      ))
+                    ) : (
+                      <div className="rounded-lg border border-dashed px-4 py-3 text-sm text-muted-foreground">
+                        No workspaces yet. Create your first one.
                       </div>
-                      {projectRepoError ? (
-                        <div className="rounded-md border border-destructive/50 bg-destructive/5 px-3 py-2 text-sm text-destructive">
-                          {projectRepoError}
-                        </div>
-                      ) : null}
-                      {detectRepoError ? (
-                        <div className="rounded-md border border-destructive/50 bg-destructive/5 px-3 py-2 text-sm text-destructive">
-                          {detectRepoError}
-                        </div>
-                      ) : null}
-                    </CardContent>
-                    <CardFooter className="flex flex-wrap items-center gap-3">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        onClick={handleDetectProjectRepo}
-                        disabled={isDetectingRepo || isUpdatingProjectRepo}
-                      >
-                        {isDetectingRepo ? "Detecting..." : "Detect from package.json"}
-                      </Button>
-                      <Button
-                        type="submit"
-                        disabled={!projectRepoDirty || isUpdatingProjectRepo}
-                      >
-                        {isUpdatingProjectRepo ? "Saving..." : "Save repo settings"}
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        onClick={() =>
-                          setProjectRepoForm({
-                            repoUrl: projectRepoUrlValue,
-                            gitProvider: projectRepoProviderValue,
-                          })
-                        }
-                        disabled={!projectRepoDirty || isUpdatingProjectRepo}
-                      >
-                        Reset
-                      </Button>
-                    </CardFooter>
-                  </form>
+                    )}
+                  </CardContent>
                 </Card>
               </div>
-              <div className="rounded-xl border bg-background p-6">
-                <div className="text-sm font-semibold text-foreground">
-                  {secondaryTitle}
-                </div>
-                <div className="mt-3 grid gap-3 md:grid-cols-2">
-                  {secondaryItems.length ? (
-                    secondaryItems.map((item) => (
-                      <div
-                        key={item}
-                        className="rounded-lg border bg-muted/30 px-4 py-3 text-sm text-foreground"
-                      >
-                        {item}
+              <div className="grid gap-4">
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Open PRs and MRs</CardTitle>
+                    <CardDescription>
+                      Pull requests for GitHub repos and merge requests for GitLab.
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="grid gap-3">
+                    {isLoadingPullRequests ? (
+                      <div className="rounded-lg border border-dashed px-4 py-3 text-sm text-muted-foreground">
+                        Loading open pull requests...
                       </div>
-                    ))
-                  ) : (
-                    <div className="rounded-lg border border-dashed px-4 py-3 text-sm text-muted-foreground">
-                      Nothing to show yet.
-                    </div>
-                  )}
-                </div>
+                    ) : pullRequestsError ? (
+                      <div className="rounded-lg border border-destructive/50 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+                        {pullRequestsError}
+                      </div>
+                    ) : projectPullRequests.length ? (
+                      projectPullRequests.map((item) => (
+                        <a
+                          key={`${item.projectId}-${item.id}`}
+                          href={item.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="rounded-lg border bg-muted/20 px-4 py-3 transition hover:border-primary/60 hover:bg-muted/40"
+                        >
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div className="text-sm font-semibold text-foreground">
+                              {item.title}
+                            </div>
+                            <Badge variant="secondary">
+                              {item.provider === "github" ? "PR" : "MR"}
+                            </Badge>
+                          </div>
+                          <div className="mt-1 text-xs text-muted-foreground">
+                            {item.projectName} · {item.repo}
+                          </div>
+                          <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                            {item.author ? `@${item.author}` : "Unknown author"}
+                            {item.sourceBranch && item.targetBranch
+                              ? `${item.sourceBranch} -> ${item.targetBranch}`
+                              : null}
+                            <span>Updated {formatDateTime(item.updatedAt)}</span>
+                          </div>
+                        </a>
+                      ))
+                    ) : hasRepoProject ? (
+                      <div className="rounded-lg border border-dashed px-4 py-3 text-sm text-muted-foreground">
+                        No open pull requests right now.
+                      </div>
+                    ) : (
+                      <div className="rounded-lg border border-dashed px-4 py-3 text-sm text-muted-foreground">
+                        Add a repo URL to this project to see open PRs or MRs here.
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
               </div>
             </div>
           ) : isWorkspaceView ? (
