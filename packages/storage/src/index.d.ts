@@ -26,7 +26,8 @@ export declare const setCurrentContext: (repoRoot: string, context: CurrentConte
 export declare const readCurrentContext: (repoRoot: string) => Promise<CurrentContext>;
 export declare const appendTranscriptEntry: (repoRoot: string, conversationId: string, sessionId: string, entry: unknown) => Promise<void>;
 export declare const appendEventEntry: (repoRoot: string, conversationId: string, sessionId: string, entry: unknown) => Promise<void>;
-export declare const readTranscriptHistory: (repoRoot: string, conversationId: string, sessionId: string) => Promise<Array<{
-    role: string;
+export type TranscriptMessage = {
+    role: "user" | "assistant" | "system";
     content: string;
-}>>;
+};
+export declare const readTranscriptHistory: (repoRoot: string, conversationId: string, sessionId: string) => Promise<TranscriptMessage[]>;

@@ -30,6 +30,7 @@ import {
 } from "@maestro/storage";
 import {
   assertGitRepo,
+  getRepoDisplayName,
   prepareWorkspace,
   resolveRepoRoot
 } from "@maestro/git";
@@ -52,6 +53,46 @@ const exitWithError = (error: unknown): never => {
   const message = error instanceof Error ? error.message : String(error);
   console.error(`Error: ${message}`);
   process.exit(1);
+};
+
+const formatTimestamp = (iso: string): string => {
+  const date = new Date(iso);
+  const pad = (value: number): string => String(value).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(
+    date.getHours()
+  )}:${pad(date.getMinutes())}`;
+};
+
+const buildConversationTitle = (options: {
+  repoLabel: string;
+  createdAt: string;
+  defaultBranch: string;
+  fromRef?: string;
+  title?: string;
+}): string | undefined => {
+  const provided = options.title?.trim();
+  if (provided) {
+    return provided;
+  }
+  const timestamp = formatTimestamp(options.createdAt);
+  const suffix =
+    options.fromRef && options.fromRef !== options.defaultBranch
+      ? ` (${options.fromRef})`
+      : "";
+  return `${options.repoLabel} - ${timestamp}${suffix}`;
+};
+
+const buildSessionTitle = (options: {
+  createdAt: string;
+  model?: string;
+  title?: string;
+}): string | undefined => {
+  const provided = options.title?.trim();
+  if (provided) {
+    return provided;
+  }
+  const timestamp = formatTimestamp(options.createdAt);
+  return `${timestamp} - ${options.model ?? "default"}`;
 };
 
 const projectCommand = program.command("project").description("Project commands");
@@ -138,10 +179,18 @@ program
       });
 
       const ts = nowIso();
+      const repoLabel = await getRepoDisplayName(project.repoPath);
+      const conversationTitle = buildConversationTitle({
+        repoLabel,
+        createdAt: ts,
+        defaultBranch: project.defaultBranch,
+        fromRef: options.from,
+        title: options.title
+      });
       const conversation: Conversation = {
         id: conversationId,
         projectId: project.id,
-        title: options.title,
+        title: conversationTitle,
         branch: workspace.branch,
         workspacePath: workspace.worktreePath,
         baseRef: workspace.baseRef,
@@ -153,11 +202,13 @@ program
       await writeConversation(project.repoPath, conversation);
 
       const sessionId = generateId("s");
+      const model = process.env.MAESTRO_MODEL;
+      const sessionTitle = buildSessionTitle({ createdAt: ts, model });
       const session: Session = {
         id: sessionId,
         conversationId: conversation.id,
-        title: undefined,
-        model: process.env.MAESTRO_MODEL,
+        title: sessionTitle,
+        model,
         createdAt: ts,
         updatedAt: ts
       };
@@ -325,7 +376,11 @@ sessionCommand
       const session: Session = {
         id: generateId("s"),
         conversationId: conversation.id,
-        title: options.title,
+        title: buildSessionTitle({
+          createdAt: ts,
+          model: process.env.MAESTRO_MODEL,
+          title: options.title
+        }),
         model: process.env.MAESTRO_MODEL,
         createdAt: ts,
         updatedAt: ts
@@ -380,7 +435,10 @@ program
         session = {
           id: generateId("s"),
           conversationId: conversation.id,
-          title: undefined,
+          title: buildSessionTitle({
+            createdAt: ts,
+            model: process.env.MAESTRO_MODEL
+          }),
           model: process.env.MAESTRO_MODEL,
           createdAt: ts,
           updatedAt: ts

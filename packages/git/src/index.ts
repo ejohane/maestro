@@ -24,6 +24,56 @@ const runGit = async (repoRoot: string, args: string[]): Promise<GitRunResult> =
   return { stdout: stdout.trim(), stderr: stderr.trim() };
 };
 
+const parseRepoFromRemote = (remote: string): string | null => {
+  const cleaned = remote.trim().replace(/\.git$/i, "");
+  if (!cleaned) {
+    return null;
+  }
+  const scpMatch = cleaned.match(/^[^@]+@[^:]+:(.+)$/);
+  if (scpMatch) {
+    const pathPart = scpMatch[1].replace(/^\/+/, "");
+    const [org, repo] = pathPart.split("/");
+    if (org && repo) {
+      return `${org}/${repo}`;
+    }
+  }
+  try {
+    const url = new URL(cleaned);
+    const pathPart = url.pathname.replace(/^\/+/, "");
+    const [org, repo] = pathPart.split("/");
+    if (org && repo) {
+      return `${org}/${repo}`;
+    }
+  } catch {
+    return null;
+  }
+  return null;
+};
+
+export const getRepoDisplayName = async (repoRoot: string): Promise<string> => {
+  try {
+    const { stdout } = await runGit(repoRoot, ["remote", "get-url", "origin"]);
+    const parsed = parseRepoFromRemote(stdout);
+    if (parsed) {
+      return parsed;
+    }
+  } catch {
+    // ignore missing remotes
+  }
+  return path.basename(repoRoot);
+};
+
+export const getRepoSlug = async (repoRoot: string): Promise<string> => {
+  const displayName = await getRepoDisplayName(repoRoot);
+  const slug = displayName
+    .replace(/[\s/]+/g, "--")
+    .replace(/[^a-z0-9-]/gi, "-")
+    .replace(/--+/g, "--")
+    .replace(/^-+|-+$/g, "")
+    .toLowerCase();
+  return slug || path.basename(repoRoot).toLowerCase();
+};
+
 export const resolveRepoRoot = async (inputPath: string): Promise<string> => {
   const { stdout } = await execFileAsync("git", ["-C", inputPath, "rev-parse", "--show-toplevel"]);
   return stdout.trim();
@@ -124,7 +174,13 @@ export const prepareWorkspace = async (options: {
 
   const branch = `conv/${conversationId}`;
   await createBranch(repoRoot, branch, baseSha);
-  const worktreePath = path.join(os.homedir(), ".maestro", "workspaces", conversationId);
+  const repoSlug = await getRepoSlug(repoRoot);
+  const worktreePath = path.join(
+    os.homedir(),
+    ".maestro",
+    "workspaces",
+    `${repoSlug}--${conversationId}`
+  );
   await createWorktree(repoRoot, worktreePath, branch);
 
   return { branch, worktreePath, baseRef, baseSha, stashRef };

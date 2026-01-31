@@ -3,6 +3,7 @@ export type IdPrefix = "p" | "c" | "s";
 export interface Project {
   id: string;
   name: string;
+  icon?: string;
   repoPath: string;
   defaultBranch: string;
   createdAt: string;

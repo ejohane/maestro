@@ -1,28 +1,28 @@
-@import url("https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Unbounded:wght@400;600&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap");
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 :root {
-  --background: 38 38% 96%;
-  --foreground: 22 20% 12%;
-  --card: 40 45% 98%;
-  --card-foreground: 22 20% 12%;
+  --background: 0 0% 100%;
+  --foreground: 224 30% 12%;
+  --card: 0 0% 100%;
+  --card-foreground: 224 30% 12%;
   --popover: 0 0% 100%;
-  --popover-foreground: 22 20% 12%;
-  --primary: 160 40% 28%;
-  --primary-foreground: 40 45% 96%;
-  --secondary: 26 32% 88%;
-  --secondary-foreground: 22 25% 18%;
-  --muted: 30 25% 90%;
-  --muted-foreground: 23 12% 44%;
-  --accent: 12 65% 58%;
-  --accent-foreground: 40 45% 98%;
-  --border: 28 30% 82%;
-  --input: 28 30% 82%;
-  --ring: 160 40% 28%;
-  --radius: 14px;
+  --popover-foreground: 224 30% 12%;
+  --primary: 224 30% 12%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 210 20% 96%;
+  --secondary-foreground: 224 30% 12%;
+  --muted: 210 20% 96%;
+  --muted-foreground: 215 16% 42%;
+  --accent: 210 20% 96%;
+  --accent-foreground: 224 30% 12%;
+  --border: 214 20% 90%;
+  --input: 214 20% 90%;
+  --ring: 224 30% 12%;
+  --radius: 8px;
 }
 
 * {
@@ -32,7 +32,40 @@
 body {
   @apply bg-background text-foreground font-sans;
   min-height: 100vh;
-  background-image: radial-gradient(circle at top left, rgba(213, 242, 228, 0.6), transparent 42%),
-    radial-gradient(circle at 80% 20%, rgba(255, 214, 193, 0.5), transparent 35%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.7), rgba(247, 244, 238, 0.9));
+}
+
+
+
+@layer base {
+  :root {
+    --sidebar-background: 0 0% 98%;
+    --sidebar-foreground: 240 5.3% 26.1%;
+    --sidebar-primary: 240 5.9% 10%;
+    --sidebar-primary-foreground: 0 0% 98%;
+    --sidebar-accent: 240 4.8% 95.9%;
+    --sidebar-accent-foreground: 240 5.9% 10%;
+    --sidebar-border: 220 13% 91%;
+    --sidebar-ring: 217.2 91.2% 59.8%;
+  }
+  .dark {
+    --sidebar-background: 240 5.9% 10%;
+    --sidebar-foreground: 240 4.8% 95.9%;
+    --sidebar-primary: 224.3 76.3% 48%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 240 3.7% 15.9%;
+    --sidebar-accent-foreground: 240 4.8% 95.9%;
+    --sidebar-border: 240 3.7% 15.9%;
+    --sidebar-ring: 217.2 91.2% 59.8%;
+  }
+}
+
+
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
 }
