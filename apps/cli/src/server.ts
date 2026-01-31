@@ -19,6 +19,7 @@ import {
   listSessions,
   readConversation,
   readCurrentContext,
+  readProjectById,
   readSession,
   readTranscriptHistory,
   setCurrentContext,
@@ -26,7 +27,7 @@ import {
   writeProject,
   writeSession
 } from "@maestro/storage";
-import { prepareWorkspace, resolveRepoRoot } from "@maestro/git";
+import { getRepoDisplayName, prepareWorkspace, resolveRepoRoot } from "@maestro/git";
 
 type ServerOptions = {
   port: number;
@@ -66,6 +67,46 @@ const sendNotFound = (res: ServerResponse): void => {
 const sendError = (res: ServerResponse, error: unknown): void => {
   const message = error instanceof Error ? error.message : String(error);
   sendJson(res, 500, { error: message });
+};
+
+const formatTimestamp = (iso: string): string => {
+  const date = new Date(iso);
+  const pad = (value: number): string => String(value).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(
+    date.getHours()
+  )}:${pad(date.getMinutes())}`;
+};
+
+const buildConversationTitle = (options: {
+  repoLabel: string;
+  createdAt: string;
+  defaultBranch: string;
+  fromRef?: string;
+  title?: string;
+}): string | undefined => {
+  const provided = options.title?.trim();
+  if (provided) {
+    return provided;
+  }
+  const timestamp = formatTimestamp(options.createdAt);
+  const suffix =
+    options.fromRef && options.fromRef !== options.defaultBranch
+      ? ` (${options.fromRef})`
+      : "";
+  return `${options.repoLabel} - ${timestamp}${suffix}`;
+};
+
+const buildSessionTitle = (options: {
+  createdAt: string;
+  model?: string;
+  title?: string;
+}): string | undefined => {
+  const provided = options.title?.trim();
+  if (provided) {
+    return provided;
+  }
+  const timestamp = formatTimestamp(options.createdAt);
+  return `${timestamp} - ${options.model ?? "default"}`;
 };
 
 const parseSegments = (pathname: string): string[] => {
@@ -245,6 +286,40 @@ const handleApi = async (req: IncomingMessage, res: ServerResponse, repoRoot: st
     }
   }
 
+  if (req.method === "POST" && segments.length === 3 && segments[1] === "projects") {
+    try {
+      const body = await readJsonBody<{ icon?: string | null }>(req);
+      if (!Object.prototype.hasOwnProperty.call(body, "icon")) {
+        sendBadRequest(res, "Project icon is required.");
+        return;
+      }
+      let project: Project;
+      try {
+        project = await readProjectById(requestRepoRoot, segments[2]);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+          sendNotFound(res);
+          return;
+        }
+        throw error;
+      }
+
+      const trimmedIcon = typeof body.icon === "string" ? body.icon.trim() : "";
+      project.icon = trimmedIcon || undefined;
+      project.updatedAt = nowIso();
+      await writeProject(requestRepoRoot, project);
+      sendJson(res, 200, project);
+      return;
+    } catch (error) {
+      if (error instanceof SyntaxError) {
+        sendBadRequest(res, "Invalid JSON body.");
+        return;
+      }
+      sendError(res, error);
+      return;
+    }
+  }
+
   if (req.method === "POST" && segments.length === 2 && segments[1] === "conversations") {
     try {
       const body = await readJsonBody<{
@@ -289,10 +364,18 @@ const handleApi = async (req: IncomingMessage, res: ServerResponse, repoRoot: st
       });
 
       const ts = nowIso();
+      const repoLabel = await getRepoDisplayName(project.repoPath);
+      const conversationTitle = buildConversationTitle({
+        repoLabel,
+        createdAt: ts,
+        defaultBranch: project.defaultBranch,
+        fromRef: body.fromRef?.trim() || undefined,
+        title: body.title
+      });
       const conversation: Conversation = {
         id: conversationId,
         projectId: project.id,
-        title: body.title?.trim() || undefined,
+        title: conversationTitle,
         branch: workspace.branch,
         workspacePath: workspace.worktreePath,
         baseRef: workspace.baseRef,
@@ -304,11 +387,13 @@ const handleApi = async (req: IncomingMessage, res: ServerResponse, repoRoot: st
       await writeConversation(project.repoPath, conversation);
 
       const sessionId = generateId("s");
+      const model = process.env.MAESTRO_MODEL;
+      const sessionTitle = buildSessionTitle({ createdAt: ts, model });
       const session: Session = {
         id: sessionId,
         conversationId: conversation.id,
-        title: undefined,
-        model: process.env.MAESTRO_MODEL,
+        title: sessionTitle,
+        model,
         createdAt: ts,
         updatedAt: ts
       };

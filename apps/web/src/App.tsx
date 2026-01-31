@@ -1,670 +1,902 @@
-import React from "react";
-import { Badge } from "./components/ui/badge";
+import * as React from "react"
+
+import { AppSidebar } from "./components/app-sidebar"
+import {
+  Breadcrumb,
+  BreadcrumbItem,
+  BreadcrumbLink,
+  BreadcrumbList,
+  BreadcrumbPage,
+  BreadcrumbSeparator,
+} from "./components/ui/breadcrumb"
+import { Button } from "./components/ui/button"
 import {
   Card,
   CardContent,
   CardDescription,
+  CardFooter,
   CardHeader,
-  CardTitle
-} from "./components/ui/card";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "./components/ui/tabs";
-import { cn } from "./lib/utils";
+  CardTitle,
+} from "./components/ui/card"
+import { Input } from "./components/ui/input"
+import { Separator } from "./components/ui/separator"
+import {
+  SidebarInset,
+  SidebarProvider,
+  SidebarRail,
+  SidebarTrigger,
+} from "./components/ui/sidebar"
 
-type CurrentContext = {
-  projectId?: string;
-  conversationId?: string;
-  sessionId?: string;
-};
+type ApiProject = {
+  id: string
+  name: string
+  icon?: string
+  repoPath: string
+  defaultBranch: string
+  createdAt: string
+  updatedAt: string
+}
+
+type ApiConversation = {
+  id: string
+  projectId: string
+  title?: string
+  branch: string
+  workspacePath: string
+  createdAt: string
+  updatedAt: string
+}
+
+type ApiSession = {
+  id: string
+  conversationId: string
+  title?: string
+  model?: string
+  createdAt: string
+  updatedAt: string
+}
+
+type CreateConversationResponse = {
+  project: ApiProject
+  conversation: ApiConversation
+  session: ApiSession
+}
+
+type ChatSession = {
+  id: string
+  name: string
+}
+
+type Workspace = {
+  id: string
+  name: string
+  chats: ChatSession[]
+}
 
 type Project = {
-  id: string;
-  name: string;
-  repoPath: string;
-  defaultBranch: string;
-  createdAt: string;
-  updatedAt: string;
-};
-
-type Conversation = {
-  id: string;
-  projectId: string;
-  title?: string;
-  branch: string;
-  workspacePath: string;
-  baseRef: string;
-  baseSha: string;
-  stashRef?: string | null;
-  createdAt: string;
-  updatedAt: string;
-};
-
-type Session = {
-  id: string;
-  conversationId: string;
-  title?: string;
-  model?: string;
-  createdAt: string;
-  updatedAt: string;
-};
-
-type TranscriptEntry = {
-  role?: string;
-  content?: string;
-};
-
-const readErrorMessage = async (res: Response): Promise<string> => {
-  const text = await res.text();
-  const contentType = res.headers.get("content-type") ?? "";
-  if (contentType.includes("application/json")) {
-    try {
-      const parsed = JSON.parse(text) as { error?: string; message?: string };
-      if (typeof parsed.error === "string" && parsed.error.trim()) {
-        return parsed.error;
-      }
-      if (typeof parsed.message === "string" && parsed.message.trim()) {
-        return parsed.message;
-      }
-    } catch {
-      return text;
-    }
-  }
-  return text || `Request failed: ${res.status}`;
-};
-
-const buildApiPath = (path: string, repoPath?: string): string => {
-  if (!repoPath) {
-    return path;
-  }
-  const separator = path.includes("?") ? "&" : "?";
-  return `${path}${separator}repoPath=${encodeURIComponent(repoPath)}`;
-};
-
-const fetchJson = async <T,>(path: string, repoPath?: string): Promise<T> => {
-  const res = await fetch(`/api${buildApiPath(path, repoPath)}`);
-  if (!res.ok) {
-    throw new Error(await readErrorMessage(res));
-  }
-  return res.json() as Promise<T>;
-};
-
-const postJson = async <T,>(path: string, payload: unknown, repoPath?: string): Promise<T> => {
-  const res = await fetch(`/api${buildApiPath(path, repoPath)}`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify(payload)
-  });
-  if (!res.ok) {
-    throw new Error(await readErrorMessage(res));
-  }
-  return res.json() as Promise<T>;
-};
-
-const formatTime = (value?: string) => {
-  if (!value) return "-";
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
-};
+  id: string
+  name: string
+  icon?: string
+  repoPath: string
+  defaultBranch: string
+  createdAt: string
+  updatedAt: string
+  workspaces: Workspace[]
+}
 
 const App = () => {
-  const [current, setCurrent] = React.useState<CurrentContext>({});
-  const [projects, setProjects] = React.useState<Project[]>([]);
-  const [conversations, setConversations] = React.useState<Conversation[]>([]);
-  const [sessions, setSessions] = React.useState<Session[]>([]);
-  const [selectedConversationId, setSelectedConversationId] = React.useState<string | null>(
+  const [projects, setProjects] = React.useState<Project[]>([])
+  const [isLoading, setIsLoading] = React.useState(true)
+  const [error, setError] = React.useState<string | null>(null)
+  const [isProjectsView, setIsProjectsView] = React.useState(false)
+  const [selectedProjectId, setSelectedProjectId] = React.useState<string | null>(
     null
-  );
-  const [selectedSessionId, setSelectedSessionId] = React.useState<string | null>(null);
-  const [transcript, setTranscript] = React.useState<TranscriptEntry[]>([]);
-  const [events, setEvents] = React.useState<unknown[]>([]);
-  const [status, setStatus] = React.useState<string>("Idle");
-  const [error, setError] = React.useState<string | null>(null);
-  const [activeRepoPath, setActiveRepoPath] = React.useState<string>("");
-  const [newProjectName, setNewProjectName] = React.useState<string>("");
-  const [newProjectBranch, setNewProjectBranch] = React.useState<string>("main");
-  const [newProjectPath, setNewProjectPath] = React.useState<string>("");
-  const [creatingProject, setCreatingProject] = React.useState<boolean>(false);
-  const [selectingProjectPath, setSelectingProjectPath] = React.useState<boolean>(false);
-  const [projectError, setProjectError] = React.useState<string | null>(null);
-  const [newConversationTitle, setNewConversationTitle] = React.useState<string>("");
-  const [creatingConversation, setCreatingConversation] = React.useState<boolean>(false);
-  const [conversationError, setConversationError] = React.useState<string | null>(null);
+  )
+  const [selectedWorkspaceId, setSelectedWorkspaceId] = React.useState<string | null>(
+    null
+  )
+  const [selectedChatId, setSelectedChatId] = React.useState<string | null>(null)
+  const [projectForm, setProjectForm] = React.useState({
+    name: "",
+    repoPath: "",
+    defaultBranch: "main",
+  })
+  const [isCreatingProject, setIsCreatingProject] = React.useState(false)
+  const [isSelectingDirectory, setIsSelectingDirectory] = React.useState(false)
+  const [createProjectError, setCreateProjectError] = React.useState<string | null>(
+    null
+  )
+  const [workspaceForm, setWorkspaceForm] = React.useState({ title: "" })
+  const [isCreatingWorkspace, setIsCreatingWorkspace] = React.useState(false)
+  const [createWorkspaceError, setCreateWorkspaceError] = React.useState<string | null>(
+    null
+  )
+  const [projectIconDraft, setProjectIconDraft] = React.useState("")
+  const [isUpdatingProjectIcon, setIsUpdatingProjectIcon] = React.useState(false)
+  const [projectIconError, setProjectIconError] = React.useState<string | null>(null)
 
-  React.useEffect(() => {
-    const loadRoot = async () => {
-      try {
-        const rootInfo = await fetchJson<{ path: string }>("/fs/root");
-        setActiveRepoPath(rootInfo.path);
-        setNewProjectPath(rootInfo.path);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
+  const loadProjects = React.useCallback(async () => {
+    setIsLoading(true)
+    setError(null)
+    try {
+      const [projectsRes, conversationsRes] = await Promise.all([
+        fetch("/api/projects?all=1"),
+        fetch("/api/conversations"),
+      ])
+      if (!projectsRes.ok) {
+        throw new Error("Failed to load projects.")
       }
-    };
-    void loadRoot();
-  }, []);
+      if (!conversationsRes.ok) {
+        throw new Error("Failed to load workspaces.")
+      }
 
-  React.useEffect(() => {
-    if (activeRepoPath && !newProjectPath) {
-      setNewProjectPath(activeRepoPath);
-    }
-  }, [activeRepoPath, newProjectPath]);
-
-  React.useEffect(() => {
-    const load = async () => {
-      try {
-        setStatus("Loading workspace");
-        const [currentContext, projectList, conversationList] = await Promise.all([
-          fetchJson<CurrentContext>("/current", activeRepoPath || undefined),
-          fetchJson<Project[]>("/projects?all=1"),
-          fetchJson<Conversation[]>("/conversations", activeRepoPath || undefined)
-        ]);
-        setCurrent(currentContext);
-        setProjects(projectList);
-        setConversations(conversationList);
-        const preferredConversation =
-          currentContext.conversationId ?? conversationList[0]?.id ?? null;
-        setSelectedConversationId(preferredConversation);
-        setStatus("Ready");
-      } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
-        setStatus("Error");
-      }
-    };
-    void load();
-  }, [activeRepoPath]);
-
-  React.useEffect(() => {
-    const loadSessions = async () => {
-      if (!selectedConversationId) {
-        setSessions([]);
-        setSelectedSessionId(null);
-        return;
-      }
-      try {
-        setStatus("Loading sessions");
-        const sessionList = await fetchJson<Session[]>(
-          `/conversations/${selectedConversationId}/sessions`,
-          activeRepoPath || undefined
-        );
-        setSessions(sessionList);
-        const preferredSession =
-          sessionList.find((session) => session.id === current.sessionId)?.id ??
-          sessionList[0]?.id ??
-          null;
-        setSelectedSessionId(preferredSession);
-        setStatus("Ready");
-      } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
-        setStatus("Error");
-      }
-    };
-    void loadSessions();
-  }, [selectedConversationId, current.sessionId, activeRepoPath]);
-
-  React.useEffect(() => {
-    const loadLogs = async () => {
-      if (!selectedConversationId || !selectedSessionId) {
-        setTranscript([]);
-        setEvents([]);
-        return;
-      }
-      try {
-        setStatus("Loading logs");
-        const [transcriptEntries, eventEntries] = await Promise.all([
-          fetchJson<TranscriptEntry[]>(
-            `/conversations/${selectedConversationId}/sessions/${selectedSessionId}/transcript`,
-            activeRepoPath || undefined
-          ),
-          fetchJson<unknown[]>(
-            `/conversations/${selectedConversationId}/sessions/${selectedSessionId}/events`,
-            activeRepoPath || undefined
+      const apiProjects = (await projectsRes.json()) as ApiProject[]
+      const conversations = (await conversationsRes.json()) as ApiConversation[]
+      const sessionsResults = await Promise.all(
+        conversations.map(async (conversation) => {
+          const response = await fetch(
+            `/api/conversations/${conversation.id}/sessions`
           )
-        ]);
-        setTranscript(transcriptEntries);
-        setEvents(eventEntries);
-        setStatus("Ready");
-      } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
-        setStatus("Error");
+          if (!response.ok) {
+            return { conversationId: conversation.id, sessions: [] as ApiSession[] }
+          }
+          const sessions = (await response.json()) as ApiSession[]
+          return { conversationId: conversation.id, sessions }
+        })
+      )
+
+      const sessionsByConversation = new Map(
+        sessionsResults.map((result) => [result.conversationId, result.sessions])
+      )
+
+      const nextProjects = apiProjects.map((project) => {
+        const projectConversations = conversations.filter(
+          (conversation) => conversation.projectId === project.id
+        )
+        const workspaces: Workspace[] = projectConversations.map((conversation) => {
+          const workspaceLabelFromPath = conversation.workspacePath
+            .split(/[\\/]/)
+            .filter(Boolean)
+            .pop()
+          const workspaceName =
+            conversation.title?.trim() ||
+            workspaceLabelFromPath ||
+            conversation.branch ||
+            conversation.id
+          const sessions = sessionsByConversation.get(conversation.id) ?? []
+          return {
+            id: conversation.id,
+            name: workspaceName,
+            chats: sessions.map((session) => ({
+              id: session.id,
+              name: session.title?.trim() || session.model || session.id,
+            })),
+          }
+        })
+
+        return {
+          id: project.id,
+          name: project.name,
+          icon: project.icon,
+          repoPath: project.repoPath,
+          defaultBranch: project.defaultBranch,
+          createdAt: project.createdAt,
+          updatedAt: project.updatedAt,
+          workspaces,
+        }
+      })
+
+      setProjects(nextProjects)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load projects.")
+      setProjects([])
+    } finally {
+      setIsLoading(false)
+    }
+  }, [])
+
+  React.useEffect(() => {
+    void loadProjects()
+  }, [loadProjects])
+
+  React.useEffect(() => {
+    if (!projects.length) {
+      setSelectedProjectId(null)
+      setSelectedWorkspaceId(null)
+      setSelectedChatId(null)
+      return
+    }
+    if (isProjectsView) {
+      setSelectedProjectId(null)
+      setSelectedWorkspaceId(null)
+      setSelectedChatId(null)
+      return
+    }
+    const project =
+      projects.find((item) => item.id === selectedProjectId) ?? projects[0]
+    const shouldSelectWorkspace =
+      selectedWorkspaceId !== null ||
+      selectedChatId !== null ||
+      selectedProjectId === null
+    const workspace = shouldSelectWorkspace
+      ? project.workspaces.find((item) => item.id === selectedWorkspaceId) ??
+        project.workspaces[0] ??
+        null
+      : null
+    const chat = shouldSelectWorkspace
+      ? workspace?.chats.find((item) => item.id === selectedChatId) ??
+        workspace?.chats[0] ??
+        null
+      : null
+    setSelectedProjectId(project.id)
+    setSelectedWorkspaceId(workspace?.id ?? null)
+    setSelectedChatId(chat?.id ?? null)
+  }, [projects, isProjectsView])
+
+  const selectedProject = React.useMemo(
+    () => projects.find((project) => project.id === selectedProjectId) ?? null,
+    [projects, selectedProjectId]
+  )
+  const selectedWorkspace = React.useMemo(
+    () =>
+      selectedProject?.workspaces.find(
+        (workspace) => workspace.id === selectedWorkspaceId
+      ) ?? null,
+    [selectedProject, selectedWorkspaceId]
+  )
+  const selectedChat = React.useMemo(
+    () =>
+      selectedWorkspace?.chats.find((chat) => chat.id === selectedChatId) ?? null,
+    [selectedWorkspace, selectedChatId]
+  )
+
+  React.useEffect(() => {
+    setProjectIconDraft(selectedProject?.icon ?? "")
+    setProjectIconError(null)
+  }, [selectedProject])
+
+  const handleSelectProjectsView = () => {
+    setIsProjectsView(true)
+    setSelectedProjectId(null)
+    setSelectedWorkspaceId(null)
+    setSelectedChatId(null)
+  }
+
+  const handleSelectProject = (projectId: string) => {
+    setIsProjectsView(false)
+    setSelectedProjectId(projectId)
+    setSelectedWorkspaceId(null)
+    setSelectedChatId(null)
+  }
+
+  const handleSelectWorkspace = (projectId: string, workspaceId: string) => {
+    setIsProjectsView(false)
+    setSelectedProjectId(projectId)
+    setSelectedWorkspaceId(workspaceId)
+    setSelectedChatId(null)
+  }
+
+  const handleSelectChat = (
+    projectId: string,
+    workspaceId: string,
+    chatId: string
+  ) => {
+    setIsProjectsView(false)
+    setSelectedProjectId(projectId)
+    setSelectedWorkspaceId(workspaceId)
+    setSelectedChatId(chatId)
+  }
+
+  const handleProjectFormChange = (field: keyof typeof projectForm) => {
+    return (event: React.ChangeEvent<HTMLInputElement>) => {
+      const value = event.target.value
+      setProjectForm((prev) => ({ ...prev, [field]: value }))
+    }
+  }
+
+  const handleWorkspaceFormChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const value = event.target.value
+    setWorkspaceForm({ title: value })
+  }
+
+  const handleProjectIconChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    setProjectIconDraft(event.target.value)
+  }
+
+  const handleSelectDirectory = async () => {
+    setIsSelectingDirectory(true)
+    setCreateProjectError(null)
+    try {
+      const response = await fetch("/api/fs/select-directory", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ startPath: projectForm.repoPath || undefined }),
+      })
+      if (!response.ok) {
+        let message = "Failed to select folder."
+        try {
+          const payload = (await response.json()) as { error?: string }
+          if (payload.error) {
+            message = payload.error
+          }
+        } catch {
+          // Ignore parsing errors
+        }
+        throw new Error(message)
       }
-    };
-    void loadLogs();
-  }, [selectedConversationId, selectedSessionId, activeRepoPath]);
-
-  const currentProject = React.useMemo(
-    () => projects.find((project) => project.id === current.projectId),
-    [projects, current.projectId]
-  );
-
-  const activeProject = React.useMemo(
-    () => projects.find((project) => project.repoPath === activeRepoPath),
-    [projects, activeRepoPath]
-  );
-
-  const selectedConversation = React.useMemo(
-    () => conversations.find((item) => item.id === selectedConversationId),
-    [conversations, selectedConversationId]
-  );
+      const payload = (await response.json()) as { path?: string }
+      if (payload.path) {
+        setProjectForm((prev) => ({ ...prev, repoPath: payload.path ?? "" }))
+      }
+    } catch (err) {
+      setCreateProjectError(
+        err instanceof Error ? err.message : "Failed to select folder."
+      )
+    } finally {
+      setIsSelectingDirectory(false)
+    }
+  }
 
   const handleCreateProject = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const name = newProjectName.trim();
-    if (!name || creatingProject) {
-      return;
+    event.preventDefault()
+    const name = projectForm.name.trim()
+    if (!name) {
+      setCreateProjectError("Project name is required.")
+      return
     }
-    const defaultBranch = newProjectBranch.trim() || "main";
-    const repoPath = newProjectPath.trim();
-    try {
-      setCreatingProject(true);
-      setProjectError(null);
-      const created = await postJson<Project>("/projects", {
-        name,
-        defaultBranch,
-        repoPath: repoPath || undefined
-      });
-      setProjects((prev) => [created, ...prev.filter((project) => project.id !== created.id)]);
-      setActiveRepoPath(created.repoPath);
-      setNewProjectPath(created.repoPath);
-      setNewProjectName("");
-      setNewProjectBranch("main");
-    } catch (err) {
-      setProjectError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setCreatingProject(false);
-    }
-  };
+    const defaultBranch = projectForm.defaultBranch.trim() || "main"
+    const repoPath = projectForm.repoPath.trim()
 
-  const handleSelectProjectPath = async () => {
-    if (selectingProjectPath) {
-      return;
-    }
+    setIsCreatingProject(true)
+    setCreateProjectError(null)
     try {
-      setSelectingProjectPath(true);
-      setProjectError(null);
-      const result = await postJson<{ path: string }>("/fs/select-directory", {
-        startPath: newProjectPath || activeRepoPath || undefined
-      });
-      setNewProjectPath(result.path);
+      const response = await fetch("/api/projects", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name,
+          defaultBranch,
+          repoPath: repoPath || undefined,
+        }),
+      })
+      if (!response.ok) {
+        let message = "Failed to create project."
+        try {
+          const payload = (await response.json()) as { error?: string }
+          if (payload.error) {
+            message = payload.error
+          }
+        } catch {
+          // Ignore parsing errors
+        }
+        throw new Error(message)
+      }
+      const createdProject = (await response.json()) as ApiProject
+      setProjectForm({ name: "", repoPath: "", defaultBranch: defaultBranch })
+      setIsProjectsView(false)
+      setSelectedProjectId(createdProject.id)
+      setSelectedWorkspaceId(null)
+      setSelectedChatId(null)
+      await loadProjects()
     } catch (err) {
-      setProjectError(err instanceof Error ? err.message : String(err));
+      setCreateProjectError(
+        err instanceof Error ? err.message : "Failed to create project."
+      )
     } finally {
-      setSelectingProjectPath(false);
+      setIsCreatingProject(false)
     }
-  };
+  }
 
-  const handleCreateConversation = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (!activeProject || creatingConversation) {
-      return;
+  const handleCreateWorkspace = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!selectedProject) {
+      return
     }
+    const title = workspaceForm.title.trim()
+    setIsCreatingWorkspace(true)
+    setCreateWorkspaceError(null)
     try {
-      setCreatingConversation(true);
-      setConversationError(null);
-      const created = await postJson<{
-        project: Project;
-        conversation: Conversation;
-        session: Session;
-      }>("/conversations", {
-        projectId: activeProject.id,
-        title: newConversationTitle.trim() || undefined
-      });
-      setActiveRepoPath(created.project.repoPath);
-      setNewProjectPath(created.project.repoPath);
-      setNewConversationTitle("");
-      setSelectedConversationId(created.conversation.id);
+      const response = await fetch("/api/conversations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          projectId: selectedProject.id,
+          title: title || undefined,
+        }),
+      })
+      if (!response.ok) {
+        let message = "Failed to create workspace."
+        try {
+          const payload = (await response.json()) as { error?: string }
+          if (payload.error) {
+            message = payload.error
+          }
+        } catch {
+          // Ignore parsing errors
+        }
+        throw new Error(message)
+      }
+      const payload = (await response.json()) as CreateConversationResponse
+      setWorkspaceForm({ title: "" })
+      setIsProjectsView(false)
+      setSelectedProjectId(payload.project.id)
+      setSelectedWorkspaceId(payload.conversation.id)
+      setSelectedChatId(payload.session.id)
+      await loadProjects()
     } catch (err) {
-      setConversationError(err instanceof Error ? err.message : String(err));
+      setCreateWorkspaceError(
+        err instanceof Error ? err.message : "Failed to create workspace."
+      )
     } finally {
-      setCreatingConversation(false);
+      setIsCreatingWorkspace(false)
     }
-  };
+  }
 
+  const handleUpdateProjectIcon = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!selectedProject) {
+      return
+    }
+    setIsUpdatingProjectIcon(true)
+    setProjectIconError(null)
+    try {
+      const response = await fetch(`/api/projects/${selectedProject.id}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ icon: projectIconDraft.trim() || null }),
+      })
+      if (!response.ok) {
+        let message = "Failed to update project icon."
+        try {
+          const payload = (await response.json()) as { error?: string }
+          if (payload.error) {
+            message = payload.error
+          }
+        } catch {
+          // Ignore parsing errors
+        }
+        throw new Error(message)
+      }
+      await loadProjects()
+    } catch (err) {
+      setProjectIconError(
+        err instanceof Error ? err.message : "Failed to update project icon."
+      )
+    } finally {
+      setIsUpdatingProjectIcon(false)
+    }
+  }
+
+  const formatDate = (value?: string) => {
+    if (!value) {
+      return "Unknown"
+    }
+    const date = new Date(value)
+    if (Number.isNaN(date.getTime())) {
+      return "Unknown"
+    }
+    return new Intl.DateTimeFormat("en-US", { dateStyle: "medium" }).format(date)
+  }
+
+  const isProjectView = Boolean(
+    selectedProject && !selectedWorkspace && !selectedChat && !isProjectsView
+  )
+  const isWorkspaceView = Boolean(selectedWorkspace && !selectedChat)
+  const isChatView = Boolean(selectedChat)
+  const projectIconValue = selectedProject?.icon?.trim() ?? ""
+  const projectIconPreview =
+    projectIconDraft.trim() || selectedProject?.name?.slice(0, 1).toUpperCase() || "?"
+  const projectIconDirty = projectIconDraft.trim() !== projectIconValue
+
+  const viewLabel = isChatView
+    ? "Chat Session"
+    : isWorkspaceView
+      ? "Workspace"
+      : isProjectView
+        ? "Project"
+        : "Home"
+  const viewTitle = isProjectsView
+    ? "Home"
+    : selectedChat?.name ??
+      selectedWorkspace?.name ??
+      selectedProject?.name ??
+      (isLoading ? "Syncing projects" : "Choose a project")
+  const viewDescription = isProjectsView
+    ? "Home for your projects, new work, and recent workspaces."
+    : selectedChat
+      ? `Workspace in ${selectedWorkspace?.name ?? "workspace"}.`
+      : selectedWorkspace
+        ? "Workspace activity, members, and recent sessions."
+        : selectedProject
+          ? `Repo: ${selectedProject.repoPath}`
+          : isLoading
+            ? "Fetching projects, workspaces, and sessions."
+            : error
+              ? error
+              : "Select a project to explore its workspaces."
+
+  const secondaryTitle = isChatView
+    ? "Workspace context"
+    : isWorkspaceView
+      ? "Chat sessions"
+      : isProjectView
+        ? "Workspaces"
+        : "Projects"
+  const secondaryItems = isLoading
+    ? ["Loading projects..."]
+    : error
+      ? ["Unable to load projects."]
+      : isChatView
+        ? [
+            selectedProject?.name ?? "",
+            selectedWorkspace?.name ?? "",
+          ].filter(Boolean)
+        : isWorkspaceView
+          ? selectedWorkspace?.chats.map((chat) => chat.name) ?? []
+          : isProjectView
+            ? selectedProject?.workspaces.map((workspace) => workspace.name) ?? []
+            : projects.map((project) => project.name)
+  const showWorkspaceCreator = Boolean(isProjectView && selectedProject)
   return (
-    <div className="min-h-screen px-6 py-10 md:px-10">
-      <div className="mx-auto flex max-w-6xl flex-col gap-8">
-        <header className="rounded-3xl border border-border/70 bg-card/70 p-6 shadow-[0_30px_60px_-40px_rgba(28,60,46,0.5)] backdrop-blur">
-          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-            <div>
-              <p className="font-display text-3xl text-foreground">Maestro Console</p>
-              <p className="text-sm text-muted-foreground">
-                Local conversations and sessions tracked in your repo
-              </p>
-            </div>
-            <div className="flex flex-wrap items-center gap-4">
-              <div className="rounded-2xl border border-border/70 bg-background/70 px-4 py-3">
-                <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Project</p>
-                <p className="text-sm font-semibold">
-                  {currentProject?.name ?? "None"}
-                </p>
-              </div>
-              <div className="rounded-2xl border border-border/70 bg-background/70 px-4 py-3">
-                <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Active</p>
-                <p className="text-sm font-semibold">
-                  {current.conversationId && current.sessionId
-                    ? `${current.conversationId} / ${current.sessionId}`
-                    : "-"}
-                </p>
-              </div>
-            </div>
-          </div>
-        </header>
-
-        {error ? (
-          <div className="rounded-2xl border border-accent/40 bg-accent/10 px-4 py-3 text-sm text-foreground">
-            {error}
-          </div>
-        ) : null}
-
-        <div className="grid gap-6 lg:grid-cols-[260px_1fr]">
-          <div className="flex flex-col gap-6">
-            <Card className="border-border/70 bg-card/80">
-              <CardHeader>
-                <div className="flex items-center justify-between">
-                  <CardTitle>Projects</CardTitle>
-                  <Badge variant="secondary">{projects.length}</Badge>
-                </div>
-                <CardDescription>Registered repositories in this workspace</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="rounded-xl border border-border/70 bg-background/80 px-3 py-2 text-xs text-muted-foreground">
-                  Active repo: {activeRepoPath || "Loading..."}
-                </div>
-                <form className="space-y-3" onSubmit={handleCreateProject}>
-                  <div className="space-y-1">
-                    <label className="text-xs uppercase tracking-[0.2em] text-muted-foreground">
-                      Project name
-                    </label>
-                    <input
-                      value={newProjectName}
-                      onChange={(event) => setNewProjectName(event.target.value)}
-                      placeholder="Maestro UI"
-                      className="w-full rounded-xl border border-border/70 bg-background/80 px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-xs uppercase tracking-[0.2em] text-muted-foreground">
-                      Project folder
-                    </label>
-                    <div className="flex flex-col gap-2 sm:flex-row">
-                      <input
-                        value={newProjectPath}
-                        onChange={(event) => setNewProjectPath(event.target.value)}
-                        placeholder="/path/to/repo"
-                        className="w-full rounded-xl border border-border/70 bg-background/80 px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
-                      />
-                      <button
-                        type="button"
-                        onClick={handleSelectProjectPath}
-                        disabled={selectingProjectPath}
-                        className="rounded-xl border border-border/70 bg-background/80 px-4 py-2 text-sm font-semibold text-foreground transition hover:border-primary/30 disabled:cursor-not-allowed disabled:opacity-60"
-                      >
-                        {selectingProjectPath ? "Picking..." : "Browse"}
-                      </button>
-                    </div>
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-xs uppercase tracking-[0.2em] text-muted-foreground">
-                      Default branch
-                    </label>
-                    <input
-                      value={newProjectBranch}
-                      onChange={(event) => setNewProjectBranch(event.target.value)}
-                      placeholder="main"
-                      className="w-full rounded-xl border border-border/70 bg-background/80 px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
-                    />
-                  </div>
-                  <button
-                    type="submit"
-                    disabled={!newProjectName.trim() || creatingProject}
-                    className="w-full rounded-xl bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground shadow-sm transition hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
+    <SidebarProvider>
+      <AppSidebar
+        projects={projects}
+        isProjectsView={isProjectsView}
+        selectedProjectId={selectedProjectId}
+        selectedWorkspaceId={selectedWorkspaceId}
+        selectedChatId={selectedChatId}
+        onSelectProjects={handleSelectProjectsView}
+        onSelectProject={handleSelectProject}
+        onSelectWorkspace={handleSelectWorkspace}
+        onSelectChat={handleSelectChat}
+      />
+      <SidebarRail />
+      <SidebarInset>
+        <header className="flex h-16 shrink-0 items-center gap-2 border-b px-4">
+          <SidebarTrigger className="-ml-1" />
+          <Separator orientation="vertical" className="mr-2 h-4" />
+          <Breadcrumb>
+            <BreadcrumbList>
+              <BreadcrumbItem>
+                {selectedProject ? (
+                  <BreadcrumbLink
+                    href="#"
+                    onClick={(event) => {
+                      event.preventDefault()
+                      handleSelectProjectsView()
+                    }}
                   >
-                    {creatingProject ? "Creating..." : "Create project"}
-                  </button>
-                  {projectError ? (
-                    <div className="rounded-xl border border-accent/40 bg-accent/10 px-3 py-2 text-xs text-foreground">
-                      {projectError}
-                    </div>
-                  ) : null}
-                  <p className="text-xs text-muted-foreground">
-                    Projects are stored in ~/.maestro.
-                  </p>
-                </form>
-
-                <div className="space-y-3">
-                  {projects.length === 0 ? (
-                    <div className="rounded-xl border border-dashed border-border/60 p-4 text-sm text-muted-foreground">
-                      No projects yet.
-                    </div>
-                  ) : (
-                    projects.map((project) => {
-                      const isActive = project.repoPath === activeRepoPath;
-                      return (
-                        <button
-                          key={project.id}
-                          type="button"
-                          onClick={() => {
-                            setActiveRepoPath(project.repoPath);
-                            setNewProjectPath(project.repoPath);
-                          }}
-                          className={`w-full rounded-xl border px-3 py-3 text-left transition ${
-                            isActive
-                              ? "border-primary/50 bg-primary/10"
-                              : "border-border/70 bg-background/80 hover:border-primary/30"
-                          }`}
-                        >
-                          <div className="text-sm font-semibold">{project.name}</div>
-                          <div className="mt-1 text-xs text-muted-foreground">
-                            {project.id} · {project.defaultBranch}
-                          </div>
-                          <div
-                            className="mt-1 truncate text-xs text-muted-foreground"
-                            title={project.repoPath}
-                          >
-                            {project.repoPath}
-                          </div>
-                        </button>
-                      );
-                    })
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="h-full border-border/70 bg-card/80">
-              <CardHeader>
-                <div className="flex items-center justify-between">
-                  <CardTitle>Conversations</CardTitle>
-                  <Badge variant="secondary">{conversations.length}</Badge>
-                </div>
-                <CardDescription>Worktree sessions grouped by branch</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <form className="space-y-3" onSubmit={handleCreateConversation}>
-                  <div className="space-y-1">
-                    <label className="text-xs uppercase tracking-[0.2em] text-muted-foreground">
-                      Conversation title
-                    </label>
-                    <input
-                      value={newConversationTitle}
-                      onChange={(event) => setNewConversationTitle(event.target.value)}
-                      placeholder="UI polish"
-                      className="w-full rounded-xl border border-border/70 bg-background/80 px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
-                    />
-                  </div>
-                  <button
-                    type="submit"
-                    disabled={!activeProject || creatingConversation}
-                    className="w-full rounded-xl bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground shadow-sm transition hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    {creatingConversation ? "Starting..." : "Start conversation"}
-                  </button>
-                  {conversationError ? (
-                    <div className="rounded-xl border border-accent/40 bg-accent/10 px-3 py-2 text-xs text-foreground">
-                      {conversationError}
-                    </div>
-                  ) : null}
-                  {!activeProject ? (
-                    <div className="rounded-xl border border-dashed border-border/60 p-3 text-xs text-muted-foreground">
-                      Select a project to start a conversation.
-                    </div>
-                  ) : null}
-                </form>
-
-                {conversations.length === 0 ? (
-                  <div className="rounded-xl border border-dashed border-border/60 p-4 text-sm text-muted-foreground">
-                    No conversations yet.
-                  </div>
+                    Home
+                  </BreadcrumbLink>
                 ) : (
-                  conversations.map((conversation) => (
-                    <button
-                      key={conversation.id}
+                  <BreadcrumbPage>Home</BreadcrumbPage>
+                )}
+              </BreadcrumbItem>
+              {selectedProject && !isLoading ? (
+                <>
+                  <BreadcrumbSeparator />
+                  <BreadcrumbItem>
+                    {selectedWorkspace || selectedChat ? (
+                      <BreadcrumbLink
+                        href="#"
+                        onClick={(event) => {
+                          event.preventDefault()
+                          handleSelectProject(selectedProject.id)
+                        }}
+                      >
+                        {selectedProject.name}
+                      </BreadcrumbLink>
+                    ) : (
+                      <BreadcrumbPage>{selectedProject.name}</BreadcrumbPage>
+                    )}
+                  </BreadcrumbItem>
+                </>
+              ) : null}
+              {selectedWorkspace && !isLoading ? (
+                <>
+                  <BreadcrumbSeparator />
+                  <BreadcrumbItem>
+                    {selectedChat ? (
+                      <BreadcrumbLink
+                        href="#"
+                        onClick={(event) => {
+                          event.preventDefault()
+                          if (!selectedProject) {
+                            return
+                          }
+                          handleSelectWorkspace(selectedProject.id, selectedWorkspace.id)
+                        }}
+                      >
+                        {selectedWorkspace.name}
+                      </BreadcrumbLink>
+                    ) : (
+                      <BreadcrumbPage>{selectedWorkspace.name}</BreadcrumbPage>
+                    )}
+                  </BreadcrumbItem>
+                </>
+              ) : null}
+              {selectedChat && !isLoading ? (
+                <>
+                  <BreadcrumbSeparator />
+                  <BreadcrumbItem>
+                    <BreadcrumbPage>{selectedChat.name}</BreadcrumbPage>
+                  </BreadcrumbItem>
+                </>
+              ) : null}
+            </BreadcrumbList>
+          </Breadcrumb>
+        </header>
+        <div className="flex flex-1 flex-col gap-4 p-6">
+          <div className="rounded-xl border bg-card p-6 shadow-sm">
+            <div className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+              {viewLabel}
+            </div>
+            <div className="mt-3 flex flex-wrap items-center gap-3 text-2xl font-semibold text-foreground">
+              {isProjectView && projectIconValue ? (
+                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-muted text-lg">
+                  {projectIconValue}
+                </div>
+              ) : null}
+              <span>{viewTitle}</span>
+            </div>
+            <div className="mt-2 max-w-2xl text-sm text-muted-foreground">
+              {viewDescription}
+            </div>
+          </div>
+          {isProjectsView ? (
+            <div className="grid gap-4 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
+              <Card className="border-dashed">
+                <form onSubmit={handleCreateProject}>
+                  <CardHeader>
+                    <CardTitle>Create a new project</CardTitle>
+                    <CardDescription>
+                      Connect a repo, set the default branch, and start a workspace.
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="grid gap-3">
+                    <div className="grid gap-2">
+                      <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                        Project name
+                      </label>
+                      <Input
+                        value={projectForm.name}
+                        onChange={handleProjectFormChange("name")}
+                        placeholder="e.g. Marketing site"
+                      />
+                    </div>
+                    <div className="grid gap-2">
+                      <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                        Repo path
+                      </label>
+                      <Input
+                        value={projectForm.repoPath}
+                        onChange={handleProjectFormChange("repoPath")}
+                        placeholder="/path/to/repo (optional)"
+                      />
+                    </div>
+                    <div className="grid gap-2">
+                      <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                        Default branch
+                      </label>
+                      <Input
+                        value={projectForm.defaultBranch}
+                        onChange={handleProjectFormChange("defaultBranch")}
+                        placeholder="main"
+                      />
+                    </div>
+                    {createProjectError ? (
+                      <div className="rounded-md border border-destructive/50 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+                        {createProjectError}
+                      </div>
+                    ) : null}
+                  </CardContent>
+                  <CardFooter className="flex flex-wrap items-center gap-3">
+                    <Button
                       type="button"
-                      onClick={() => setSelectedConversationId(conversation.id)}
-                      className={cn(
-                        "w-full rounded-xl border px-3 py-3 text-left transition",
-                        conversation.id === selectedConversationId
-                          ? "border-primary/60 bg-primary/10"
-                          : "border-border/70 bg-background/80 hover:border-primary/30"
-                      )}
+                      variant="outline"
+                      onClick={handleSelectDirectory}
+                      disabled={isSelectingDirectory}
                     >
-                      <div className="text-sm font-semibold">
-                        {conversation.title || conversation.id}
-                      </div>
-                      <div className="mt-1 text-xs text-muted-foreground">
-                        {conversation.id} · {formatTime(conversation.updatedAt)}
-                      </div>
+                      {isSelectingDirectory ? "Selecting folder..." : "Select folder"}
+                    </Button>
+                    <Button
+                      type="submit"
+                      disabled={!projectForm.name.trim() || isCreatingProject}
+                    >
+                      {isCreatingProject ? "Creating project..." : "Create project"}
+                    </Button>
+                  </CardFooter>
+                </form>
+              </Card>
+              <div className="grid gap-4 sm:grid-cols-2">
+                {isLoading ? (
+                  <Card className="flex items-center justify-center border-dashed p-6 text-sm text-muted-foreground">
+                    Loading projects...
+                  </Card>
+                ) : error ? (
+                  <Card className="flex items-center justify-center border-destructive/40 bg-destructive/5 p-6 text-sm text-destructive">
+                    {error}
+                  </Card>
+                ) : projects.length ? (
+                  projects.map((project) => (
+                    <button
+                      key={project.id}
+                      type="button"
+                      onClick={() => handleSelectProject(project.id)}
+                      className="text-left"
+                    >
+                      <Card className="h-full transition hover:border-primary/60 hover:shadow-md">
+                        <CardHeader>
+                          <CardTitle className="flex items-center gap-2">
+                            {project.icon ? (
+                              <span className="text-xl leading-none">{project.icon}</span>
+                            ) : null}
+                            <span>{project.name}</span>
+                          </CardTitle>
+                          <CardDescription className="truncate">
+                            {project.repoPath}
+                          </CardDescription>
+                        </CardHeader>
+                        <CardContent className="grid gap-2 text-sm text-muted-foreground">
+                          <div>
+                            <span className="font-medium text-foreground">
+                              {project.workspaces.length}
+                            </span>{" "}
+                            workspaces
+                          </div>
+                          <div>
+                            Default branch: {project.defaultBranch || "main"}
+                          </div>
+                          <div>Updated {formatDate(project.updatedAt)}</div>
+                        </CardContent>
+                      </Card>
                     </button>
                   ))
+                ) : (
+                  <Card className="flex items-center justify-center border-dashed p-6 text-sm text-muted-foreground">
+                    No projects yet. Create your first one.
+                  </Card>
                 )}
-              </CardContent>
-            </Card>
-          </div>
-
-          <div className="flex flex-col gap-6">
-            <Card className="border-border/70 bg-card/80">
-              <CardHeader>
-                <div className="flex flex-wrap items-center justify-between gap-4">
-                  <div>
-                    <CardTitle>
-                      {selectedConversation?.title || selectedConversation?.id || "Select a conversation"}
-                    </CardTitle>
-                    <CardDescription>
-                      {selectedConversation
-                        ? `Base: ${selectedConversation.baseRef} · Branch: ${selectedConversation.branch}`
-                        : "Pick a conversation to inspect sessions."}
-                    </CardDescription>
-                  </div>
-                  <Badge>{status}</Badge>
-                </div>
-              </CardHeader>
-            </Card>
-
-            <div className="grid gap-6 xl:grid-cols-[260px_1fr]">
-              <Card className="border-border/70 bg-card/80">
-                <CardHeader>
-                  <div className="flex items-center justify-between">
-                    <CardTitle>Sessions</CardTitle>
-                    <Badge variant="secondary">{sessions.length}</Badge>
-                  </div>
-                  <CardDescription>Pick a session to read logs</CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  {sessions.length === 0 ? (
-                    <div className="rounded-xl border border-dashed border-border/60 p-4 text-sm text-muted-foreground">
-                      No sessions yet.
-                    </div>
-                  ) : (
-                    sessions.map((session) => (
-                      <button
-                        key={session.id}
-                        type="button"
-                        onClick={() => setSelectedSessionId(session.id)}
-                        className={cn(
-                          "w-full rounded-xl border px-3 py-3 text-left transition",
-                          session.id === selectedSessionId
-                            ? "border-primary/60 bg-primary/10"
-                            : "border-border/70 bg-background/80 hover:border-primary/30"
-                        )}
-                      >
-                        <div className="text-sm font-semibold">
-                          {session.title || session.id}
-                        </div>
-                        <div className="mt-1 text-xs text-muted-foreground">
-                          {session.id} · {formatTime(session.updatedAt)}
-                        </div>
-                      </button>
-                    ))
-                  )}
-                </CardContent>
-              </Card>
-
-              <Card className="border-border/70 bg-card/80">
-                <CardHeader>
-                  <CardTitle>Session Logs</CardTitle>
-                  <CardDescription>Transcript and SDK events</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <Tabs defaultValue="transcript">
-                    <TabsList>
-                      <TabsTrigger value="transcript">Transcript</TabsTrigger>
-                      <TabsTrigger value="events">Events</TabsTrigger>
-                    </TabsList>
-                    <TabsContent value="transcript">
-                      <div className="max-h-[420px] space-y-3 overflow-auto rounded-2xl border border-border/70 bg-background/70 p-4 text-sm">
-                        {transcript.length === 0 ? (
-                          <div className="rounded-xl border border-dashed border-border/60 p-4 text-muted-foreground">
-                            No transcript entries yet.
-                          </div>
-                        ) : (
-                          transcript.map((entry, index) => (
-                            <div
-                              key={`${entry.role ?? "entry"}-${index}`}
-                              className="rounded-xl border border-border/60 bg-card/90 p-3"
-                            >
-                              <div className="text-xs font-semibold uppercase tracking-[0.2em] text-primary">
-                                {entry.role ?? "entry"}
-                              </div>
-                              <div className="mt-2 whitespace-pre-wrap font-mono text-xs text-foreground">
-                                {entry.content ?? JSON.stringify(entry, null, 2)}
-                              </div>
-                            </div>
-                          ))
-                        )}
-                      </div>
-                    </TabsContent>
-                    <TabsContent value="events">
-                      <div className="max-h-[420px] space-y-3 overflow-auto rounded-2xl border border-border/70 bg-background/70 p-4 text-sm">
-                        {events.length === 0 ? (
-                          <div className="rounded-xl border border-dashed border-border/60 p-4 text-muted-foreground">
-                            No events yet.
-                          </div>
-                        ) : (
-                          events.map((entry, index) => (
-                            <div
-                              key={`event-${index}`}
-                              className="rounded-xl border border-border/60 bg-card/90 p-3"
-                            >
-                              <div className="text-xs font-semibold uppercase tracking-[0.2em] text-primary">
-                                {(entry as { type?: string }).type ?? "event"}
-                              </div>
-                              <pre className="mt-2 whitespace-pre-wrap font-mono text-xs text-foreground">
-                                {JSON.stringify(entry, null, 2)}
-                              </pre>
-                            </div>
-                          ))
-                        )}
-                      </div>
-                    </TabsContent>
-                  </Tabs>
-                </CardContent>
-              </Card>
+              </div>
             </div>
-          </div>
+          ) : showWorkspaceCreator ? (
+            <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]">
+              <div className="grid gap-4">
+                <Card className="border-dashed">
+                  <form onSubmit={handleCreateWorkspace}>
+                    <CardHeader>
+                      <CardTitle>Create a new workspace</CardTitle>
+                      <CardDescription>
+                        Spin up a fresh worktree and start a new chat session.
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent className="grid gap-3">
+                      <div className="grid gap-2">
+                        <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                          Workspace name
+                        </label>
+                        <Input
+                          value={workspaceForm.title}
+                          onChange={handleWorkspaceFormChange}
+                          placeholder="e.g. Feature branch review"
+                        />
+                      </div>
+                      {createWorkspaceError ? (
+                        <div className="rounded-md border border-destructive/50 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+                          {createWorkspaceError}
+                        </div>
+                      ) : null}
+                    </CardContent>
+                    <CardFooter>
+                      <Button type="submit" disabled={isCreatingWorkspace}>
+                        {isCreatingWorkspace
+                          ? "Creating workspace..."
+                          : "Create workspace"}
+                      </Button>
+                    </CardFooter>
+                  </form>
+                </Card>
+                <Card>
+                  <form onSubmit={handleUpdateProjectIcon}>
+                    <CardHeader>
+                      <CardTitle>Project settings</CardTitle>
+                      <CardDescription>
+                        Update the icon that represents this project.
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent className="grid gap-3">
+                      <div className="flex flex-wrap items-center gap-4">
+                        <div className="flex h-12 w-12 items-center justify-center rounded-full border bg-muted text-xl">
+                          {projectIconPreview}
+                        </div>
+                        <div className="grid flex-1 gap-2">
+                          <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                            Project icon
+                          </label>
+                          <Input
+                            value={projectIconDraft}
+                            onChange={handleProjectIconChange}
+                            placeholder="Short label"
+                          />
+                          <div className="text-xs text-muted-foreground">
+                            Use an emoji or short text. Leave blank to clear.
+                          </div>
+                        </div>
+                      </div>
+                      {projectIconError ? (
+                        <div className="rounded-md border border-destructive/50 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+                          {projectIconError}
+                        </div>
+                      ) : null}
+                    </CardContent>
+                    <CardFooter className="flex flex-wrap items-center gap-3">
+                      <Button
+                        type="submit"
+                        disabled={!projectIconDirty || isUpdatingProjectIcon}
+                      >
+                        {isUpdatingProjectIcon ? "Saving icon..." : "Save icon"}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => setProjectIconDraft(projectIconValue)}
+                        disabled={!projectIconDirty || isUpdatingProjectIcon}
+                      >
+                        Reset
+                      </Button>
+                    </CardFooter>
+                  </form>
+                </Card>
+              </div>
+              <div className="rounded-xl border bg-background p-6">
+                <div className="text-sm font-semibold text-foreground">
+                  {secondaryTitle}
+                </div>
+                <div className="mt-3 grid gap-3 md:grid-cols-2">
+                  {secondaryItems.length ? (
+                    secondaryItems.map((item) => (
+                      <div
+                        key={item}
+                        className="rounded-lg border bg-muted/30 px-4 py-3 text-sm text-foreground"
+                      >
+                        {item}
+                      </div>
+                    ))
+                  ) : (
+                    <div className="rounded-lg border border-dashed px-4 py-3 text-sm text-muted-foreground">
+                      Nothing to show yet.
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="rounded-xl border bg-background p-6">
+              <div className="text-sm font-semibold text-foreground">
+                {secondaryTitle}
+              </div>
+              <div className="mt-3 grid gap-3 md:grid-cols-2">
+                {secondaryItems.length ? (
+                  secondaryItems.map((item) => (
+                    <div
+                      key={item}
+                      className="rounded-lg border bg-muted/30 px-4 py-3 text-sm text-foreground"
+                    >
+                      {item}
+                    </div>
+                  ))
+                ) : (
+                  <div className="rounded-lg border border-dashed px-4 py-3 text-sm text-muted-foreground">
+                    Nothing to show yet.
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </div>
-      </div>
-    </div>
-  );
-};
+      </SidebarInset>
+    </SidebarProvider>
+  )
+}
 
-export default App;
+export default App

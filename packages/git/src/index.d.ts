@@ -9,6 +9,8 @@ export interface WorkspaceResult {
     baseSha: string;
     stashRef?: string;
 }
+export declare const getRepoDisplayName: (repoRoot: string) => Promise<string>;
+export declare const getRepoSlug: (repoRoot: string) => Promise<string>;
 export declare const resolveRepoRoot: (inputPath: string) => Promise<string>;
 export declare const assertGitRepo: (repoRoot: string) => Promise<void>;
 export declare const isDirty: (repoRoot: string) => Promise<boolean>;
