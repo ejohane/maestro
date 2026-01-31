@@ -23,6 +23,8 @@ export declare const stashChanges: (repoRoot: string, conversationId: string) =>
 export declare const prepareWorkspace: (options: {
     repoRoot: string;
     conversationId: string;
+    projectName: string;
+    conversationTitle?: string;
     defaultBranch: string;
     fromRef?: string;
     stash?: boolean;

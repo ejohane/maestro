@@ -358,6 +358,8 @@ const handleApi = async (req: IncomingMessage, res: ServerResponse, repoRoot: st
       const workspace = await prepareWorkspace({
         repoRoot: project.repoPath,
         conversationId,
+        projectName: project.name,
+        conversationTitle: body.title?.trim() || undefined,
         defaultBranch: project.defaultBranch,
         fromRef: body.fromRef?.trim() || undefined,
         stash: body.stash ?? false

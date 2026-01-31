@@ -173,6 +173,8 @@ program
       const workspace = await prepareWorkspace({
         repoRoot: project.repoPath,
         conversationId,
+        projectName: project.name,
+        conversationTitle: options.title,
         defaultBranch: project.defaultBranch,
         fromRef: options.from,
         stash: options.stash
