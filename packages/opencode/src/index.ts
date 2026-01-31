@@ -1,4 +1,6 @@
-import { createOpencodeClient } from "@opencode-ai/sdk";
+import { createOpencodeClient, type OpencodeClient } from "@opencode-ai/sdk";
+
+export { createOpencodeClient, type OpencodeClient };
 
 export interface OpenCodeMessage {
   role: "user" | "assistant" | "system";
@@ -20,7 +22,7 @@ export interface OpenCodeSendParams {
 }
 
 export interface OpenCodeClient {
-  ensureSession(params: { sessionId?: string; title?: string }): Promise<string>;
+  ensureSession(params: { sessionId?: string; title?: string; workspacePath?: string }): Promise<string>;
   sendMessage(params: OpenCodeSendParams): AsyncIterable<OpenCodeEvent>;
 }
 
@@ -36,12 +38,22 @@ export class DirectSDKClient implements OpenCodeClient {
     });
   }
 
-  async ensureSession(params: { sessionId?: string; title?: string }): Promise<string> {
+  async ensureSession(params: {
+    sessionId?: string;
+    title?: string;
+    workspacePath?: string;
+  }): Promise<string> {
     if (params.sessionId) {
       return params.sessionId;
     }
+    const body = params.title
+      ? {
+          title: params.title
+        }
+      : undefined;
     const response = await this.client.session.create({
-      body: params.title ? { title: params.title } : {}
+      body: body as any,
+      query: params.workspacePath ? { directory: params.workspacePath } : undefined
     });
     const session = (response as any)?.data ?? response;
     if (!session?.id) {
@@ -53,7 +65,8 @@ export class DirectSDKClient implements OpenCodeClient {
   async *sendMessage(params: OpenCodeSendParams): AsyncIterable<OpenCodeEvent> {
     const sessionId = await this.ensureSession({
       sessionId: params.sessionId,
-      title: params.sessionTitle
+      title: params.sessionTitle,
+      workspacePath: params.workspacePath
     });
     yield { type: "sdk_event", data: { sessionId } };
 
@@ -65,7 +78,8 @@ export class DirectSDKClient implements OpenCodeClient {
         model: model ?? undefined,
         system: system ?? undefined,
         parts: [{ type: "text", text: params.message }]
-      }
+      },
+      query: params.workspacePath ? { directory: params.workspacePath } : undefined
     });
 
     yield { type: "sdk_event", data: response };
@@ -77,7 +91,11 @@ export class DirectSDKClient implements OpenCodeClient {
 }
 
 export class ToolAdapterClient implements OpenCodeClient {
-  async ensureSession(params: { sessionId?: string; title?: string }): Promise<string> {
+  async ensureSession(params: {
+    sessionId?: string;
+    title?: string;
+    workspacePath?: string;
+  }): Promise<string> {
     if (params.sessionId) {
       return params.sessionId;
     }
@@ -89,16 +107,21 @@ export class ToolAdapterClient implements OpenCodeClient {
   }
 }
 
-const parseModel = (model?: string): { providerID: string; modelID: string } | undefined => {
+export const parseModel = (model?: string): { providerID: string; modelID: string } | undefined => {
   if (!model) return undefined;
   const [providerID, modelID] = model.split("/");
-  if (!providerID || !modelID) {
+  if (!modelID) {
+    const fallbackProvider =
+      process.env.MAESTRO_MODEL_PROVIDER ?? process.env.MAESTRO_PROVIDER ?? "openai";
+    return { providerID: fallbackProvider, modelID: model };
+  }
+  if (!providerID) {
     return undefined;
   }
   return { providerID, modelID };
 };
 
-const extractAssistantResponse = (response: any): { content: string } => {
+export const extractAssistantResponse = (response: any): { content: string } => {
   const data = response?.data ?? response;
   const parts = data?.parts as Array<{ type: string; text?: string }> | undefined;
   if (!parts || parts.length === 0) {
@@ -111,7 +134,7 @@ const extractAssistantResponse = (response: any): { content: string } => {
   return { content: text };
 };
 
-const withBasicAuthFetch = () => {
+export const withBasicAuthFetch = () => {
   const username = process.env.OPENCODE_SERVER_USERNAME ?? "opencode";
   const password = process.env.OPENCODE_SERVER_PASSWORD;
   if (!password) {
@@ -125,7 +148,10 @@ const withBasicAuthFetch = () => {
   };
 };
 
-const buildSystemMessage = (workspacePath: string, history: OpenCodeMessage[]): string | undefined => {
+export const buildSystemMessage = (
+  workspacePath: string,
+  history: OpenCodeMessage[]
+): string | undefined => {
   const sections: string[] = [];
   if (workspacePath) {
     sections.push(`Workspace root: ${workspacePath}`);
@@ -140,4 +166,15 @@ const buildSystemMessage = (workspacePath: string, history: OpenCodeMessage[]): 
     return undefined;
   }
   return sections.join("\n\n");
+};
+
+export const createAuthedOpencodeClient = (
+  baseUrl = process.env.MAESTRO_OPENCODE_URL ?? "http://localhost:4096"
+): OpencodeClient => {
+  return createOpencodeClient({
+    baseUrl,
+    fetch: withBasicAuthFetch(),
+    responseStyle: "data",
+    throwOnError: true
+  });
 };

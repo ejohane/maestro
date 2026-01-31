@@ -289,8 +289,9 @@ program
       const client = new DirectSDKClient();
       const opencodeSessionId = await client.ensureSession({
         sessionId: session.opencodeSessionId,
-        title: session.title ?? conversation.title
-      });
+        title: session.title ?? conversation.title,
+        workspacePath: conversation.workspacePath
+      } as any);
       if (opencodeSessionId !== session.opencodeSessionId) {
         session.opencodeSessionId = opencodeSessionId;
         await writeSession(repoRoot, conversation.id, session);
