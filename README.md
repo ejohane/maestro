@@ -78,7 +78,7 @@ When starting a conversation, the CLI:
 2. Optionally stashes dirty changes (`--stash`).
 3. Resolves a base ref (`origin/<defaultBranch>` if present, else the local default branch).
 4. Creates a branch named `conv/<conversationId>` at the base SHA.
-5. Adds a git worktree at `~/.maestro/workspaces/<conversationId>`.
+5. Adds a git worktree at `~/.maestro/workspaces/<project>--<title>--<hash>`.
 
 This produces isolated working directories per conversation while keeping the main repo clean.
 

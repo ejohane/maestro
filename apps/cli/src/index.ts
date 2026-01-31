@@ -12,6 +12,7 @@ import {
 import {
   appendEventEntry,
   appendTranscriptEntry,
+  deleteConversation,
   findProject,
   listConversations,
   listProjects,
@@ -30,8 +31,10 @@ import {
 } from "@maestro/storage";
 import {
   assertGitRepo,
+  deleteBranch,
   getRepoDisplayName,
   prepareWorkspace,
+  removeWorktree,
   resolveRepoRoot
 } from "@maestro/git";
 import { DirectSDKClient } from "@maestro/opencode";
@@ -173,6 +176,8 @@ program
       const workspace = await prepareWorkspace({
         repoRoot: project.repoPath,
         conversationId,
+        projectName: project.name,
+        conversationTitle: options.title,
         defaultBranch: project.defaultBranch,
         fromRef: options.from,
         stash: options.stash
@@ -225,6 +230,30 @@ program
       console.log(`Branch: ${conversation.branch}`);
       console.log(`Base: ${conversation.baseSha} (${conversation.baseRef})`);
       console.log(`Session: ${session.id}`);
+    } catch (error) {
+      exitWithError(error);
+    }
+  });
+
+const workspaceCommand = program.command("workspace").description("Workspace commands");
+
+workspaceCommand
+  .command("delete")
+  .argument("<conversationId>", "Conversation id")
+  .option("--confirm", "Confirm workspace deletion")
+  .description("Delete a workspace and its data")
+  .action(async (conversationId, options) => {
+    try {
+      if (!options.confirm) {
+        throw new Error("Workspace deletion requires --confirm.");
+      }
+      const repoRoot = await getRepoRootFromCwd();
+      const conversation = await readConversation(repoRoot, conversationId);
+      const project = await readProjectById(repoRoot, conversation.projectId);
+      await removeWorktree(project.repoPath, conversation.workspacePath);
+      await deleteBranch(project.repoPath, conversation.branch);
+      await deleteConversation(project.repoPath, conversation.id);
+      console.log(`Deleted workspace ${conversation.id}.`);
     } catch (error) {
       exitWithError(error);
     }

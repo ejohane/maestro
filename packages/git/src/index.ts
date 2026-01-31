@@ -19,6 +19,39 @@ export interface WorkspaceResult {
   stashRef?: string;
 }
 
+const slugify = (value: string, fallback: string): string => {
+  const normalized = value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .replace(/-{2,}/g, "-");
+  return normalized || fallback;
+};
+
+const truncateSlug = (value: string, maxLength: number): string => {
+  if (value.length <= maxLength) {
+    return value;
+  }
+  return value.slice(0, maxLength).replace(/-+$/g, "");
+};
+
+const getConversationHash = (conversationId: string): string => {
+  const parts = conversationId.split("_");
+  return parts.length > 1 ? parts[1] : conversationId;
+};
+
+const buildWorkspaceDirName = (
+  projectName: string,
+  conversationTitle: string | undefined,
+  conversationId: string
+): string => {
+  const projectSlug = truncateSlug(slugify(projectName, "project"), 24);
+  const titleSlug = truncateSlug(slugify(conversationTitle ?? "untitled", "untitled"), 32);
+  const hash = getConversationHash(conversationId);
+  return `${projectSlug}--${titleSlug}--${hash}`;
+};
+
 const runGit = async (repoRoot: string, args: string[]): Promise<GitRunResult> => {
   const { stdout, stderr } = await execFileAsync("git", ["-C", repoRoot, ...args]);
   return { stdout: stdout.trim(), stderr: stderr.trim() };
@@ -123,6 +156,26 @@ export const createWorktree = async (
   await runGit(repoRoot, ["worktree", "add", worktreePath, branch]);
 };
 
+export const removeWorktree = async (repoRoot: string, worktreePath: string): Promise<void> => {
+  try {
+    const stat = await fs.stat(worktreePath);
+    if (!stat.isDirectory()) {
+      return;
+    }
+  } catch {
+    await runGit(repoRoot, ["worktree", "prune"]);
+    return;
+  }
+  await runGit(repoRoot, ["worktree", "remove", "--force", worktreePath]);
+};
+
+export const deleteBranch = async (repoRoot: string, branch: string): Promise<void> => {
+  if (!(await refExists(repoRoot, branch))) {
+    return;
+  }
+  await runGit(repoRoot, ["branch", "-D", branch]);
+};
+
 export const stashChanges = async (
   repoRoot: string,
   conversationId: string
@@ -141,11 +194,21 @@ export const stashChanges = async (
 export const prepareWorkspace = async (options: {
   repoRoot: string;
   conversationId: string;
+  projectName: string;
+  conversationTitle?: string;
   defaultBranch: string;
   fromRef?: string;
   stash?: boolean;
 }): Promise<WorkspaceResult> => {
-  const { repoRoot, conversationId, defaultBranch, fromRef, stash } = options;
+  const {
+    repoRoot,
+    conversationId,
+    projectName,
+    conversationTitle,
+    defaultBranch,
+    fromRef,
+    stash
+  } = options;
   const dirty = await isDirty(repoRoot);
   let stashRef: string | undefined;
   if (dirty) {
@@ -157,6 +220,7 @@ export const prepareWorkspace = async (options: {
 
   let baseRef = fromRef;
   if (!baseRef) {
+    await fetchAll(repoRoot);
     const remoteRef = `origin/${defaultBranch}`;
     baseRef = (await refExists(repoRoot, remoteRef)) ? remoteRef : defaultBranch;
   }
@@ -174,13 +238,8 @@ export const prepareWorkspace = async (options: {
 
   const branch = `conv/${conversationId}`;
   await createBranch(repoRoot, branch, baseSha);
-  const repoSlug = await getRepoSlug(repoRoot);
-  const worktreePath = path.join(
-    os.homedir(),
-    ".maestro",
-    "workspaces",
-    `${repoSlug}--${conversationId}`
-  );
+  const workspaceDirName = buildWorkspaceDirName(projectName, conversationTitle, conversationId);
+  const worktreePath = path.join(os.homedir(), ".maestro", "workspaces", workspaceDirName);
   await createWorktree(repoRoot, worktreePath, branch);
 
   return { branch, worktreePath, baseRef, baseSha, stashRef };

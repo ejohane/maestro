@@ -19,10 +19,14 @@ export declare const fetchAll: (repoRoot: string) => Promise<void>;
 export declare const resolveRef: (repoRoot: string, ref: string) => Promise<string>;
 export declare const createBranch: (repoRoot: string, branch: string, sha: string) => Promise<void>;
 export declare const createWorktree: (repoRoot: string, worktreePath: string, branch: string) => Promise<void>;
+export declare const removeWorktree: (repoRoot: string, worktreePath: string) => Promise<void>;
+export declare const deleteBranch: (repoRoot: string, branch: string) => Promise<void>;
 export declare const stashChanges: (repoRoot: string, conversationId: string) => Promise<string>;
 export declare const prepareWorkspace: (options: {
     repoRoot: string;
     conversationId: string;
+    projectName: string;
+    conversationTitle?: string;
     defaultBranch: string;
     fromRef?: string;
     stash?: boolean;

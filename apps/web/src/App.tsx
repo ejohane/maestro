@@ -114,6 +114,8 @@ const App = () => {
   const [projectIconDraft, setProjectIconDraft] = React.useState("")
   const [isUpdatingProjectIcon, setIsUpdatingProjectIcon] = React.useState(false)
   const [projectIconError, setProjectIconError] = React.useState<string | null>(null)
+  const [isDeletingWorkspace, setIsDeletingWorkspace] = React.useState(false)
+  const [deleteWorkspaceError, setDeleteWorkspaceError] = React.useState<string | null>(null)
 
   const loadProjects = React.useCallback(async () => {
     setIsLoading(true)
@@ -254,6 +256,10 @@ const App = () => {
     setProjectIconDraft(selectedProject?.icon ?? "")
     setProjectIconError(null)
   }, [selectedProject])
+
+  React.useEffect(() => {
+    setDeleteWorkspaceError(null)
+  }, [selectedWorkspaceId])
 
   const handleSelectProjectsView = () => {
     setIsProjectsView(true)
@@ -467,6 +473,50 @@ const App = () => {
     }
   }
 
+  const handleDeleteWorkspace = async () => {
+    if (!selectedProject || !selectedWorkspace) {
+      return
+    }
+    const workspaceLabel = selectedWorkspace.name || selectedWorkspace.id
+    const confirmed = window.confirm(
+      `Delete workspace "${workspaceLabel}"? This removes the worktree and all sessions.`
+    )
+    if (!confirmed) {
+      return
+    }
+    setIsDeletingWorkspace(true)
+    setDeleteWorkspaceError(null)
+    try {
+      const response = await fetch(
+        `/api/conversations/${selectedWorkspace.id}?confirm=true`,
+        {
+          method: "DELETE",
+        }
+      )
+      if (!response.ok) {
+        let message = "Failed to delete workspace."
+        try {
+          const payload = (await response.json()) as { error?: string }
+          if (payload.error) {
+            message = payload.error
+          }
+        } catch {
+          // Ignore parsing errors
+        }
+        throw new Error(message)
+      }
+      setSelectedWorkspaceId(null)
+      setSelectedChatId(null)
+      await loadProjects()
+    } catch (err) {
+      setDeleteWorkspaceError(
+        err instanceof Error ? err.message : "Failed to delete workspace."
+      )
+    } finally {
+      setIsDeletingWorkspace(false)
+    }
+  }
+
   const formatDate = (value?: string) => {
     if (!value) {
       return "Unknown"
@@ -642,6 +692,23 @@ const App = () => {
             <div className="mt-2 max-w-2xl text-sm text-muted-foreground">
               {viewDescription}
             </div>
+            {isWorkspaceView ? (
+              <div className="mt-4 flex flex-wrap items-center gap-3">
+                <Button
+                  type="button"
+                  variant="destructive"
+                  onClick={handleDeleteWorkspace}
+                  disabled={isDeletingWorkspace}
+                >
+                  {isDeletingWorkspace ? "Deleting workspace..." : "Delete workspace"}
+                </Button>
+                {deleteWorkspaceError ? (
+                  <div className="rounded-md border border-destructive/50 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+                    {deleteWorkspaceError}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
           </div>
           {isProjectsView ? (
             <div className="grid gap-4 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">

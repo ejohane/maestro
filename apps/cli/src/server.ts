@@ -13,6 +13,7 @@ import {
   nowIso
 } from "@maestro/core";
 import {
+  deleteConversation,
   getMaestroPaths,
   listConversations,
   listProjects,
@@ -27,7 +28,13 @@ import {
   writeProject,
   writeSession
 } from "@maestro/storage";
-import { getRepoDisplayName, prepareWorkspace, resolveRepoRoot } from "@maestro/git";
+import {
+  deleteBranch,
+  getRepoDisplayName,
+  prepareWorkspace,
+  removeWorktree,
+  resolveRepoRoot
+} from "@maestro/git";
 
 type ServerOptions = {
   port: number;
@@ -204,7 +211,7 @@ const handleApi = async (req: IncomingMessage, res: ServerResponse, repoRoot: st
   const url = new URL(req.url, "http://localhost");
   const segments = parseSegments(url.pathname);
 
-  if (req.method !== "GET" && req.method !== "POST") {
+  if (req.method !== "GET" && req.method !== "POST" && req.method !== "DELETE") {
     sendJson(res, 405, { error: "Method Not Allowed" });
     return;
   }
@@ -358,6 +365,8 @@ const handleApi = async (req: IncomingMessage, res: ServerResponse, repoRoot: st
       const workspace = await prepareWorkspace({
         repoRoot: project.repoPath,
         conversationId,
+        projectName: project.name,
+        conversationTitle: body.title?.trim() || undefined,
         defaultBranch: project.defaultBranch,
         fromRef: body.fromRef?.trim() || undefined,
         stash: body.stash ?? false
@@ -416,43 +425,69 @@ const handleApi = async (req: IncomingMessage, res: ServerResponse, repoRoot: st
     }
   }
 
-  if (segments.length === 2 && segments[1] === "health") {
+  if (req.method === "GET" && segments.length === 2 && segments[1] === "health") {
     sendJson(res, 200, { ok: true });
     return;
   }
 
-  if (segments.length === 2 && segments[1] === "current") {
+  if (req.method === "GET" && segments.length === 2 && segments[1] === "current") {
     const current = await readCurrentContext(requestRepoRoot);
     sendJson(res, 200, current);
     return;
   }
 
-  if (segments.length === 2 && segments[1] === "projects") {
+  if (req.method === "GET" && segments.length === 2 && segments[1] === "projects") {
     const includeAll = url.searchParams.get("all") === "1" || url.searchParams.get("all") === "true";
     const projects = await listProjects(requestRepoRoot, { includeAll });
     sendJson(res, 200, projects);
     return;
   }
 
-  if (segments.length === 2 && segments[1] === "conversations") {
+  if (req.method === "GET" && segments.length === 2 && segments[1] === "conversations") {
     const conversations = await listConversations(requestRepoRoot);
     sendJson(res, 200, conversations);
     return;
   }
 
-  if (segments.length === 3 && segments[1] === "conversations") {
+  if (req.method === "GET" && segments.length === 3 && segments[1] === "conversations") {
     const conversation = await readConversation(requestRepoRoot, segments[2]);
     sendJson(res, 200, conversation);
     return;
   }
 
-  if (segments.length === 4 && segments[1] === "conversations" && segments[3] === "sessions") {
+  if (req.method === "DELETE" && segments.length === 3 && segments[1] === "conversations") {
+    const confirm = url.searchParams.get("confirm");
+    if (confirm !== "true" && confirm !== "1") {
+      sendBadRequest(res, "Deletion requires confirm=true.");
+      return;
+    }
+    try {
+      const conversation = await readConversation(requestRepoRoot, segments[2]);
+      const project = await readProjectById(requestRepoRoot, conversation.projectId);
+      await removeWorktree(project.repoPath, conversation.workspacePath);
+      await deleteBranch(project.repoPath, conversation.branch);
+      await deleteConversation(project.repoPath, conversation.id);
+      sendJson(res, 200, { ok: true });
+      return;
+    } catch (error) {
+      sendError(res, error);
+      return;
+    }
+  }
+
+  if (
+    req.method === "GET" &&
+    segments.length === 4 &&
+    segments[1] === "conversations" &&
+    segments[3] === "sessions"
+  ) {
     const sessions = await listSessions(requestRepoRoot, segments[2]);
     sendJson(res, 200, sessions);
     return;
   }
 
   if (
+    req.method === "GET" &&
     segments.length === 5 &&
     segments[1] === "conversations" &&
     segments[3] === "sessions"
@@ -463,6 +498,7 @@ const handleApi = async (req: IncomingMessage, res: ServerResponse, repoRoot: st
   }
 
   if (
+    req.method === "GET" &&
     segments.length === 6 &&
     segments[1] === "conversations" &&
     segments[3] === "sessions" &&
@@ -474,6 +510,7 @@ const handleApi = async (req: IncomingMessage, res: ServerResponse, repoRoot: st
   }
 
   if (
+    req.method === "GET" &&
     segments.length === 6 &&
     segments[1] === "conversations" &&
     segments[3] === "sessions" &&
