@@ -1,5 +1,5 @@
 import * as React from "react"
-import { LifeBuoy, Send, Workflow } from "lucide-react"
+import { LifeBuoy, Send, Settings, Workflow } from "lucide-react"
 
 import { NavProjects } from "./nav-projects"
 import { NavSecondary } from "./nav-secondary"
@@ -9,6 +9,8 @@ import {
   SidebarContent,
   SidebarFooter,
   SidebarHeader,
+  SidebarGroup,
+  SidebarGroupContent,
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
@@ -56,10 +58,12 @@ const data = {
 export function AppSidebar({
   projects,
   isProjectsView,
+  isSettingsView,
   selectedProjectId,
   selectedWorkspaceId,
   selectedChatId,
   onSelectProjects,
+  onSelectSettings,
   onSelectProject,
   onSelectWorkspace,
   onSelectChat,
@@ -67,10 +71,12 @@ export function AppSidebar({
 }: React.ComponentProps<typeof Sidebar> & {
   projects: Project[]
   isProjectsView: boolean
+  isSettingsView: boolean
   selectedProjectId: string | null
   selectedWorkspaceId: string | null
   selectedChatId: string | null
   onSelectProjects: () => void
+  onSelectSettings: () => void
   onSelectProject: (projectId: string) => void
   onSelectWorkspace: (projectId: string, workspaceId: string) => void
   onSelectChat: (projectId: string, workspaceId: string, chatId: string) => void
@@ -111,6 +117,24 @@ export function AppSidebar({
           onSelectWorkspace={onSelectWorkspace}
           onSelectChat={onSelectChat}
         />
+        <SidebarGroup>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  isActive={isSettingsView}
+                  onClick={(event) => {
+                    event.preventDefault()
+                    onSelectSettings()
+                  }}
+                >
+                  <Settings />
+                  <span>Settings</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
         <NavSecondary items={data.navSecondary} className="mt-auto" />
       </SidebarContent>
       <SidebarFooter>

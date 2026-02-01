@@ -1,5 +1,4 @@
 import * as React from "react"
-import { Moon, Sun } from "lucide-react"
 
 import { AppSidebar } from "./components/app-sidebar"
 import { ProjectWorkspacesTable } from "./components/project-workspaces-table"
@@ -168,6 +167,7 @@ const App = () => {
   const [isLoading, setIsLoading] = React.useState(true)
   const [error, setError] = React.useState<string | null>(null)
   const [isProjectsView, setIsProjectsView] = React.useState(false)
+  const [isSettingsView, setIsSettingsView] = React.useState(false)
   const [selectedProjectId, setSelectedProjectId] = React.useState<string | null>(
     null
   )
@@ -215,6 +215,15 @@ const App = () => {
   const [openPullRequests, setOpenPullRequests] = React.useState<OpenPullRequest[]>([])
   const [isLoadingPullRequests, setIsLoadingPullRequests] = React.useState(false)
   const [pullRequestsError, setPullRequestsError] = React.useState<string | null>(null)
+  const [settingsForm, setSettingsForm] = React.useState({
+    githubToken: "",
+    gotlandToken: "",
+  })
+  const [settingsError, setSettingsError] = React.useState<string | null>(null)
+  const [settingsSavedMessage, setSettingsSavedMessage] = React.useState<string | null>(
+    null
+  )
+  const [isSavingSettings, setIsSavingSettings] = React.useState(false)
   const [mergingPullRequests, setMergingPullRequests] = React.useState<
     Record<string, boolean>
   >({})
@@ -319,9 +328,35 @@ const App = () => {
     }
   }, [])
 
+  const loadSettings = React.useCallback(async () => {
+    setSettingsError(null)
+    try {
+      const response = await fetch("/api/settings")
+      if (!response.ok) {
+        throw new Error("Failed to load settings.")
+      }
+      const payload = (await response.json()) as {
+        githubToken?: string
+        gotlandToken?: string
+      }
+      setSettingsForm({
+        githubToken: payload.githubToken ?? "",
+        gotlandToken: payload.gotlandToken ?? "",
+      })
+    } catch (err) {
+      setSettingsError(
+        err instanceof Error ? err.message : "Failed to load settings."
+      )
+    }
+  }, [])
+
   React.useEffect(() => {
     void loadProjects()
   }, [loadProjects])
+
+  React.useEffect(() => {
+    void loadSettings()
+  }, [loadSettings])
 
   React.useEffect(() => {
     if (!projects.length) {
@@ -642,13 +677,20 @@ const App = () => {
 
   const handleSelectProjectsView = () => {
     setIsProjectsView(true)
+    setIsSettingsView(false)
     setSelectedProjectId(null)
     setSelectedWorkspaceId(null)
     setSelectedChatId(null)
   }
 
+  const handleSelectSettingsView = () => {
+    setIsSettingsView(true)
+    setIsProjectsView(false)
+  }
+
   const handleSelectProject = (projectId: string) => {
     setIsProjectsView(false)
+    setIsSettingsView(false)
     setSelectedProjectId(projectId)
     setSelectedWorkspaceId(null)
     setSelectedChatId(null)
@@ -656,6 +698,7 @@ const App = () => {
 
   const handleSelectWorkspace = (projectId: string, workspaceId: string) => {
     setIsProjectsView(false)
+    setIsSettingsView(false)
     setSelectedProjectId(projectId)
     setSelectedWorkspaceId(workspaceId)
     setSelectedChatId(null)
@@ -799,6 +842,7 @@ const App = () => {
     chatId: string
   ) => {
     setIsProjectsView(false)
+    setIsSettingsView(false)
     setSelectedProjectId(projectId)
     setSelectedWorkspaceId(workspaceId)
     setSelectedChatId(chatId)
@@ -811,6 +855,14 @@ const App = () => {
     }
   }
 
+  const handleSettingsChange = (field: keyof typeof settingsForm) => {
+    return (event: React.ChangeEvent<HTMLInputElement>) => {
+      const value = event.target.value
+      setSettingsForm((prev) => ({ ...prev, [field]: value }))
+      setSettingsSavedMessage(null)
+    }
+  }
+
   const handleWorkspaceFormChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const value = event.target.value
     setWorkspaceForm({ title: value })
@@ -819,6 +871,50 @@ const App = () => {
   const handleSessionFormChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const value = event.target.value
     setSessionForm({ title: value })
+  }
+
+  const handleSettingsSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    setIsSavingSettings(true)
+    setSettingsError(null)
+    setSettingsSavedMessage(null)
+    try {
+      const response = await fetch("/api/settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          githubToken: settingsForm.githubToken.trim() || null,
+          gotlandToken: settingsForm.gotlandToken.trim() || null,
+        }),
+      })
+      if (!response.ok) {
+        let message = "Failed to save settings."
+        try {
+          const payload = (await response.json()) as { error?: string }
+          if (payload.error) {
+            message = payload.error
+          }
+        } catch {
+          // Ignore parsing errors
+        }
+        throw new Error(message)
+      }
+      const payload = (await response.json()) as {
+        githubToken?: string
+        gotlandToken?: string
+      }
+      setSettingsForm({
+        githubToken: payload.githubToken ?? "",
+        gotlandToken: payload.gotlandToken ?? "",
+      })
+      setSettingsSavedMessage("Settings saved.")
+    } catch (err) {
+      setSettingsError(
+        err instanceof Error ? err.message : "Failed to save settings."
+      )
+    } finally {
+      setIsSavingSettings(false)
+    }
   }
 
   const handleSelectDirectory = async () => {
@@ -1295,41 +1391,52 @@ const App = () => {
   }
 
   const isProjectView = Boolean(
-    selectedProject && !selectedWorkspace && !selectedChat && !isProjectsView
+    !isSettingsView &&
+      selectedProject &&
+      !selectedWorkspace &&
+      !selectedChat &&
+      !isProjectsView
   )
-  const isWorkspaceView = Boolean(selectedWorkspace && !selectedChat)
-  const isChatView = Boolean(selectedChat)
+  const isWorkspaceView = Boolean(!isSettingsView && selectedWorkspace && !selectedChat)
+  const isChatView = Boolean(!isSettingsView && selectedChat)
   const isChatStreaming = chatStatus === "streaming"
   const projectIconValue = selectedProject?.icon?.trim() ?? ""
   const promptDisabled =
     isChatStreaming || !selectedWorkspace || !selectedChat || isTranscriptLoading
+  const nextThemeLabel = theme === "dark" ? "Light" : "Dark"
 
-  const viewLabel = isChatView
-    ? "Chat Session"
-    : isWorkspaceView
-      ? "Workspace"
-      : isProjectView
-        ? "Project"
-        : "Home"
-  const viewTitle = isProjectsView
-    ? "Home"
-    : selectedChat?.name ??
-      selectedWorkspace?.name ??
-      selectedProject?.name ??
-      (isLoading ? "Syncing projects" : "Choose a project")
-  const viewDescription = isProjectsView
-    ? "Home for your projects, new work, and recent workspaces."
-    : selectedChat
-      ? `Workspace in ${selectedWorkspace?.name ?? "workspace"}.`
-      : selectedWorkspace
-        ? "Workspace activity, members, and recent sessions."
-        : selectedProject
-          ? `Repo: ${selectedProject.repoUrl?.trim() || selectedProject.repoPath}`
-          : isLoading
-            ? "Fetching projects, workspaces, and sessions."
-            : error
-              ? error
-              : "Select a project to explore its workspaces."
+  const viewLabel = isSettingsView
+    ? "Settings"
+    : isChatView
+      ? "Chat Session"
+      : isWorkspaceView
+        ? "Workspace"
+        : isProjectView
+          ? "Project"
+          : "Home"
+  const viewTitle = isSettingsView
+    ? "Settings"
+    : isProjectsView
+      ? "Home"
+      : selectedChat?.name ??
+        selectedWorkspace?.name ??
+        selectedProject?.name ??
+        (isLoading ? "Syncing projects" : "Choose a project")
+  const viewDescription = isSettingsView
+    ? "Manage access tokens and appearance for Maestro."
+    : isProjectsView
+      ? "Home for your projects, new work, and recent workspaces."
+      : selectedChat
+        ? `Workspace in ${selectedWorkspace?.name ?? "workspace"}.`
+        : selectedWorkspace
+          ? "Workspace activity, members, and recent sessions."
+          : selectedProject
+            ? `Repo: ${selectedProject.repoUrl?.trim() || selectedProject.repoPath}`
+            : isLoading
+              ? "Fetching projects, workspaces, and sessions."
+              : error
+                ? error
+                : "Select a project to explore its workspaces."
 
   const secondaryTitle = isChatView
     ? "Workspace context"
@@ -1361,17 +1468,19 @@ const App = () => {
   const recentSessionsForView = isProjectView ? projectRecentSessions : recentSessions
   return (
     <SidebarProvider>
-      <AppSidebar
-        projects={projects}
-        isProjectsView={isProjectsView}
-        selectedProjectId={selectedProjectId}
-        selectedWorkspaceId={selectedWorkspaceId}
-        selectedChatId={selectedChatId}
-        onSelectProjects={handleSelectProjectsView}
-        onSelectProject={handleSelectProject}
-        onSelectWorkspace={handleSelectWorkspace}
-        onSelectChat={handleSelectChat}
-      />
+        <AppSidebar
+          projects={projects}
+          isProjectsView={isProjectsView}
+          isSettingsView={isSettingsView}
+          selectedProjectId={selectedProjectId}
+          selectedWorkspaceId={selectedWorkspaceId}
+          selectedChatId={selectedChatId}
+          onSelectProjects={handleSelectProjectsView}
+          onSelectSettings={handleSelectSettingsView}
+          onSelectProject={handleSelectProject}
+          onSelectWorkspace={handleSelectWorkspace}
+          onSelectChat={handleSelectChat}
+        />
       <SidebarRail />
       <SidebarInset>
         <header className="flex h-16 shrink-0 items-center gap-2 border-b px-4">
@@ -1379,89 +1488,197 @@ const App = () => {
           <Separator orientation="vertical" className="mr-2 h-4" />
           <Breadcrumb>
             <BreadcrumbList>
-              <BreadcrumbItem>
-                {selectedProject ? (
-                  <BreadcrumbLink
-                    href="#"
-                    onClick={(event) => {
-                      event.preventDefault()
-                      handleSelectProjectsView()
-                    }}
-                  >
-                    Home
-                  </BreadcrumbLink>
-                ) : (
-                  <BreadcrumbPage>Home</BreadcrumbPage>
-                )}
-              </BreadcrumbItem>
-              {selectedProject && !isLoading ? (
+              {isSettingsView ? (
+                <BreadcrumbItem>
+                  <BreadcrumbPage>Settings</BreadcrumbPage>
+                </BreadcrumbItem>
+              ) : (
                 <>
-                  <BreadcrumbSeparator />
                   <BreadcrumbItem>
-                    {selectedWorkspace || selectedChat ? (
+                    {selectedProject ? (
                       <BreadcrumbLink
                         href="#"
                         onClick={(event) => {
                           event.preventDefault()
-                          handleSelectProject(selectedProject.id)
+                          handleSelectProjectsView()
                         }}
                       >
-                        {selectedProject.name}
+                        Home
                       </BreadcrumbLink>
                     ) : (
-                      <BreadcrumbPage>{selectedProject.name}</BreadcrumbPage>
+                      <BreadcrumbPage>Home</BreadcrumbPage>
                     )}
                   </BreadcrumbItem>
+                  {selectedProject && !isLoading ? (
+                    <>
+                      <BreadcrumbSeparator />
+                      <BreadcrumbItem>
+                        {selectedWorkspace || selectedChat ? (
+                          <BreadcrumbLink
+                            href="#"
+                            onClick={(event) => {
+                              event.preventDefault()
+                              handleSelectProject(selectedProject.id)
+                            }}
+                          >
+                            {selectedProject.name}
+                          </BreadcrumbLink>
+                        ) : (
+                          <BreadcrumbPage>{selectedProject.name}</BreadcrumbPage>
+                        )}
+                      </BreadcrumbItem>
+                    </>
+                  ) : null}
+                  {selectedWorkspace && !isLoading ? (
+                    <>
+                      <BreadcrumbSeparator />
+                      <BreadcrumbItem>
+                        {selectedChat ? (
+                          <BreadcrumbLink
+                            href="#"
+                            onClick={(event) => {
+                              event.preventDefault()
+                              if (!selectedProject) {
+                                return
+                              }
+                              handleSelectWorkspace(
+                                selectedProject.id,
+                                selectedWorkspace.id
+                              )
+                            }}
+                          >
+                            {selectedWorkspace.name}
+                          </BreadcrumbLink>
+                        ) : (
+                          <BreadcrumbPage>{selectedWorkspace.name}</BreadcrumbPage>
+                        )}
+                      </BreadcrumbItem>
+                    </>
+                  ) : null}
+                  {selectedChat && !isLoading ? (
+                    <>
+                      <BreadcrumbSeparator />
+                      <BreadcrumbItem>
+                        <BreadcrumbPage>{selectedChat.name}</BreadcrumbPage>
+                      </BreadcrumbItem>
+                    </>
+                  ) : null}
                 </>
-              ) : null}
-              {selectedWorkspace && !isLoading ? (
-                <>
-                  <BreadcrumbSeparator />
-                  <BreadcrumbItem>
-                    {selectedChat ? (
-                      <BreadcrumbLink
-                        href="#"
-                        onClick={(event) => {
-                          event.preventDefault()
-                          if (!selectedProject) {
-                            return
-                          }
-                          handleSelectWorkspace(selectedProject.id, selectedWorkspace.id)
-                        }}
-                      >
-                        {selectedWorkspace.name}
-                      </BreadcrumbLink>
-                    ) : (
-                      <BreadcrumbPage>{selectedWorkspace.name}</BreadcrumbPage>
-                    )}
-                  </BreadcrumbItem>
-                </>
-              ) : null}
-              {selectedChat && !isLoading ? (
-                <>
-                  <BreadcrumbSeparator />
-                  <BreadcrumbItem>
-                    <BreadcrumbPage>{selectedChat.name}</BreadcrumbPage>
-                  </BreadcrumbItem>
-                </>
-              ) : null}
+              )}
             </BreadcrumbList>
           </Breadcrumb>
-          <div className="ml-auto flex items-center gap-2">
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              onClick={toggleTheme}
-              aria-label="Toggle dark mode"
-              title="Toggle dark mode"
-            >
-              {theme === "dark" ? <Sun /> : <Moon />}
-              <span className="sr-only">Toggle dark mode</span>
-            </Button>
-          </div>
         </header>
-        <div className="flex flex-1 flex-col gap-4 p-6">
+        {isSettingsView ? (
+          <div className="flex flex-1 flex-col gap-4 p-6">
+            <div className="rounded-xl border bg-card p-6 shadow-sm">
+              <div className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+                Settings
+              </div>
+              <div className="mt-3 text-2xl font-semibold text-foreground">
+                Maestro preferences
+              </div>
+              <div className="mt-2 max-w-2xl text-sm text-muted-foreground">
+                Manage access tokens and appearance for this device.
+              </div>
+            </div>
+            <div className="grid gap-4 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,0.9fr)]">
+              <Card>
+                <form onSubmit={handleSettingsSubmit}>
+                  <CardHeader>
+                    <CardTitle>Access tokens</CardTitle>
+                    <CardDescription>
+                      Keep your GitHub and Gotland integrations up to date.
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="grid gap-4">
+                    <div className="grid gap-2">
+                      <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                        GitHub token
+                      </label>
+                      <Input
+                        type="password"
+                        autoComplete="new-password"
+                        value={settingsForm.githubToken}
+                        onChange={handleSettingsChange("githubToken")}
+                        placeholder="ghp_..."
+                      />
+                      <div className="text-xs text-muted-foreground">
+                        Leave blank to clear. Environment variable GITHUB_TOKEN
+                        overrides this value.
+                      </div>
+                    </div>
+                    <div className="grid gap-2">
+                      <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                        Gotland token
+                      </label>
+                      <Input
+                        type="password"
+                        autoComplete="new-password"
+                        value={settingsForm.gotlandToken}
+                        onChange={handleSettingsChange("gotlandToken")}
+                        placeholder="gotland_..."
+                      />
+                      <div className="text-xs text-muted-foreground">
+                        Stored locally in ~/.maestro/settings.json.
+                      </div>
+                    </div>
+                    {settingsError ? (
+                      <div className="rounded-md border border-destructive/50 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+                        {settingsError}
+                      </div>
+                    ) : null}
+                    {settingsSavedMessage ? (
+                      <div className="rounded-md border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-700">
+                        {settingsSavedMessage}
+                      </div>
+                    ) : null}
+                  </CardContent>
+                  <CardFooter>
+                    <Button type="submit" disabled={isSavingSettings}>
+                      {isSavingSettings ? "Saving..." : "Save settings"}
+                    </Button>
+                  </CardFooter>
+                </form>
+              </Card>
+              <div className="grid gap-4">
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Appearance</CardTitle>
+                    <CardDescription>
+                      Choose the theme that feels best for long sessions.
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="grid gap-3">
+                    <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-muted/30 px-4 py-3">
+                      <div>
+                        <div className="text-sm font-semibold text-foreground">Theme</div>
+                        <div className="text-xs text-muted-foreground">
+                          Currently set to {theme === "dark" ? "dark" : "light"} mode.
+                        </div>
+                      </div>
+                      <Button type="button" variant="outline" onClick={toggleTheme}>
+                        Switch to {nextThemeLabel}
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Security</CardTitle>
+                    <CardDescription>
+                      Tokens stay on this machine unless you export them.
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="text-sm text-muted-foreground">
+                    Maestro uses environment variables first, then falls back to your local
+                    settings file if needed.
+                  </CardContent>
+                </Card>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="flex flex-1 flex-col gap-4 p-6">
           <div className="rounded-xl border bg-card p-6 shadow-sm">
             <div className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
               {viewLabel}
@@ -2015,7 +2232,8 @@ const App = () => {
               </div>
             </div>
           )}
-        </div>
+          </div>
+        )}
       </SidebarInset>
     </SidebarProvider>
   )
