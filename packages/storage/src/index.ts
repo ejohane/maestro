@@ -15,6 +15,12 @@ export interface MaestroPaths {
   conversationsDir: string;
   workspacesDir: string;
   currentFile: string;
+  settingsFile: string;
+}
+
+export interface MaestroSettings {
+  githubToken?: string;
+  gotlandToken?: string;
 }
 
 export const getMaestroPaths = (_repoRoot: string): MaestroPaths => {
@@ -24,7 +30,8 @@ export const getMaestroPaths = (_repoRoot: string): MaestroPaths => {
     projectsDir: path.join(root, "projects"),
     conversationsDir: path.join(root, "conversations"),
     workspacesDir: path.join(root, "workspaces"),
-    currentFile: path.join(root, "current.json")
+    currentFile: path.join(root, "current.json"),
+    settingsFile: path.join(root, "settings.json")
   };
 };
 
@@ -250,6 +257,26 @@ export const readCurrentContext = async (repoRoot: string): Promise<CurrentConte
     }
     throw error;
   }
+};
+
+export const readSettings = async (repoRoot: string): Promise<MaestroSettings> => {
+  const { settingsFile } = getMaestroPaths(repoRoot);
+  try {
+    return await readJson<MaestroSettings>(settingsFile);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return {};
+    }
+    throw error;
+  }
+};
+
+export const writeSettings = async (
+  repoRoot: string,
+  settings: MaestroSettings
+): Promise<void> => {
+  const { settingsFile } = await ensureMaestroRoot(repoRoot);
+  await writeJson(settingsFile, settings);
 };
 
 export const appendTranscriptEntry = async (

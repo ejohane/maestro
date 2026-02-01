@@ -24,6 +24,7 @@ import {
   appendTranscriptEntry,
   readConversation,
   readCurrentContext,
+  readSettings,
   readProjectById,
   readSession,
   readTranscriptHistory,
@@ -32,6 +33,7 @@ import {
   updateSessionTimestamp,
   writeConversation,
   writeProject,
+  writeSettings,
   writeSession
 } from "@maestro/storage";
 import {
@@ -237,11 +239,22 @@ const buildGitHubApiBase = (host: string): string => {
   return `https://${host}/api/v3`;
 };
 
+const resolveGitHubToken = async (repoRoot: string): Promise<string | undefined> => {
+  const envToken = process.env.GITHUB_TOKEN?.trim();
+  if (envToken) {
+    return envToken;
+  }
+  const settings = await readSettings(repoRoot);
+  const stored = settings.githubToken?.trim();
+  return stored || undefined;
+};
+
 const buildGitLabApiBase = (host: string): string => {
   return `https://${host}/api/v4`;
 };
 
 const fetchGitHubPullRequests = async (
+  repoRoot: string,
   repoUrl: string,
   limit: number
 ): Promise<PullRequestInfo[]> => {
@@ -261,7 +274,7 @@ const fetchGitHubPullRequests = async (
     Accept: "application/vnd.github+json",
     "User-Agent": "Maestro"
   };
-  const token = process.env.GITHUB_TOKEN;
+  const token = await resolveGitHubToken(repoRoot);
   if (token) {
     headers.Authorization = `Bearer ${token}`;
   }
@@ -473,9 +486,50 @@ const handleApi = async (req: IncomingMessage, res: ServerResponse, repoRoot: st
   const url = new URL(req.url, "http://localhost");
   const segments = parseSegments(url.pathname);
 
-  if (req.method !== "GET" && req.method !== "POST" && req.method !== "DELETE") {
+  if (
+    req.method !== "GET" &&
+    req.method !== "POST" &&
+    req.method !== "DELETE" &&
+    req.method !== "PUT"
+  ) {
     sendJson(res, 405, { error: "Method Not Allowed" });
     return;
+  }
+
+  if (req.method === "GET" && segments.length === 2 && segments[1] === "settings") {
+    const settings = await readSettings(repoRoot);
+    sendJson(res, 200, settings);
+    return;
+  }
+
+  if (req.method === "PUT" && segments.length === 2 && segments[1] === "settings") {
+    try {
+      const body = await readJsonBody<{
+        githubToken?: string | null;
+        gotlandToken?: string | null;
+      }>(req);
+      const normalizeToken = (value?: string | null): string | undefined => {
+        if (typeof value !== "string") {
+          return undefined;
+        }
+        const trimmed = value.trim();
+        return trimmed.length ? trimmed : undefined;
+      };
+      const nextSettings = {
+        githubToken: normalizeToken(body.githubToken),
+        gotlandToken: normalizeToken(body.gotlandToken)
+      };
+      await writeSettings(repoRoot, nextSettings);
+      sendJson(res, 200, nextSettings);
+      return;
+    } catch (error) {
+      if (error instanceof SyntaxError) {
+        sendBadRequest(res, "Invalid JSON body.");
+        return;
+      }
+      sendError(res, error);
+      return;
+    }
   }
 
   if (req.method === "GET" && segments.length === 3 && segments[1] === "fs" && segments[2] === "root") {
@@ -720,7 +774,7 @@ const handleApi = async (req: IncomingMessage, res: ServerResponse, repoRoot: st
         : 10;
       const pullRequests =
         provider === "github"
-          ? await fetchGitHubPullRequests(repoUrl, limit)
+          ? await fetchGitHubPullRequests(requestRepoRoot, repoUrl, limit)
           : await fetchGitLabMergeRequests(repoUrl, limit);
       sendJson(res, 200, pullRequests);
       return;

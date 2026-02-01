@@ -5,6 +5,11 @@ export interface MaestroPaths {
     conversationsDir: string;
     workspacesDir: string;
     currentFile: string;
+    settingsFile: string;
+}
+export interface MaestroSettings {
+    githubToken?: string;
+    gotlandToken?: string;
 }
 export declare const getMaestroPaths: (repoRoot: string) => MaestroPaths;
 export declare const ensureMaestroRoot: (repoRoot: string) => Promise<MaestroPaths>;
@@ -26,6 +31,8 @@ export declare const updateConversationTimestamp: (repoRoot: string, conversatio
 export declare const updateSessionTimestamp: (repoRoot: string, conversationId: string, session: Session) => Promise<void>;
 export declare const setCurrentContext: (repoRoot: string, context: CurrentContext) => Promise<void>;
 export declare const readCurrentContext: (repoRoot: string) => Promise<CurrentContext>;
+export declare const readSettings: (repoRoot: string) => Promise<MaestroSettings>;
+export declare const writeSettings: (repoRoot: string, settings: MaestroSettings) => Promise<void>;
 export declare const appendTranscriptEntry: (repoRoot: string, conversationId: string, sessionId: string, entry: unknown) => Promise<void>;
 export declare const appendEventEntry: (repoRoot: string, conversationId: string, sessionId: string, entry: unknown) => Promise<void>;
 export type TranscriptMessage = {
