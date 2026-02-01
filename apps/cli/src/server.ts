@@ -366,7 +366,11 @@ const fetchGitLabMergeRequests = async (
   }));
 };
 
-const mergeGitHubPullRequest = async (repoUrl: string, pullNumber: string): Promise<void> => {
+const mergeGitHubPullRequest = async (
+  repoRoot: string,
+  repoUrl: string,
+  pullNumber: string
+): Promise<void> => {
   const parsed = parseRepoUrl(repoUrl);
   if (!parsed) {
     throw new Error("Invalid GitHub repository URL.");
@@ -375,7 +379,7 @@ const mergeGitHubPullRequest = async (repoUrl: string, pullNumber: string): Prom
   if (!owner || !repo) {
     throw new Error("GitHub repository URL must include owner and repo.");
   }
-  const token = process.env.GITHUB_TOKEN;
+  const token = await resolveGitHubToken(repoRoot);
   if (!token) {
     throw new Error("GITHUB_TOKEN is required to merge GitHub pull requests.");
   }
@@ -908,7 +912,7 @@ const handleApi = async (req: IncomingMessage, res: ServerResponse, repoRoot: st
         return;
       }
       if (provider === "github") {
-        await mergeGitHubPullRequest(repoUrl, pullRequestId);
+        await mergeGitHubPullRequest(requestRepoRoot, repoUrl, pullRequestId);
       } else {
         await mergeGitLabMergeRequest(repoUrl, pullRequestId);
       }
