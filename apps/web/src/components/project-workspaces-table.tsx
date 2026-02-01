@@ -54,6 +54,7 @@ type WorkspaceItem = {
 
 type OpenPullRequest = {
   id: string
+  number: string
   title: string
   url: string
   author?: string
@@ -88,6 +89,21 @@ type ProjectWorkspacesTableProps = {
   isCreatingWorkspace: boolean
   createWorkspaceError: string | null
   formatDateTime: (value?: string) => string
+  onMergePullRequest: (item: OpenPullRequest) => void
+  mergedPullRequests: Record<
+    string,
+    { workspaceId?: string; workspaceName?: string; workspaceDeleted?: boolean }
+  >
+  mergingPullRequests: Record<string, boolean>
+  mergePullRequestErrors: Record<string, string>
+  onDeleteMergedWorkspace: (
+    pullRequestKey: string,
+    workspaceId: string,
+    workspaceName?: string
+  ) => void
+  deletingMergeWorkspace: Record<string, boolean>
+  deleteMergeWorkspaceErrors: Record<string, string>
+  getPullRequestKey: (item: OpenPullRequest) => string
 }
 
 const getLatestWorkspaceActivity = (workspace: WorkspaceItem) => {
@@ -147,6 +163,14 @@ const ProjectWorkspacesTable = ({
   isCreatingWorkspace,
   createWorkspaceError,
   formatDateTime,
+  onMergePullRequest,
+  mergedPullRequests,
+  mergingPullRequests,
+  mergePullRequestErrors,
+  onDeleteMergedWorkspace,
+  deletingMergeWorkspace,
+  deleteMergeWorkspaceErrors,
+  getPullRequestKey,
 }: ProjectWorkspacesTableProps) => {
   const data = React.useMemo<WorkspaceRow[]>(() => {
     return workspaces
@@ -250,18 +274,98 @@ const ProjectWorkspacesTable = ({
                 ) : null}
                 {gitlabCount ? <Badge variant="outline">MR {gitlabCount}</Badge> : null}
               </div>
-              <div className="grid gap-1 text-xs text-muted-foreground">
-                {visibleItems.map((item) => (
-                  <a
-                    key={item.id}
-                    className="truncate text-primary hover:underline"
-                    href={item.url}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    {item.title}
-                  </a>
-                ))}
+              <div className="grid gap-2 text-xs text-muted-foreground">
+                {visibleItems.map((item) => {
+                  const key = getPullRequestKey(item)
+                  const mergeState = mergedPullRequests[key]
+                  const mergeError = mergePullRequestErrors[key]
+                  const isMerging = mergingPullRequests[key]
+                  const isMerged = Boolean(mergeState)
+                  const workspaceId = mergeState?.workspaceId
+                  const workspaceName = mergeState?.workspaceName ?? row.original.name
+                  const isDeletingWorkspace = workspaceId
+                    ? deletingMergeWorkspace[workspaceId]
+                    : false
+                  const deleteWorkspaceError = workspaceId
+                    ? deleteMergeWorkspaceErrors[workspaceId]
+                    : null
+
+                  return (
+                    <div key={item.id} className="grid gap-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <a
+                          className="truncate text-primary hover:underline"
+                          href={item.url}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          {item.title}
+                        </a>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant={isMerged ? "outline" : "default"}
+                          onClick={() => onMergePullRequest(item)}
+                          disabled={isMerging || isMerged}
+                        >
+                          {isMerged
+                            ? "Merged"
+                            : isMerging
+                              ? "Merging..."
+                              : "Merge"}
+                        </Button>
+                      </div>
+                      {mergeError ? (
+                        <div className="rounded-md border border-destructive/50 bg-destructive/5 px-2 py-1 text-xs text-destructive">
+                          {mergeError}
+                        </div>
+                      ) : null}
+                      {isMerged ? (
+                        <div className="rounded-md border border-emerald-500/40 bg-emerald-500/5 px-2 py-1">
+                          <div className="text-xs font-semibold text-foreground">
+                            Merge complete
+                          </div>
+                          <div className="mt-1 text-xs text-muted-foreground">
+                            {workspaceId
+                              ? `Optional: delete workspace ${workspaceName}.`
+                              : "No workspace matched this branch."
+                            }
+                          </div>
+                          {workspaceId && !mergeState?.workspaceDeleted ? (
+                            <div className="mt-2 flex flex-wrap items-center gap-2">
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="destructive"
+                                onClick={() =>
+                                  onDeleteMergedWorkspace(
+                                    key,
+                                    workspaceId,
+                                    workspaceName
+                                  )
+                                }
+                                disabled={Boolean(isDeletingWorkspace)}
+                              >
+                                {isDeletingWorkspace
+                                  ? "Deleting workspace..."
+                                  : "Delete workspace"}
+                              </Button>
+                              {deleteWorkspaceError ? (
+                                <span className="text-xs text-destructive">
+                                  {deleteWorkspaceError}
+                                </span>
+                              ) : null}
+                            </div>
+                          ) : workspaceId && mergeState?.workspaceDeleted ? (
+                            <div className="mt-2 text-xs text-muted-foreground">
+                              Workspace deleted.
+                            </div>
+                          ) : null}
+                        </div>
+                      ) : null}
+                    </div>
+                  )
+                })}
                 {remaining > 0 ? <span>+{remaining} more</span> : null}
               </div>
             </div>
@@ -306,7 +410,19 @@ const ProjectWorkspacesTable = ({
         ),
       },
     ],
-    [formatDateTime, onSelectWorkspace, projectId]
+    [
+      formatDateTime,
+      onDeleteMergedWorkspace,
+      onMergePullRequest,
+      onSelectWorkspace,
+      projectId,
+      getPullRequestKey,
+      mergedPullRequests,
+      mergingPullRequests,
+      mergePullRequestErrors,
+      deletingMergeWorkspace,
+      deleteMergeWorkspaceErrors,
+    ]
   )
 
   const [sorting, setSorting] = React.useState<SortingState>([
@@ -473,18 +589,97 @@ const ProjectWorkspacesTable = ({
                   <div>{item.sessionCount} sessions</div>
                   <div>Last used {formatDateTime(item.updatedAt)}</div>
                   {item.pullRequests.length ? (
-                    <div className="grid gap-1">
-                      {item.pullRequests.slice(0, 2).map((pr) => (
-                        <a
-                          key={pr.id}
-                          className="truncate text-primary hover:underline"
-                          href={pr.url}
-                          target="_blank"
-                          rel="noreferrer"
-                        >
-                          {pr.title}
-                        </a>
-                      ))}
+                    <div className="grid gap-2">
+                      {item.pullRequests.slice(0, 2).map((pr) => {
+                        const key = getPullRequestKey(pr)
+                        const mergeState = mergedPullRequests[key]
+                        const mergeError = mergePullRequestErrors[key]
+                        const isMerging = mergingPullRequests[key]
+                        const isMerged = Boolean(mergeState)
+                        const workspaceId = mergeState?.workspaceId
+                        const workspaceName = mergeState?.workspaceName ?? item.name
+                        const isDeletingWorkspace = workspaceId
+                          ? deletingMergeWorkspace[workspaceId]
+                          : false
+                        const deleteWorkspaceError = workspaceId
+                          ? deleteMergeWorkspaceErrors[workspaceId]
+                          : null
+                        return (
+                          <div key={pr.id} className="grid gap-2">
+                            <div className="flex items-center justify-between gap-2">
+                              <a
+                                className="truncate text-primary hover:underline"
+                                href={pr.url}
+                                target="_blank"
+                                rel="noreferrer"
+                              >
+                                {pr.title}
+                              </a>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant={isMerged ? "outline" : "default"}
+                                onClick={() => onMergePullRequest(pr)}
+                                disabled={isMerging || isMerged}
+                              >
+                                {isMerged
+                                  ? "Merged"
+                                  : isMerging
+                                    ? "Merging..."
+                                    : "Merge"}
+                              </Button>
+                            </div>
+                            {mergeError ? (
+                              <div className="rounded-md border border-destructive/50 bg-destructive/5 px-2 py-1 text-xs text-destructive">
+                                {mergeError}
+                              </div>
+                            ) : null}
+                            {isMerged ? (
+                              <div className="rounded-md border border-emerald-500/40 bg-emerald-500/5 px-2 py-1">
+                                <div className="text-xs font-semibold text-foreground">
+                                  Merge complete
+                                </div>
+                                <div className="mt-1 text-xs text-muted-foreground">
+                                  {workspaceId
+                                    ? `Optional: delete workspace ${workspaceName}.`
+                                    : "No workspace matched this branch."
+                                  }
+                                </div>
+                                {workspaceId && !mergeState?.workspaceDeleted ? (
+                                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                                    <Button
+                                      type="button"
+                                      size="sm"
+                                      variant="destructive"
+                                      onClick={() =>
+                                        onDeleteMergedWorkspace(
+                                          key,
+                                          workspaceId,
+                                          workspaceName
+                                        )
+                                      }
+                                      disabled={Boolean(isDeletingWorkspace)}
+                                    >
+                                      {isDeletingWorkspace
+                                        ? "Deleting workspace..."
+                                        : "Delete workspace"}
+                                    </Button>
+                                    {deleteWorkspaceError ? (
+                                      <span className="text-xs text-destructive">
+                                        {deleteWorkspaceError}
+                                      </span>
+                                    ) : null}
+                                  </div>
+                                ) : workspaceId && mergeState?.workspaceDeleted ? (
+                                  <div className="mt-2 text-xs text-muted-foreground">
+                                    Workspace deleted.
+                                  </div>
+                                ) : null}
+                              </div>
+                            ) : null}
+                          </div>
+                        )
+                      })}
                       {item.pullRequests.length > 2 ? (
                         <span>+{item.pullRequests.length - 2} more</span>
                       ) : null}

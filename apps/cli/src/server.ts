@@ -102,6 +102,16 @@ const sendError = (res: ServerResponse, error: unknown): void => {
   sendJson(res, 500, { error: message });
 };
 
+const isWorktreeDirty = async (worktreePath: string): Promise<boolean> => {
+  const { stdout } = await execFileAsync("git", [
+    "-C",
+    worktreePath,
+    "status",
+    "--porcelain"
+  ]);
+  return stdout.trim().length > 0;
+};
+
 const getDefaultModel = (): string => {
   return process.env.MAESTRO_MODEL ?? "openai/gpt-5.2-codex";
 };
@@ -994,6 +1004,23 @@ const handleApi = async (req: IncomingMessage, res: ServerResponse, repoRoot: st
     const conversation = await readConversation(requestRepoRoot, segments[2]);
     sendJson(res, 200, conversation);
     return;
+  }
+
+  if (
+    req.method === "GET" &&
+    segments.length === 4 &&
+    segments[1] === "conversations" &&
+    segments[3] === "status"
+  ) {
+    try {
+      const conversation = await readConversation(requestRepoRoot, segments[2]);
+      const dirty = await isWorktreeDirty(conversation.workspacePath);
+      sendJson(res, 200, { dirty });
+      return;
+    } catch (error) {
+      sendError(res, error);
+      return;
+    }
   }
 
   if (req.method === "DELETE" && segments.length === 3 && segments[1] === "conversations") {

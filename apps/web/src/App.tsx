@@ -666,6 +666,7 @@ const App = () => {
     if (mergingPullRequests[key]) {
       return
     }
+    const workspace = findWorkspaceForPullRequest(item)
     setMergingPullRequests((prev) => ({ ...prev, [key]: true }))
     setMergePullRequestErrors((prev) => {
       const next = { ...prev }
@@ -673,6 +674,35 @@ const App = () => {
       return next
     })
     try {
+      if (workspace) {
+        const statusResponse = await fetch(
+          `/api/conversations/${workspace.id}/status`
+        )
+        if (!statusResponse.ok) {
+          if (statusResponse.status !== 404) {
+            let message = "Failed to check workspace status."
+            try {
+              const payload = (await statusResponse.json()) as { error?: string }
+              if (payload.error) {
+                message = payload.error
+              }
+            } catch {
+              // Ignore parsing errors
+            }
+            throw new Error(message)
+          }
+        } else {
+          const payload = (await statusResponse.json()) as { dirty?: boolean }
+          if (payload.dirty) {
+            const confirmed = window.confirm(
+              `Workspace "${workspace.name}" has uncommitted changes. Merge anyway?`
+            )
+            if (!confirmed) {
+              return
+            }
+          }
+        }
+      }
       const response = await fetch(
         `/api/projects/${item.projectId}/pull-requests/${item.number}/merge`,
         { method: "POST" }
@@ -687,9 +717,12 @@ const App = () => {
         } catch {
           // Ignore parsing errors
         }
+        if (response.status === 404 && message === "Not Found") {
+          message =
+            "Merge endpoint not found. Restart the CLI server to pick up the merge API."
+        }
         throw new Error(message)
       }
-      const workspace = findWorkspaceForPullRequest(item)
       setMergedPullRequests((prev) => ({
         ...prev,
         [key]: {
@@ -1727,122 +1760,34 @@ const App = () => {
                         {pullRequestsError}
                       </div>
                     ) : sortedPullRequests.length ? (
-                      sortedPullRequests.map((item) => {
-                        const key = getPullRequestKey(item)
-                        const mergeState = mergedPullRequests[key]
-                        const mergeError = mergePullRequestErrors[key]
-                        const isMerging = mergingPullRequests[key]
-                        const isMerged = Boolean(mergeState)
-                        const workspaceId = mergeState?.workspaceId
-                        const workspaceName = mergeState?.workspaceName
-                        const isDeletingWorkspace = workspaceId
-                          ? deletingMergeWorkspace[workspaceId]
-                          : false
-                        const deleteWorkspaceError = workspaceId
-                          ? deleteMergeWorkspaceErrors[workspaceId]
-                          : null
-
-                        return (
-                          <div
-                            key={`${item.projectId}-${item.id}`}
-                            className="rounded-lg border bg-muted/20 px-4 py-3 transition hover:border-primary/60 hover:bg-muted/40"
-                          >
-                            <div className="flex flex-wrap items-center justify-between gap-2">
-                              <div className="text-sm font-semibold text-foreground">
-                                <a
-                                  href={item.url}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  className="hover:underline"
-                                >
-                                  {item.title}
-                                </a>
-                              </div>
-                              <div className="flex items-center gap-2">
-                                {isMerged ? (
-                                  <Badge variant="outline">Merged</Badge>
-                                ) : null}
-                                <Badge variant="secondary">
-                                  {item.provider === "github" ? "PR" : "MR"}
-                                </Badge>
-                              </div>
+                      sortedPullRequests.map((item) => (
+                        <a
+                          key={`${item.projectId}-${item.id}`}
+                          href={item.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="rounded-lg border bg-muted/20 px-4 py-3 transition hover:border-primary/60 hover:bg-muted/40"
+                        >
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div className="text-sm font-semibold text-foreground">
+                              {item.title}
                             </div>
-                            <div className="mt-1 text-xs text-muted-foreground">
-                              {item.projectName} · {item.repo}
-                            </div>
-                            <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
-                              <div className="flex flex-wrap items-center gap-2">
-                                {item.author ? `@${item.author}` : "Unknown author"}
-                                {item.sourceBranch && item.targetBranch
-                                  ? `${item.sourceBranch} → ${item.targetBranch}`
-                                  : null}
-                                <span>Updated {formatDateTime(item.updatedAt)}</span>
-                              </div>
-                              <Button
-                                type="button"
-                                size="sm"
-                                variant={isMerged ? "outline" : "default"}
-                                onClick={() => handleMergePullRequest(item)}
-                                disabled={isMerging || isMerged}
-                              >
-                                {isMerged
-                                  ? "Merged"
-                                  : isMerging
-                                    ? "Merging..."
-                                    : "Merge"}
-                              </Button>
-                            </div>
-                            {mergeError ? (
-                              <div className="mt-2 rounded-md border border-destructive/50 bg-destructive/5 px-3 py-2 text-xs text-destructive">
-                                {mergeError}
-                              </div>
-                            ) : null}
-                            {isMerged ? (
-                              <div className="mt-3 rounded-lg border border-emerald-500/40 bg-emerald-500/5 px-3 py-2">
-                                <div className="text-xs font-semibold text-foreground">
-                                  Merge complete
-                                </div>
-                                <div className="mt-1 text-xs text-muted-foreground">
-                                  {workspaceId
-                                    ? `Optional: delete the workspace for ${workspaceName ?? "this branch"}.`
-                                    : "No workspace matched this branch."
-                                  }
-                                </div>
-                                {workspaceId && !mergeState?.workspaceDeleted ? (
-                                  <div className="mt-2 flex flex-wrap items-center gap-2">
-                                    <Button
-                                      type="button"
-                                      size="sm"
-                                      variant="destructive"
-                                      onClick={() =>
-                                        handleDeleteMergedWorkspace(
-                                          key,
-                                          workspaceId,
-                                          workspaceName
-                                        )
-                                      }
-                                      disabled={Boolean(isDeletingWorkspace)}
-                                    >
-                                      {isDeletingWorkspace
-                                        ? "Deleting workspace..."
-                                        : "Delete workspace"}
-                                    </Button>
-                                    {deleteWorkspaceError ? (
-                                      <span className="text-xs text-destructive">
-                                        {deleteWorkspaceError}
-                                      </span>
-                                    ) : null}
-                                  </div>
-                                ) : workspaceId && mergeState?.workspaceDeleted ? (
-                                  <div className="mt-2 text-xs text-muted-foreground">
-                                    Workspace deleted.
-                                  </div>
-                                ) : null}
-                              </div>
-                            ) : null}
+                            <Badge variant="secondary">
+                              {item.provider === "github" ? "PR" : "MR"}
+                            </Badge>
                           </div>
-                        )
-                      })
+                          <div className="mt-1 text-xs text-muted-foreground">
+                            {item.projectName} · {item.repo}
+                          </div>
+                          <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                            {item.author ? `@${item.author}` : "Unknown author"}
+                            {item.sourceBranch && item.targetBranch
+                              ? `${item.sourceBranch} → ${item.targetBranch}`
+                              : null}
+                            <span>Updated {formatDateTime(item.updatedAt)}</span>
+                          </div>
+                        </a>
+                      ))
                     ) : hasRepoProjects ? (
                       <div className="rounded-lg border border-dashed px-4 py-3 text-sm text-muted-foreground">
                         No open pull requests right now.
@@ -1872,6 +1817,14 @@ const App = () => {
                 isCreatingWorkspace={isCreatingWorkspace}
                 createWorkspaceError={createWorkspaceError}
                 formatDateTime={formatDateTime}
+                onMergePullRequest={handleMergePullRequest}
+                mergedPullRequests={mergedPullRequests}
+                mergingPullRequests={mergingPullRequests}
+                mergePullRequestErrors={mergePullRequestErrors}
+                onDeleteMergedWorkspace={handleDeleteMergedWorkspace}
+                deletingMergeWorkspace={deletingMergeWorkspace}
+                deleteMergeWorkspaceErrors={deleteMergeWorkspaceErrors}
+                getPullRequestKey={getPullRequestKey}
               />
             ) : null
           ) : isWorkspaceView ? (
