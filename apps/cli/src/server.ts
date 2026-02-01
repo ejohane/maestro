@@ -58,6 +58,7 @@ type ServerOptions = {
 
 type PullRequestInfo = {
   id: string;
+  number: string;
   title: string;
   url: string;
   author?: string;
@@ -101,6 +102,16 @@ const sendNotFound = (res: ServerResponse): void => {
 const sendError = (res: ServerResponse, error: unknown): void => {
   const message = error instanceof Error ? error.message : String(error);
   sendJson(res, 500, { error: message });
+};
+
+const isWorktreeDirty = async (worktreePath: string): Promise<boolean> => {
+  const { stdout } = await execFileAsync("git", [
+    "-C",
+    worktreePath,
+    "status",
+    "--porcelain"
+  ]);
+  return stdout.trim().length > 0;
 };
 
 const getDefaultModel = (): string => {
@@ -284,6 +295,7 @@ const fetchGitHubPullRequests = async (
   }
   const payload = (await response.json()) as Array<{
     id: number;
+    number: number;
     title: string;
     html_url: string;
     updated_at?: string;
@@ -293,6 +305,7 @@ const fetchGitHubPullRequests = async (
   }>;
   return payload.map((item) => ({
     id: String(item.id),
+    number: String(item.number),
     title: item.title,
     url: item.html_url,
     author: item.user?.login,
@@ -341,6 +354,7 @@ const fetchGitLabMergeRequests = async (
   }>;
   return payload.map((item) => ({
     id: String(item.iid ?? item.id),
+    number: String(item.iid ?? item.id),
     title: item.title,
     url: item.web_url,
     author: item.author?.username,
@@ -350,6 +364,82 @@ const fetchGitLabMergeRequests = async (
     provider: "gitlab",
     repo: parsed.path
   }));
+};
+
+const mergeGitHubPullRequest = async (repoUrl: string, pullNumber: string): Promise<void> => {
+  const parsed = parseRepoUrl(repoUrl);
+  if (!parsed) {
+    throw new Error("Invalid GitHub repository URL.");
+  }
+  const [owner, repo] = parsed.path.split("/");
+  if (!owner || !repo) {
+    throw new Error("GitHub repository URL must include owner and repo.");
+  }
+  const token = process.env.GITHUB_TOKEN;
+  if (!token) {
+    throw new Error("GITHUB_TOKEN is required to merge GitHub pull requests.");
+  }
+  const apiBase = buildGitHubApiBase(parsed.host);
+  const url = new URL(`${apiBase}/repos/${owner}/${repo}/pulls/${pullNumber}/merge`);
+  const response = await fetch(url.toString(), {
+    method: "PUT",
+    headers: {
+      Accept: "application/vnd.github+json",
+      "Content-Type": "application/json",
+      "User-Agent": "Maestro",
+      Authorization: `Bearer ${token}`
+    }
+  });
+  if (!response.ok) {
+    let message = `GitHub merge failed (${response.status}).`;
+    try {
+      const payload = (await response.json()) as { message?: string };
+      if (payload.message) {
+        message = `GitHub merge failed: ${payload.message}`;
+      }
+    } catch {
+      // Ignore parsing errors
+    }
+    throw new Error(message);
+  }
+};
+
+const mergeGitLabMergeRequest = async (
+  repoUrl: string,
+  mergeRequestIid: string
+): Promise<void> => {
+  const parsed = parseRepoUrl(repoUrl);
+  if (!parsed) {
+    throw new Error("Invalid GitLab repository URL.");
+  }
+  const token = process.env.GITLAB_TOKEN;
+  if (!token) {
+    throw new Error("GITLAB_TOKEN is required to merge GitLab merge requests.");
+  }
+  const apiBase = buildGitLabApiBase(parsed.host);
+  const url = new URL(
+    `${apiBase}/projects/${encodeURIComponent(parsed.path)}/merge_requests/${mergeRequestIid}/merge`
+  );
+  const response = await fetch(url.toString(), {
+    method: "PUT",
+    headers: {
+      "User-Agent": "Maestro",
+      "PRIVATE-TOKEN": token
+    }
+  });
+  if (!response.ok) {
+    let message = `GitLab merge failed (${response.status}).`;
+    try {
+      const payload = (await response.json()) as { message?: string; error?: string };
+      const detail = payload.message ?? payload.error;
+      if (detail) {
+        message = `GitLab merge failed: ${detail}`;
+      }
+    } catch {
+      // Ignore parsing errors
+    }
+    throw new Error(message);
+  }
 };
 
 const readPackageJson = async (repoRoot: string): Promise<Record<string, unknown> | null> => {
@@ -784,6 +874,52 @@ const handleApi = async (req: IncomingMessage, res: ServerResponse, repoRoot: st
     }
   }
 
+  if (
+    req.method === "POST" &&
+    segments.length === 6 &&
+    segments[1] === "projects" &&
+    segments[3] === "pull-requests" &&
+    segments[5] === "merge"
+  ) {
+    try {
+      const pullRequestId = segments[4]?.trim();
+      if (!pullRequestId) {
+        sendBadRequest(res, "Pull request id is required.");
+        return;
+      }
+      let project: Project;
+      try {
+        project = await readProjectById(requestRepoRoot, segments[2]);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+          sendNotFound(res);
+          return;
+        }
+        throw error;
+      }
+      const repoUrl = project.repoUrl?.trim();
+      if (!repoUrl) {
+        sendBadRequest(res, "Project repo URL is required.");
+        return;
+      }
+      const provider = project.gitProvider ?? inferGitProvider(repoUrl);
+      if (!provider) {
+        sendBadRequest(res, "Git provider could not be determined.");
+        return;
+      }
+      if (provider === "github") {
+        await mergeGitHubPullRequest(repoUrl, pullRequestId);
+      } else {
+        await mergeGitLabMergeRequest(repoUrl, pullRequestId);
+      }
+      sendJson(res, 200, { merged: true, id: pullRequestId });
+      return;
+    } catch (error) {
+      sendError(res, error);
+      return;
+    }
+  }
+
   if (req.method === "POST" && segments.length === 2 && segments[1] === "conversations") {
     try {
       const body = await readJsonBody<{
@@ -922,6 +1058,23 @@ const handleApi = async (req: IncomingMessage, res: ServerResponse, repoRoot: st
     const conversation = await readConversation(requestRepoRoot, segments[2]);
     sendJson(res, 200, conversation);
     return;
+  }
+
+  if (
+    req.method === "GET" &&
+    segments.length === 4 &&
+    segments[1] === "conversations" &&
+    segments[3] === "status"
+  ) {
+    try {
+      const conversation = await readConversation(requestRepoRoot, segments[2]);
+      const dirty = await isWorktreeDirty(conversation.workspacePath);
+      sendJson(res, 200, { dirty });
+      return;
+    } catch (error) {
+      sendError(res, error);
+      return;
+    }
   }
 
   if (req.method === "DELETE" && segments.length === 3 && segments[1] === "conversations") {

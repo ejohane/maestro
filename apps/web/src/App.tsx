@@ -1,6 +1,7 @@
 import * as React from "react"
 
 import { AppSidebar } from "./components/app-sidebar"
+import { ProjectWorkspacesTable } from "./components/project-workspaces-table"
 import {
   Conversation,
   ConversationContent,
@@ -81,6 +82,7 @@ type ApiSession = {
 
 type ApiPullRequest = {
   id: string
+  number: string
   title: string
   url: string
   author?: string
@@ -112,6 +114,7 @@ type ChatSession = {
 type Workspace = {
   id: string
   name: string
+  branch?: string
   chats: ChatSession[]
   createdAt?: string
   updatedAt?: string
@@ -143,6 +146,12 @@ type RecentSession = {
 type OpenPullRequest = ApiPullRequest & {
   projectId: string
   projectName: string
+}
+
+type MergedPullRequestAction = {
+  workspaceId?: string
+  workspaceName?: string
+  workspaceDeleted?: boolean
 }
 
 type ChatMessage = {
@@ -215,6 +224,21 @@ const App = () => {
     null
   )
   const [isSavingSettings, setIsSavingSettings] = React.useState(false)
+  const [mergingPullRequests, setMergingPullRequests] = React.useState<
+    Record<string, boolean>
+  >({})
+  const [mergePullRequestErrors, setMergePullRequestErrors] = React.useState<
+    Record<string, string>
+  >({})
+  const [mergedPullRequests, setMergedPullRequests] = React.useState<
+    Record<string, MergedPullRequestAction>
+  >({})
+  const [deletingMergeWorkspace, setDeletingMergeWorkspace] = React.useState<
+    Record<string, boolean>
+  >({})
+  const [deleteMergeWorkspaceErrors, setDeleteMergeWorkspaceErrors] = React.useState<
+    Record<string, string>
+  >({})
   const recentSessionsLimit = 6
 
   const loadProjects = React.useCallback(async () => {
@@ -269,6 +293,7 @@ const App = () => {
           return {
             id: conversation.id,
             name: workspaceName,
+            branch: conversation.branch,
             chats: sessions.map((session) => ({
               id: session.id,
               name: session.title?.trim() || session.model || session.id,
@@ -474,7 +499,26 @@ const App = () => {
     () => projects.some((project) => project.repoUrl?.trim()),
     [projects]
   )
-  const hasRepoProject = Boolean(selectedProject?.repoUrl?.trim())
+  const getPullRequestKey = React.useCallback((item: OpenPullRequest) => {
+    return `${item.projectId}:${item.number}`
+  }, [])
+  const findWorkspaceForPullRequest = React.useCallback(
+    (item: OpenPullRequest) => {
+      const sourceBranch = item.sourceBranch?.trim().toLowerCase()
+      if (!sourceBranch) {
+        return undefined
+      }
+      const project = projects.find((entry) => entry.id === item.projectId)
+      if (!project) {
+        return undefined
+      }
+      return project.workspaces.find((workspace) => {
+        const branch = workspace.branch?.trim().toLowerCase()
+        return branch && branch === sourceBranch
+      })
+    },
+    [projects]
+  )
   const createLocalMessageId = React.useCallback(() => {
     return `m_${Math.random().toString(36).slice(2, 10)}`
   }, [])
@@ -658,6 +702,138 @@ const App = () => {
     setSelectedProjectId(projectId)
     setSelectedWorkspaceId(workspaceId)
     setSelectedChatId(null)
+  }
+
+  const handleMergePullRequest = async (item: OpenPullRequest) => {
+    const key = getPullRequestKey(item)
+    if (mergingPullRequests[key]) {
+      return
+    }
+    const workspace = findWorkspaceForPullRequest(item)
+    setMergingPullRequests((prev) => ({ ...prev, [key]: true }))
+    setMergePullRequestErrors((prev) => {
+      const next = { ...prev }
+      delete next[key]
+      return next
+    })
+    try {
+      if (workspace) {
+        const statusResponse = await fetch(
+          `/api/conversations/${workspace.id}/status`
+        )
+        if (!statusResponse.ok) {
+          if (statusResponse.status !== 404) {
+            let message = "Failed to check workspace status."
+            try {
+              const payload = (await statusResponse.json()) as { error?: string }
+              if (payload.error) {
+                message = payload.error
+              }
+            } catch {
+              // Ignore parsing errors
+            }
+            throw new Error(message)
+          }
+        } else {
+          const payload = (await statusResponse.json()) as { dirty?: boolean }
+          if (payload.dirty) {
+            const confirmed = window.confirm(
+              `Workspace "${workspace.name}" has uncommitted changes. Merge anyway?`
+            )
+            if (!confirmed) {
+              return
+            }
+          }
+        }
+      }
+      const response = await fetch(
+        `/api/projects/${item.projectId}/pull-requests/${item.number}/merge`,
+        { method: "POST" }
+      )
+      if (!response.ok) {
+        let message = "Failed to merge pull request."
+        try {
+          const payload = (await response.json()) as { error?: string }
+          if (payload.error) {
+            message = payload.error
+          }
+        } catch {
+          // Ignore parsing errors
+        }
+        if (response.status === 404 && message === "Not Found") {
+          message =
+            "Merge endpoint not found. Restart the CLI server to pick up the merge API."
+        }
+        throw new Error(message)
+      }
+      setMergedPullRequests((prev) => ({
+        ...prev,
+        [key]: {
+          workspaceId: workspace?.id,
+          workspaceName: workspace?.name,
+        },
+      }))
+    } catch (err) {
+      setMergePullRequestErrors((prev) => ({
+        ...prev,
+        [key]: err instanceof Error ? err.message : "Failed to merge pull request.",
+      }))
+    } finally {
+      setMergingPullRequests((prev) => ({ ...prev, [key]: false }))
+    }
+  }
+
+  const handleDeleteMergedWorkspace = async (
+    pullRequestKey: string,
+    workspaceId: string,
+    workspaceName?: string
+  ) => {
+    const label = workspaceName || workspaceId
+    const confirmed = window.confirm(
+      `Delete workspace "${label}"? This removes the worktree and all sessions.`
+    )
+    if (!confirmed) {
+      return
+    }
+    setDeletingMergeWorkspace((prev) => ({ ...prev, [workspaceId]: true }))
+    setDeleteMergeWorkspaceErrors((prev) => {
+      const next = { ...prev }
+      delete next[workspaceId]
+      return next
+    })
+    try {
+      const response = await fetch(`/api/conversations/${workspaceId}?confirm=true`, {
+        method: "DELETE",
+      })
+      if (!response.ok) {
+        let message = "Failed to delete workspace."
+        try {
+          const payload = (await response.json()) as { error?: string }
+          if (payload.error) {
+            message = payload.error
+          }
+        } catch {
+          // Ignore parsing errors
+        }
+        throw new Error(message)
+      }
+      await loadProjects()
+      setMergedPullRequests((prev) => ({
+        ...prev,
+        [pullRequestKey]: {
+          ...prev[pullRequestKey],
+          workspaceDeleted: true,
+        },
+      }))
+    } catch (err) {
+      setDeleteMergeWorkspaceErrors((prev) => ({
+        ...prev,
+        [workspaceId]:
+          err instanceof Error ? err.message : "Failed to delete workspace.",
+      }))
+    } finally {
+      setDeletingMergeWorkspace((prev) => ({ ...prev, [workspaceId]: false }))
+    }
   }
 
   const handleSelectChat = (
@@ -1843,140 +2019,31 @@ const App = () => {
               </div>
             </div>
           ) : showWorkspaceCreator ? (
-            <div className="grid gap-4 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
-              <div className="grid gap-4">
-                <Card className="border-dashed">
-                  <form onSubmit={handleCreateWorkspace}>
-                    <CardHeader>
-                      <CardTitle>Create a new workspace</CardTitle>
-                      <CardDescription>
-                        Spin up a fresh worktree and start a new chat session.
-                      </CardDescription>
-                    </CardHeader>
-                    <CardContent className="grid gap-3">
-                      <div className="grid gap-2">
-                        <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                          Workspace name
-                        </label>
-                        <Input
-                          value={workspaceForm.title}
-                          onChange={handleWorkspaceFormChange}
-                          placeholder="e.g. Feature branch review"
-                        />
-                      </div>
-                      {createWorkspaceError ? (
-                        <div className="rounded-md border border-destructive/50 bg-destructive/5 px-3 py-2 text-sm text-destructive">
-                          {createWorkspaceError}
-                        </div>
-                      ) : null}
-                    </CardContent>
-                    <CardFooter>
-                      <Button type="submit" disabled={isCreatingWorkspace}>
-                        {isCreatingWorkspace
-                          ? "Creating workspace..."
-                          : "Create workspace"}
-                      </Button>
-                    </CardFooter>
-                  </form>
-                </Card>
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Workspaces</CardTitle>
-                    <CardDescription>Active workspaces for this project.</CardDescription>
-                  </CardHeader>
-                  <CardContent className="grid gap-3">
-                    {selectedProject?.workspaces.length ? (
-                      selectedProject.workspaces.map((workspace) => (
-                        <button
-                          key={workspace.id}
-                          type="button"
-                          onClick={() =>
-                            handleSelectWorkspace(selectedProject.id, workspace.id)
-                          }
-                          className="rounded-lg border bg-muted/20 px-4 py-3 text-left transition hover:border-primary/60 hover:bg-muted/40"
-                        >
-                          <div className="flex flex-wrap items-center justify-between gap-2">
-                            <div>
-                              <div className="text-sm font-semibold text-foreground">
-                                {workspace.name}
-                              </div>
-                              <div className="text-xs text-muted-foreground">
-                                {selectedProject.name}
-                              </div>
-                            </div>
-                            <div className="text-xs text-muted-foreground">
-                              Updated {formatDateTime(workspace.updatedAt ?? workspace.createdAt)}
-                            </div>
-                          </div>
-                        </button>
-                      ))
-                    ) : (
-                      <div className="rounded-lg border border-dashed px-4 py-3 text-sm text-muted-foreground">
-                        No workspaces yet. Create your first one.
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
-              </div>
-              <div className="grid gap-4">
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Open PRs and MRs</CardTitle>
-                    <CardDescription>
-                      Pull requests for GitHub repos and merge requests for GitLab.
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="grid gap-3">
-                    {isLoadingPullRequests ? (
-                      <div className="rounded-lg border border-dashed px-4 py-3 text-sm text-muted-foreground">
-                        Loading open pull requests...
-                      </div>
-                    ) : pullRequestsError ? (
-                      <div className="rounded-lg border border-destructive/50 bg-destructive/5 px-4 py-3 text-sm text-destructive">
-                        {pullRequestsError}
-                      </div>
-                    ) : projectPullRequests.length ? (
-                      projectPullRequests.map((item) => (
-                        <a
-                          key={`${item.projectId}-${item.id}`}
-                          href={item.url}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="rounded-lg border bg-muted/20 px-4 py-3 transition hover:border-primary/60 hover:bg-muted/40"
-                        >
-                          <div className="flex flex-wrap items-center justify-between gap-2">
-                            <div className="text-sm font-semibold text-foreground">
-                              {item.title}
-                            </div>
-                            <Badge variant="secondary">
-                              {item.provider === "github" ? "PR" : "MR"}
-                            </Badge>
-                          </div>
-                          <div className="mt-1 text-xs text-muted-foreground">
-                            {item.projectName} · {item.repo}
-                          </div>
-                          <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                            {item.author ? `@${item.author}` : "Unknown author"}
-                            {item.sourceBranch && item.targetBranch
-                              ? `${item.sourceBranch} -> ${item.targetBranch}`
-                              : null}
-                            <span>Updated {formatDateTime(item.updatedAt)}</span>
-                          </div>
-                        </a>
-                      ))
-                    ) : hasRepoProject ? (
-                      <div className="rounded-lg border border-dashed px-4 py-3 text-sm text-muted-foreground">
-                        No open pull requests right now.
-                      </div>
-                    ) : (
-                      <div className="rounded-lg border border-dashed px-4 py-3 text-sm text-muted-foreground">
-                        Add a repo URL to this project to see open PRs or MRs here.
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
-              </div>
-            </div>
+            selectedProject ? (
+              <ProjectWorkspacesTable
+                projectId={selectedProject.id}
+                projectName={selectedProject.name}
+                workspaces={selectedProject.workspaces}
+                pullRequests={projectPullRequests}
+                isLoadingPullRequests={isLoadingPullRequests}
+                pullRequestsError={pullRequestsError}
+                onSelectWorkspace={handleSelectWorkspace}
+                onCreateWorkspace={handleCreateWorkspace}
+                workspaceTitle={workspaceForm.title}
+                onWorkspaceTitleChange={handleWorkspaceFormChange}
+                isCreatingWorkspace={isCreatingWorkspace}
+                createWorkspaceError={createWorkspaceError}
+                formatDateTime={formatDateTime}
+                onMergePullRequest={handleMergePullRequest}
+                mergedPullRequests={mergedPullRequests}
+                mergingPullRequests={mergingPullRequests}
+                mergePullRequestErrors={mergePullRequestErrors}
+                onDeleteMergedWorkspace={handleDeleteMergedWorkspace}
+                deletingMergeWorkspace={deletingMergeWorkspace}
+                deleteMergeWorkspaceErrors={deleteMergeWorkspaceErrors}
+                getPullRequestKey={getPullRequestKey}
+              />
+            ) : null
           ) : isWorkspaceView ? (
             <div className="grid gap-4 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
               <Card className="border-dashed">
