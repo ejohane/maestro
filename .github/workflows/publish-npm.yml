@@ -1,0 +1,98 @@
+name: Publish NPM
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.1.30"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build
+        run: bun run build
+
+      - name: Determine next version
+        id: version
+        run: |
+          git fetch --tags --force
+          LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          if [ -z "$LAST_TAG" ]; then
+            BASE_VERSION="0.1.0"
+          else
+            BASE_VERSION="${LAST_TAG#v}"
+          fi
+          BUMP=$(npx -y conventional-recommended-bump -p angular || echo "patch")
+          if [ -z "$BUMP" ]; then
+            BUMP="patch"
+          fi
+          if [ -z "$LAST_TAG" ]; then
+            NEXT_VERSION="$BASE_VERSION"
+          else
+            NEXT_VERSION=$(npx -y semver "$BASE_VERSION" -i "$BUMP")
+          fi
+          echo "version=$NEXT_VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$NEXT_VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Create and push tag
+        id: tag
+        env:
+          TAG_NAME: ${{ steps.version.outputs.tag }}
+        run: |
+          if git rev-parse -q --verify "refs/tags/$TAG_NAME" >/dev/null; then
+            echo "Tag $TAG_NAME already exists. Skipping publish."
+            echo "should_publish=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          git tag "$TAG_NAME"
+          git push origin "$TAG_NAME"
+          echo "should_publish=true" >> "$GITHUB_OUTPUT"
+
+      - name: Set versions from tag
+        if: steps.tag.outputs.should_publish == 'true'
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          npm pkg set -w packages/core version="$VERSION"
+          npm pkg set -w packages/git version="$VERSION"
+          npm pkg set -w packages/opencode version="$VERSION"
+          npm pkg set -w packages/storage version="$VERSION"
+          npm pkg set -w apps/cli version="$VERSION"
+          npm pkg set -w apps/cli dependencies.@maestro/core="$VERSION"
+          npm pkg set -w apps/cli dependencies.@maestro/git="$VERSION"
+          npm pkg set -w apps/cli dependencies.@maestro/opencode="$VERSION"
+          npm pkg set -w apps/cli dependencies.@maestro/storage="$VERSION"
+          npm pkg set -w packages/storage dependencies.@maestro/core="$VERSION"
+
+      - name: Publish packages
+        if: steps.tag.outputs.should_publish == 'true'
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          npm publish -w packages/core --access public
+          npm publish -w packages/git --access public
+          npm publish -w packages/opencode --access public
+          npm publish -w packages/storage --access public
+          npm publish -w apps/cli --access public
