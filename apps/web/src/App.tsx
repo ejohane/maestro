@@ -83,6 +83,7 @@ type ApiSession = {
 
 type ApiPullRequest = {
   id: string
+  number: string
   title: string
   url: string
   author?: string
@@ -148,6 +149,12 @@ type OpenPullRequest = ApiPullRequest & {
   projectName: string
 }
 
+type MergedPullRequestAction = {
+  workspaceId?: string
+  workspaceName?: string
+  workspaceDeleted?: boolean
+}
+
 type ChatMessage = {
   id: string
   role: "user" | "assistant" | "system"
@@ -208,6 +215,21 @@ const App = () => {
   const [openPullRequests, setOpenPullRequests] = React.useState<OpenPullRequest[]>([])
   const [isLoadingPullRequests, setIsLoadingPullRequests] = React.useState(false)
   const [pullRequestsError, setPullRequestsError] = React.useState<string | null>(null)
+  const [mergingPullRequests, setMergingPullRequests] = React.useState<
+    Record<string, boolean>
+  >({})
+  const [mergePullRequestErrors, setMergePullRequestErrors] = React.useState<
+    Record<string, string>
+  >({})
+  const [mergedPullRequests, setMergedPullRequests] = React.useState<
+    Record<string, MergedPullRequestAction>
+  >({})
+  const [deletingMergeWorkspace, setDeletingMergeWorkspace] = React.useState<
+    Record<string, boolean>
+  >({})
+  const [deleteMergeWorkspaceErrors, setDeleteMergeWorkspaceErrors] = React.useState<
+    Record<string, string>
+  >({})
   const recentSessionsLimit = 6
 
   const loadProjects = React.useCallback(async () => {
@@ -442,6 +464,26 @@ const App = () => {
     () => projects.some((project) => project.repoUrl?.trim()),
     [projects]
   )
+  const getPullRequestKey = React.useCallback((item: OpenPullRequest) => {
+    return `${item.projectId}:${item.number}`
+  }, [])
+  const findWorkspaceForPullRequest = React.useCallback(
+    (item: OpenPullRequest) => {
+      const sourceBranch = item.sourceBranch?.trim().toLowerCase()
+      if (!sourceBranch) {
+        return undefined
+      }
+      const project = projects.find((entry) => entry.id === item.projectId)
+      if (!project) {
+        return undefined
+      }
+      return project.workspaces.find((workspace) => {
+        const branch = workspace.branch?.trim().toLowerCase()
+        return branch && branch === sourceBranch
+      })
+    },
+    [projects]
+  )
   const createLocalMessageId = React.useCallback(() => {
     return `m_${Math.random().toString(36).slice(2, 10)}`
   }, [])
@@ -617,6 +659,105 @@ const App = () => {
     setSelectedProjectId(projectId)
     setSelectedWorkspaceId(workspaceId)
     setSelectedChatId(null)
+  }
+
+  const handleMergePullRequest = async (item: OpenPullRequest) => {
+    const key = getPullRequestKey(item)
+    if (mergingPullRequests[key]) {
+      return
+    }
+    setMergingPullRequests((prev) => ({ ...prev, [key]: true }))
+    setMergePullRequestErrors((prev) => {
+      const next = { ...prev }
+      delete next[key]
+      return next
+    })
+    try {
+      const response = await fetch(
+        `/api/projects/${item.projectId}/pull-requests/${item.number}/merge`,
+        { method: "POST" }
+      )
+      if (!response.ok) {
+        let message = "Failed to merge pull request."
+        try {
+          const payload = (await response.json()) as { error?: string }
+          if (payload.error) {
+            message = payload.error
+          }
+        } catch {
+          // Ignore parsing errors
+        }
+        throw new Error(message)
+      }
+      const workspace = findWorkspaceForPullRequest(item)
+      setMergedPullRequests((prev) => ({
+        ...prev,
+        [key]: {
+          workspaceId: workspace?.id,
+          workspaceName: workspace?.name,
+        },
+      }))
+    } catch (err) {
+      setMergePullRequestErrors((prev) => ({
+        ...prev,
+        [key]: err instanceof Error ? err.message : "Failed to merge pull request.",
+      }))
+    } finally {
+      setMergingPullRequests((prev) => ({ ...prev, [key]: false }))
+    }
+  }
+
+  const handleDeleteMergedWorkspace = async (
+    pullRequestKey: string,
+    workspaceId: string,
+    workspaceName?: string
+  ) => {
+    const label = workspaceName || workspaceId
+    const confirmed = window.confirm(
+      `Delete workspace "${label}"? This removes the worktree and all sessions.`
+    )
+    if (!confirmed) {
+      return
+    }
+    setDeletingMergeWorkspace((prev) => ({ ...prev, [workspaceId]: true }))
+    setDeleteMergeWorkspaceErrors((prev) => {
+      const next = { ...prev }
+      delete next[workspaceId]
+      return next
+    })
+    try {
+      const response = await fetch(`/api/conversations/${workspaceId}?confirm=true`, {
+        method: "DELETE",
+      })
+      if (!response.ok) {
+        let message = "Failed to delete workspace."
+        try {
+          const payload = (await response.json()) as { error?: string }
+          if (payload.error) {
+            message = payload.error
+          }
+        } catch {
+          // Ignore parsing errors
+        }
+        throw new Error(message)
+      }
+      await loadProjects()
+      setMergedPullRequests((prev) => ({
+        ...prev,
+        [pullRequestKey]: {
+          ...prev[pullRequestKey],
+          workspaceDeleted: true,
+        },
+      }))
+    } catch (err) {
+      setDeleteMergeWorkspaceErrors((prev) => ({
+        ...prev,
+        [workspaceId]:
+          err instanceof Error ? err.message : "Failed to delete workspace.",
+      }))
+    } finally {
+      setDeletingMergeWorkspace((prev) => ({ ...prev, [workspaceId]: false }))
+    }
   }
 
   const handleSelectChat = (
@@ -1586,34 +1727,122 @@ const App = () => {
                         {pullRequestsError}
                       </div>
                     ) : sortedPullRequests.length ? (
-                      sortedPullRequests.map((item) => (
-                        <a
-                          key={`${item.projectId}-${item.id}`}
-                          href={item.url}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="rounded-lg border bg-muted/20 px-4 py-3 transition hover:border-primary/60 hover:bg-muted/40"
-                        >
-                          <div className="flex flex-wrap items-center justify-between gap-2">
-                            <div className="text-sm font-semibold text-foreground">
-                              {item.title}
+                      sortedPullRequests.map((item) => {
+                        const key = getPullRequestKey(item)
+                        const mergeState = mergedPullRequests[key]
+                        const mergeError = mergePullRequestErrors[key]
+                        const isMerging = mergingPullRequests[key]
+                        const isMerged = Boolean(mergeState)
+                        const workspaceId = mergeState?.workspaceId
+                        const workspaceName = mergeState?.workspaceName
+                        const isDeletingWorkspace = workspaceId
+                          ? deletingMergeWorkspace[workspaceId]
+                          : false
+                        const deleteWorkspaceError = workspaceId
+                          ? deleteMergeWorkspaceErrors[workspaceId]
+                          : null
+
+                        return (
+                          <div
+                            key={`${item.projectId}-${item.id}`}
+                            className="rounded-lg border bg-muted/20 px-4 py-3 transition hover:border-primary/60 hover:bg-muted/40"
+                          >
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <div className="text-sm font-semibold text-foreground">
+                                <a
+                                  href={item.url}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="hover:underline"
+                                >
+                                  {item.title}
+                                </a>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                {isMerged ? (
+                                  <Badge variant="outline">Merged</Badge>
+                                ) : null}
+                                <Badge variant="secondary">
+                                  {item.provider === "github" ? "PR" : "MR"}
+                                </Badge>
+                              </div>
                             </div>
-                            <Badge variant="secondary">
-                              {item.provider === "github" ? "PR" : "MR"}
-                            </Badge>
+                            <div className="mt-1 text-xs text-muted-foreground">
+                              {item.projectName} · {item.repo}
+                            </div>
+                            <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+                              <div className="flex flex-wrap items-center gap-2">
+                                {item.author ? `@${item.author}` : "Unknown author"}
+                                {item.sourceBranch && item.targetBranch
+                                  ? `${item.sourceBranch} → ${item.targetBranch}`
+                                  : null}
+                                <span>Updated {formatDateTime(item.updatedAt)}</span>
+                              </div>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant={isMerged ? "outline" : "default"}
+                                onClick={() => handleMergePullRequest(item)}
+                                disabled={isMerging || isMerged}
+                              >
+                                {isMerged
+                                  ? "Merged"
+                                  : isMerging
+                                    ? "Merging..."
+                                    : "Merge"}
+                              </Button>
+                            </div>
+                            {mergeError ? (
+                              <div className="mt-2 rounded-md border border-destructive/50 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+                                {mergeError}
+                              </div>
+                            ) : null}
+                            {isMerged ? (
+                              <div className="mt-3 rounded-lg border border-emerald-500/40 bg-emerald-500/5 px-3 py-2">
+                                <div className="text-xs font-semibold text-foreground">
+                                  Merge complete
+                                </div>
+                                <div className="mt-1 text-xs text-muted-foreground">
+                                  {workspaceId
+                                    ? `Optional: delete the workspace for ${workspaceName ?? "this branch"}.`
+                                    : "No workspace matched this branch."
+                                  }
+                                </div>
+                                {workspaceId && !mergeState?.workspaceDeleted ? (
+                                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                                    <Button
+                                      type="button"
+                                      size="sm"
+                                      variant="destructive"
+                                      onClick={() =>
+                                        handleDeleteMergedWorkspace(
+                                          key,
+                                          workspaceId,
+                                          workspaceName
+                                        )
+                                      }
+                                      disabled={Boolean(isDeletingWorkspace)}
+                                    >
+                                      {isDeletingWorkspace
+                                        ? "Deleting workspace..."
+                                        : "Delete workspace"}
+                                    </Button>
+                                    {deleteWorkspaceError ? (
+                                      <span className="text-xs text-destructive">
+                                        {deleteWorkspaceError}
+                                      </span>
+                                    ) : null}
+                                  </div>
+                                ) : workspaceId && mergeState?.workspaceDeleted ? (
+                                  <div className="mt-2 text-xs text-muted-foreground">
+                                    Workspace deleted.
+                                  </div>
+                                ) : null}
+                              </div>
+                            ) : null}
                           </div>
-                          <div className="mt-1 text-xs text-muted-foreground">
-                            {item.projectName} · {item.repo}
-                          </div>
-                          <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                            {item.author ? `@${item.author}` : "Unknown author"}
-                            {item.sourceBranch && item.targetBranch
-                              ? `${item.sourceBranch} → ${item.targetBranch}`
-                              : null}
-                            <span>Updated {formatDateTime(item.updatedAt)}</span>
-                          </div>
-                        </a>
-                      ))
+                        )
+                      })
                     ) : hasRepoProjects ? (
                       <div className="rounded-lg border border-dashed px-4 py-3 text-sm text-muted-foreground">
                         No open pull requests right now.
