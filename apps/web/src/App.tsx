@@ -2,6 +2,7 @@ import * as React from "react"
 import { Moon, Sun } from "lucide-react"
 
 import { AppSidebar } from "./components/app-sidebar"
+import { ProjectWorkspacesTable } from "./components/project-workspaces-table"
 import {
   Conversation,
   ConversationContent,
@@ -113,6 +114,7 @@ type ChatSession = {
 type Workspace = {
   id: string
   name: string
+  branch?: string
   chats: ChatSession[]
   createdAt?: string
   updatedAt?: string
@@ -260,6 +262,7 @@ const App = () => {
           return {
             id: conversation.id,
             name: workspaceName,
+            branch: conversation.branch,
             chats: sessions.map((session) => ({
               id: session.id,
               name: session.title?.trim() || session.model || session.id,
@@ -439,7 +442,6 @@ const App = () => {
     () => projects.some((project) => project.repoUrl?.trim()),
     [projects]
   )
-  const hasRepoProject = Boolean(selectedProject?.repoUrl?.trim())
   const createLocalMessageId = React.useCallback(() => {
     return `m_${Math.random().toString(36).slice(2, 10)}`
   }, [])
@@ -1626,140 +1628,23 @@ const App = () => {
               </div>
             </div>
           ) : showWorkspaceCreator ? (
-            <div className="grid gap-4 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
-              <div className="grid gap-4">
-                <Card className="border-dashed">
-                  <form onSubmit={handleCreateWorkspace}>
-                    <CardHeader>
-                      <CardTitle>Create a new workspace</CardTitle>
-                      <CardDescription>
-                        Spin up a fresh worktree and start a new chat session.
-                      </CardDescription>
-                    </CardHeader>
-                    <CardContent className="grid gap-3">
-                      <div className="grid gap-2">
-                        <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                          Workspace name
-                        </label>
-                        <Input
-                          value={workspaceForm.title}
-                          onChange={handleWorkspaceFormChange}
-                          placeholder="e.g. Feature branch review"
-                        />
-                      </div>
-                      {createWorkspaceError ? (
-                        <div className="rounded-md border border-destructive/50 bg-destructive/5 px-3 py-2 text-sm text-destructive">
-                          {createWorkspaceError}
-                        </div>
-                      ) : null}
-                    </CardContent>
-                    <CardFooter>
-                      <Button type="submit" disabled={isCreatingWorkspace}>
-                        {isCreatingWorkspace
-                          ? "Creating workspace..."
-                          : "Create workspace"}
-                      </Button>
-                    </CardFooter>
-                  </form>
-                </Card>
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Workspaces</CardTitle>
-                    <CardDescription>Active workspaces for this project.</CardDescription>
-                  </CardHeader>
-                  <CardContent className="grid gap-3">
-                    {selectedProject?.workspaces.length ? (
-                      selectedProject.workspaces.map((workspace) => (
-                        <button
-                          key={workspace.id}
-                          type="button"
-                          onClick={() =>
-                            handleSelectWorkspace(selectedProject.id, workspace.id)
-                          }
-                          className="rounded-lg border bg-muted/20 px-4 py-3 text-left transition hover:border-primary/60 hover:bg-muted/40"
-                        >
-                          <div className="flex flex-wrap items-center justify-between gap-2">
-                            <div>
-                              <div className="text-sm font-semibold text-foreground">
-                                {workspace.name}
-                              </div>
-                              <div className="text-xs text-muted-foreground">
-                                {selectedProject.name}
-                              </div>
-                            </div>
-                            <div className="text-xs text-muted-foreground">
-                              Updated {formatDateTime(workspace.updatedAt ?? workspace.createdAt)}
-                            </div>
-                          </div>
-                        </button>
-                      ))
-                    ) : (
-                      <div className="rounded-lg border border-dashed px-4 py-3 text-sm text-muted-foreground">
-                        No workspaces yet. Create your first one.
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
-              </div>
-              <div className="grid gap-4">
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Open PRs and MRs</CardTitle>
-                    <CardDescription>
-                      Pull requests for GitHub repos and merge requests for GitLab.
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="grid gap-3">
-                    {isLoadingPullRequests ? (
-                      <div className="rounded-lg border border-dashed px-4 py-3 text-sm text-muted-foreground">
-                        Loading open pull requests...
-                      </div>
-                    ) : pullRequestsError ? (
-                      <div className="rounded-lg border border-destructive/50 bg-destructive/5 px-4 py-3 text-sm text-destructive">
-                        {pullRequestsError}
-                      </div>
-                    ) : projectPullRequests.length ? (
-                      projectPullRequests.map((item) => (
-                        <a
-                          key={`${item.projectId}-${item.id}`}
-                          href={item.url}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="rounded-lg border bg-muted/20 px-4 py-3 transition hover:border-primary/60 hover:bg-muted/40"
-                        >
-                          <div className="flex flex-wrap items-center justify-between gap-2">
-                            <div className="text-sm font-semibold text-foreground">
-                              {item.title}
-                            </div>
-                            <Badge variant="secondary">
-                              {item.provider === "github" ? "PR" : "MR"}
-                            </Badge>
-                          </div>
-                          <div className="mt-1 text-xs text-muted-foreground">
-                            {item.projectName} · {item.repo}
-                          </div>
-                          <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                            {item.author ? `@${item.author}` : "Unknown author"}
-                            {item.sourceBranch && item.targetBranch
-                              ? `${item.sourceBranch} -> ${item.targetBranch}`
-                              : null}
-                            <span>Updated {formatDateTime(item.updatedAt)}</span>
-                          </div>
-                        </a>
-                      ))
-                    ) : hasRepoProject ? (
-                      <div className="rounded-lg border border-dashed px-4 py-3 text-sm text-muted-foreground">
-                        No open pull requests right now.
-                      </div>
-                    ) : (
-                      <div className="rounded-lg border border-dashed px-4 py-3 text-sm text-muted-foreground">
-                        Add a repo URL to this project to see open PRs or MRs here.
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
-              </div>
-            </div>
+            selectedProject ? (
+              <ProjectWorkspacesTable
+                projectId={selectedProject.id}
+                projectName={selectedProject.name}
+                workspaces={selectedProject.workspaces}
+                pullRequests={projectPullRequests}
+                isLoadingPullRequests={isLoadingPullRequests}
+                pullRequestsError={pullRequestsError}
+                onSelectWorkspace={handleSelectWorkspace}
+                onCreateWorkspace={handleCreateWorkspace}
+                workspaceTitle={workspaceForm.title}
+                onWorkspaceTitleChange={handleWorkspaceFormChange}
+                isCreatingWorkspace={isCreatingWorkspace}
+                createWorkspaceError={createWorkspaceError}
+                formatDateTime={formatDateTime}
+              />
+            ) : null
           ) : isWorkspaceView ? (
             <div className="grid gap-4 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
               <Card className="border-dashed">
