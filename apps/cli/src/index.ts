@@ -312,6 +312,7 @@ program
           ts,
           role: "user",
           content: trimmed,
+          parts: [{ type: "text", text: trimmed }],
           sessionId: session.id,
           conversationId: conversation.id
         });
@@ -345,6 +346,7 @@ program
             ts: nowIso(),
             role: "assistant",
             content: assistantContent,
+            parts: [{ type: "text", text: assistantContent }],
             sessionId: session.id,
             conversationId: conversation.id
           });

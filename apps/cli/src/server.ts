@@ -123,6 +123,19 @@ const isMessagePart = (part: unknown): part is MessagePart => {
   );
 };
 
+const normalizeMessageParts = (
+  content: string,
+  parts: MessagePart[]
+): MessagePart[] | undefined => {
+  if (parts.length > 0) {
+    return parts;
+  }
+  if (content) {
+    return [{ type: "text", text: content }];
+  }
+  return undefined;
+};
+
 const getPartIndex = (parts: MessagePart[], part: MessagePart): number => {
   const partIndex = (part as { index?: unknown }).index;
   if (typeof partIndex === "number" && partIndex >= 0) {
@@ -1451,9 +1464,21 @@ const handleApi = async (req: IncomingMessage, res: ServerResponse, repoRoot: st
     segments[6] === "stream"
   ) {
     try {
-      const body = await readJsonBody<{ message?: string }>(req);
-      const message = body.message?.trim();
-      if (!message) {
+      const body = await readJsonBody<{
+        message?: string;
+        content?: string;
+        parts?: MessagePart[];
+        metadata?: Record<string, unknown>;
+      }>(req);
+      const contentInput = body.message?.trim() ?? body.content?.trim() ?? "";
+      const incomingParts = Array.isArray(body.parts) ? body.parts.filter(isMessagePart) : [];
+      const derivedContent =
+        contentInput || (incomingParts.length > 0 ? getTextFromParts(incomingParts) : "");
+      const metadata =
+        body.metadata && typeof body.metadata === "object" && !Array.isArray(body.metadata)
+          ? body.metadata
+          : undefined;
+      if (!derivedContent && incomingParts.length === 0) {
         sendBadRequest(res, "Message is required.");
         return;
       }
@@ -1491,7 +1516,9 @@ const handleApi = async (req: IncomingMessage, res: ServerResponse, repoRoot: st
       const userEntry: TranscriptEntry = {
         ts,
         role: "user",
-        content: message,
+        content: derivedContent,
+        parts: normalizeMessageParts(derivedContent, incomingParts),
+        metadata,
         sessionId: session.id,
         conversationId: conversation.id
       };
@@ -1563,7 +1590,7 @@ const handleApi = async (req: IncomingMessage, res: ServerResponse, repoRoot: st
           body: {
             model: resolvedModel ?? undefined,
             system: system ?? undefined,
-            parts: [{ type: "text", text: message }]
+            parts: [{ type: "text", text: derivedContent }]
           },
           query: { directory: conversation.workspacePath }
         });
@@ -1593,12 +1620,13 @@ const handleApi = async (req: IncomingMessage, res: ServerResponse, repoRoot: st
         assistantContent = getTextFromParts(assistantParts);
       }
 
+      const normalizedAssistantParts = normalizeMessageParts(assistantContent, assistantParts);
       if (assistantContent.length > 0 || assistantParts.length > 0) {
         const assistantEntry: TranscriptEntry = {
           ts: nowIso(),
           role: "assistant",
           content: assistantContent,
-          parts: assistantParts.length > 0 ? assistantParts : undefined,
+          parts: normalizedAssistantParts,
           sessionId: session.id,
           conversationId: conversation.id
         };
@@ -1611,7 +1639,7 @@ const handleApi = async (req: IncomingMessage, res: ServerResponse, repoRoot: st
       sendSseEvent(res, "message_end", {
         id: assistantMessageId,
         content: assistantContent,
-        parts: assistantParts.length > 0 ? assistantParts : undefined
+        parts: normalizedAssistantParts
       });
       res.end();
       return;
@@ -1640,22 +1668,25 @@ const handleApi = async (req: IncomingMessage, res: ServerResponse, repoRoot: st
     segments[5] === "transcript"
   ) {
     const entries = await readTranscriptEntries(requestRepoRoot, segments[2], segments[4]);
-    const transcript = entries.map((entry) => {
-      const role: "user" | "assistant" | "system" =
-        entry.role === "user" || entry.role === "assistant" || entry.role === "system"
-          ? entry.role
-          : entry.role === "tool"
-            ? "assistant"
-            : "user";
-      const content = typeof entry.content === "string" ? entry.content : "";
-      const parts = Array.isArray(entry.parts) ? entry.parts.filter(isMessagePart) : [];
-      const partsText = parts.length > 0 ? getTextFromParts(parts) : "";
-      return {
-        role,
-        content: content || partsText,
-        parts: parts.length > 0 ? parts : undefined
-      };
-    });
+      const transcript = entries.map((entry) => {
+        const role: "user" | "assistant" | "system" =
+          entry.role === "user" || entry.role === "assistant" || entry.role === "system"
+            ? entry.role
+            : entry.role === "tool"
+              ? "assistant"
+              : "user";
+        const content = typeof entry.content === "string" ? entry.content : "";
+        const parts = Array.isArray(entry.parts) ? entry.parts.filter(isMessagePart) : [];
+        const partsText = parts.length > 0 ? getTextFromParts(parts) : "";
+        const resolvedContent = content || partsText;
+        const normalizedParts = normalizeMessageParts(resolvedContent, parts);
+        return {
+          role,
+          content: resolvedContent,
+          parts: normalizedParts,
+          metadata: entry.metadata
+        };
+      });
     sendJson(res, 200, transcript);
     return;
   }
