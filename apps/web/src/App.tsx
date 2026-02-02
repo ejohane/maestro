@@ -15,6 +15,7 @@ import {
   MessageAttachments,
   MessageResponse,
 } from "./components/ai-elements/message"
+import { ReasoningSection } from "./components/ai-elements/reasoning"
 import {
   PromptInput,
   PromptInputFooter,
@@ -2574,6 +2575,20 @@ const App = () => {
                         source: file.source,
                       }
                     })
+                    const reasoningParts = message.parts.filter(
+                      (part): part is StructuredMessagePart & { type: "reasoning" } =>
+                        part.type === "reasoning"
+                    )
+                    const reasoningText = reasoningParts
+                      .map((part) => part.text)
+                      .filter(
+                        (text): text is string =>
+                          typeof text === "string" && text.trim().length > 0
+                      )
+                      .join("\n\n")
+                    const messageText = getTextFromParts(message.parts) || message.content
+                    const hasMessageText = Boolean(messageText)
+                    const showReasoning = message.role === "assistant" && Boolean(reasoningText)
 
                     return (
                       <Message key={message.id} from={message.role}>
@@ -2583,22 +2598,23 @@ const App = () => {
                           ) : null}
                           {message.role === "assistant" ? (
                             <>
-                              <MessageResponse>
-                                {message.content || getTextFromParts(message.parts)}
-                              </MessageResponse>
-                              {message.isStreaming &&
-                              !message.content &&
-                              !getTextFromParts(message.parts) &&
-                              isAwaitingFirstToken ? (
+                              {showReasoning ? (
+                                <ReasoningSection
+                                  text={reasoningText}
+                                  isStreaming={message.isStreaming}
+                                />
+                              ) : null}
+                              {hasMessageText ? (
+                                <MessageResponse>{messageText}</MessageResponse>
+                              ) : null}
+                              {message.isStreaming && !hasMessageText && isAwaitingFirstToken ? (
                                 <span className="inline-flex items-center gap-2 text-muted-foreground">
                                   <Loader /> Waiting for response...
                                 </span>
                               ) : null}
                             </>
                           ) : (
-                            <MessageResponse>
-                              {message.content || getTextFromParts(message.parts)}
-                            </MessageResponse>
+                            <MessageResponse>{messageText}</MessageResponse>
                           )}
                         </MessageContent>
                       </Message>
