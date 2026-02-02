@@ -5,6 +5,7 @@ import { ProjectWorkspacesTable } from "./components/project-workspaces-table"
 import {
   Conversation,
   ConversationContent,
+  ConversationEmptyState,
   ConversationScrollButton,
 } from "./components/ai-elements/conversation"
 import { Loader } from "./components/ai-elements/loader"
@@ -2580,9 +2581,11 @@ const App = () => {
                     </Message>
                   ))
                 ) : (
-                  <div className="flex h-full min-h-[320px] items-center justify-center text-sm text-muted-foreground">
-                    Ask a question to start the session.
-                  </div>
+                  <ConversationEmptyState
+                    className="min-h-[320px]"
+                    title="No messages yet"
+                    description="Ask a question to start the session."
+                  />
                 )}
               </ConversationContent>
               <ConversationScrollButton />
