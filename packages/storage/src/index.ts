@@ -330,6 +330,20 @@ const isMessagePart = (part: unknown): part is MessagePart => {
   );
 };
 
+const logLegacyMigrationWarning = (context: {
+  conversationId: string;
+  sessionId: string;
+  line: number;
+  reason: string;
+}): void => {
+  const prefix = "[legacy-migration]";
+  console.warn(`${prefix} ${context.reason}`, {
+    conversationId: context.conversationId,
+    sessionId: context.sessionId,
+    line: context.line
+  });
+};
+
 export const readTranscriptHistory = async (
   repoRoot: string,
   conversationId: string,
@@ -342,7 +356,7 @@ export const readTranscriptHistory = async (
       .trim()
       .split("\n")
       .filter(Boolean)
-        .map((line) => {
+        .map((line, index) => {
           const parsed = JSON.parse(line) as Partial<TranscriptEntry>;
           const role: TranscriptMessageRole =
             parsed.role === "user" || parsed.role === "assistant" || parsed.role === "system"
@@ -353,6 +367,21 @@ export const readTranscriptHistory = async (
           const content = typeof parsed.content === "string" ? parsed.content : "";
           const parts = Array.isArray(parsed.parts) ? parsed.parts.filter(isMessagePart) : [];
           const partsText = parts.length > 0 ? getTextFromParts(parts) : "";
+          if (!content && !partsText) {
+            logLegacyMigrationWarning({
+              conversationId,
+              sessionId,
+              line: index + 1,
+              reason: "Transcript entry missing content and parts."
+            });
+          } else if (content && partsText && content !== partsText) {
+            logLegacyMigrationWarning({
+              conversationId,
+              sessionId,
+              line: index + 1,
+              reason: "Transcript entry content does not match text parts."
+            });
+          }
           return { role, content: content || partsText };
         });
   } catch (error) {

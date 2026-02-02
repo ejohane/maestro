@@ -136,6 +136,22 @@ const normalizeMessageParts = (
   return undefined;
 };
 
+const logLegacyMigrationWarning = (context: {
+  conversationId: string;
+  sessionId: string;
+  reason: string;
+  entry?: Pick<TranscriptEntry, "ts" | "role">;
+}): void => {
+  const prefix = "[legacy-migration]";
+  const details = {
+    conversationId: context.conversationId,
+    sessionId: context.sessionId,
+    ts: context.entry?.ts,
+    role: context.entry?.role
+  };
+  console.warn(`${prefix} ${context.reason}`, details);
+};
+
 const getPartIndex = (parts: MessagePart[], part: MessagePart): number => {
   const partIndex = (part as { index?: unknown }).index;
   if (typeof partIndex === "number" && partIndex >= 0) {
@@ -1679,6 +1695,21 @@ const handleApi = async (req: IncomingMessage, res: ServerResponse, repoRoot: st
         const parts = Array.isArray(entry.parts) ? entry.parts.filter(isMessagePart) : [];
         const partsText = parts.length > 0 ? getTextFromParts(parts) : "";
         const resolvedContent = content || partsText;
+        if (!resolvedContent && parts.length === 0) {
+          logLegacyMigrationWarning({
+            conversationId: segments[2],
+            sessionId: segments[4],
+            reason: "Transcript entry missing content and parts.",
+            entry
+          });
+        } else if (content && partsText && content !== partsText) {
+          logLegacyMigrationWarning({
+            conversationId: segments[2],
+            sessionId: segments[4],
+            reason: "Transcript entry content does not match text parts.",
+            entry
+          });
+        }
         const normalizedParts = normalizeMessageParts(resolvedContent, parts);
         return {
           role,

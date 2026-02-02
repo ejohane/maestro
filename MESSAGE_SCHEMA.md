@@ -139,3 +139,22 @@ Any part with a type that starts with `data-` is reserved for structured payload
 - If both `content` and `parts` are present, `parts` is the source of truth. `content` should match the concatenated `text` parts.
 - When building a text-only history view (system prompt or UI fallback), use `content` if present, otherwise the derived text.
 - Unknown or missing `role` values default to `user` for legacy entries.
+
+## Legacy compatibility and migration strategy
+
+Legacy sessions that only stored `content` remain functional via **on-read normalization**:
+
+- When reading transcripts or streaming history, missing `parts` are synthesized from `content`.
+- When `parts` exist without `content`, the server derives `content` from text parts.
+- New writes always persist both `content` and `parts` to keep mixed-format sessions consistent.
+
+Mixed-format sessions are supported:
+
+- `parts` are the source of truth for structured rendering.
+- `content` is treated as a text-only fallback and is derived when absent.
+- If `content` and text-part concatenation disagree, the API logs a migration warning and favors `parts`.
+
+Telemetry/logging:
+
+- API responses log warnings when a transcript entry is missing both `content` and `parts`, or when `content` disagrees with text-part concatenation.
+- These warnings are intended to surface data that should be backfilled by a future batch migration.
