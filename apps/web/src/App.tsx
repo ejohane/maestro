@@ -1043,7 +1043,6 @@ const App = () => {
     setSettingsForm((prev) => ({ ...prev, defaultModel: value }))
     setSettingsSavedMessage(null)
   }
-
   const handleSettingsSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     setIsSavingSettings(true)
@@ -2426,7 +2425,7 @@ const App = () => {
                   <CardHeader>
                     <CardTitle>Create a new session</CardTitle>
                     <CardDescription>
-                      Start a focused chat within this workspace.
+                      Start a focused chat within this workspace. OpenCode will name it.
                     </CardDescription>
                   </CardHeader>
                   <CardContent className="grid gap-3">
@@ -2572,19 +2571,20 @@ const App = () => {
                     <Message key={message.id} role={message.role}>
                       <MessageContent>
                         {message.role === "assistant" ? (
-                          <MessageResponse>
-                            {message.content}
-                            {message.isStreaming && message.content ? (
-                              <span className="ml-1 inline-block h-3 w-1 animate-pulse rounded-sm bg-muted-foreground/60" />
-                            ) : null}
+                          <>
+                            <MessageResponse isAnimating={message.isStreaming}>
+                              {message.content}
+                            </MessageResponse>
                             {message.isStreaming && !message.content && isAwaitingFirstToken ? (
-                              <span className="inline-flex items-center gap-2">
+                              <span className="inline-flex items-center gap-2 text-muted-foreground">
                                 <Loader /> Waiting for response...
                               </span>
                             ) : null}
-                          </MessageResponse>
+                          </>
                         ) : (
-                          message.content
+                          <MessageResponse isAnimating={false}>
+                            {message.content}
+                          </MessageResponse>
                         )}
                       </MessageContent>
                     </Message>

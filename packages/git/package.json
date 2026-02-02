@@ -12,6 +12,7 @@
   },
   "scripts": {
     "build": "bun tsc -p tsconfig.json",
+    "dev": "bun tsc -p tsconfig.json --watch",
     "test": "bun test"
   }
 }

@@ -1109,7 +1109,7 @@ const handleApi = async (req: IncomingMessage, res: ServerResponse, repoRoot: st
 
       const sessionId = generateId("s");
       const model = process.env.MAESTRO_MODEL;
-      const sessionTitle = buildSessionTitle({ createdAt: ts, model });
+      const sessionTitle = undefined;
       const session: Session = {
         id: sessionId,
         conversationId: conversation.id,
@@ -1123,7 +1123,7 @@ const handleApi = async (req: IncomingMessage, res: ServerResponse, repoRoot: st
       const client = new DirectSDKClient();
       const opencodeSessionId = await client.ensureSession({
         sessionId: session.opencodeSessionId,
-        title: session.title ?? conversation.title,
+        title: session.title?.trim() || undefined,
         workspacePath: conversation.workspacePath
       } as any);
       if (opencodeSessionId !== session.opencodeSessionId) {
@@ -1223,7 +1223,32 @@ const handleApi = async (req: IncomingMessage, res: ServerResponse, repoRoot: st
     segments[3] === "sessions"
   ) {
     const sessions = await listSessions(requestRepoRoot, segments[2]);
-    sendJson(res, 200, sessions);
+    if (!sessions.length) {
+      sendJson(res, 200, sessions);
+      return;
+    }
+    const opencodeClient = createAuthedOpencodeClient();
+    const hydrated = await Promise.all(
+      sessions.map(async (session) => {
+        if (!session.opencodeSessionId) {
+          return session;
+        }
+        try {
+          const response = await opencodeClient.session.get({
+            path: { id: session.opencodeSessionId }
+          });
+          const payload = (response as any)?.data ?? response;
+          const title = typeof payload?.title === "string" ? payload.title.trim() : "";
+          if (!title) {
+            return session;
+          }
+          return { ...session, title };
+        } catch {
+          return session;
+        }
+      })
+    );
+    sendJson(res, 200, hydrated);
     return;
   }
 
@@ -1247,11 +1272,7 @@ const handleApi = async (req: IncomingMessage, res: ServerResponse, repoRoot: st
       }
       const ts = nowIso();
       const model = body.model?.trim() || getDefaultModel();
-      const sessionTitle = buildSessionTitle({
-        createdAt: ts,
-        model,
-        title: body.title
-      });
+      const sessionTitle = body.title?.trim() || undefined;
       const session: Session = {
         id: generateId("s"),
         conversationId: conversation.id,
@@ -1264,7 +1285,7 @@ const handleApi = async (req: IncomingMessage, res: ServerResponse, repoRoot: st
       const client = new DirectSDKClient();
       const opencodeSessionId = await client.ensureSession({
         sessionId: session.opencodeSessionId,
-        title: session.title ?? conversation.title,
+        title: session.title?.trim() || undefined,
         workspacePath: conversation.workspacePath
       } as any);
       if (opencodeSessionId !== session.opencodeSessionId) {
@@ -1369,7 +1390,7 @@ const handleApi = async (req: IncomingMessage, res: ServerResponse, repoRoot: st
       const directClient = new DirectSDKClient();
       const opencodeSessionId = await directClient.ensureSession({
         sessionId: session.opencodeSessionId,
-        title: session.title ?? conversation.title,
+        title: session.title?.trim() || undefined,
         workspacePath: conversation.workspacePath
       } as any);
       if (opencodeSessionId !== session.opencodeSessionId) {
