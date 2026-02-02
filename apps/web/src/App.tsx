@@ -97,6 +97,7 @@ type ApiPullRequest = {
 type ApiTranscriptEntry = {
   role: "user" | "assistant" | "system"
   content: string
+  parts?: MessagePart[]
 }
 
 type CreateConversationResponse = {
@@ -159,9 +160,9 @@ type ChatMessage = {
   id: string
   role: "user" | "assistant" | "system"
   content: string
+  parts?: MessagePart[]
   isStreaming?: boolean
 }
-
 type ModelProviderModel = {
   id: string
   name?: string
@@ -171,6 +172,64 @@ type ModelProvider = {
   id: string
   name?: string
   models: ModelProviderModel[]
+}
+
+type MessagePart = {
+  type: string
+  id?: string
+  index?: number
+  text?: string
+  [key: string]: unknown
+}
+
+const getTextFromParts = (parts?: MessagePart[]): string => {
+  if (!parts?.length) {
+    return ""
+  }
+  return parts
+    .map((part) => (part.type === "text" && typeof part.text === "string" ? part.text : ""))
+    .filter(Boolean)
+    .join("")
+}
+
+const getPartIndex = (parts: MessagePart[], part: MessagePart): number => {
+  if (typeof part.index === "number" && part.index >= 0) {
+    return part.index
+  }
+  if (typeof part.id === "string") {
+    return parts.findIndex((existing) => existing.id === part.id)
+  }
+  return -1
+}
+
+const mergeMessageParts = (
+  parts: MessagePart[] | undefined,
+  incoming: MessagePart,
+  delta: unknown
+): MessagePart[] => {
+  const current = parts ?? []
+  const index = getPartIndex(current, incoming)
+  const existing = index >= 0 ? current[index] : undefined
+  const merged: MessagePart = { ...existing, ...incoming }
+  if (incoming.type === "text" || incoming.type === "reasoning") {
+    const existingText = typeof existing?.text === "string" ? existing.text : ""
+    const incomingText = typeof incoming.text === "string" ? incoming.text : ""
+    let nextText = existingText
+    if (incomingText && incomingText.startsWith(existingText)) {
+      nextText = incomingText
+    } else if (typeof delta === "string") {
+      nextText = existingText + delta
+    } else if (incomingText) {
+      nextText = incomingText
+    }
+    merged.text = nextText
+  }
+  if (index >= 0) {
+    const next = current.slice()
+    next[index] = merged
+    return next
+  }
+  return [...current, merged]
 }
 
 const App = () => {
@@ -642,7 +701,8 @@ const App = () => {
           transcript.map((entry) => ({
             id: createLocalMessageId(),
             role: entry.role,
-            content: entry.content,
+            content: entry.content || getTextFromParts(entry.parts),
+            parts: entry.parts,
           }))
         )
       })
@@ -1367,7 +1427,13 @@ const App = () => {
     setMessages((prev) => [
       ...prev,
       { id: userMessageId, role: "user", content },
-      { id: assistantMessageId, role: "assistant", content: "", isStreaming: true },
+      {
+        id: assistantMessageId,
+        role: "assistant",
+        content: "",
+        parts: [],
+        isStreaming: true,
+      },
     ])
 
     const controller = new AbortController()
@@ -1440,6 +1506,36 @@ const App = () => {
             continue
           }
 
+          if (eventName === "message_part_updated" || eventName === "message.part.updated") {
+            const incomingPart = data?.part
+            if (incomingPart && typeof incomingPart.type === "string") {
+              setIsAwaitingFirstToken(false)
+              setMessages((prev) =>
+                prev.map((message) => {
+                  if (message.id !== assistantMessageId) {
+                    return message
+                  }
+                  const updatedParts = mergeMessageParts(
+                    message.parts,
+                    incomingPart as MessagePart,
+                    data?.delta
+                  )
+                  const partsText = getTextFromParts(updatedParts)
+                  return {
+                    ...message,
+                    parts: updatedParts,
+                    content:
+                      partsText.length >= message.content.length
+                        ? partsText
+                        : message.content,
+                    isStreaming: true,
+                  }
+                })
+              )
+            }
+            continue
+          }
+
           if (eventName === "message_end") {
             setIsAwaitingFirstToken(false)
             setChatStatus("idle")
@@ -1449,7 +1545,10 @@ const App = () => {
                   ? {
                       ...message,
                       content:
-                        typeof data?.content === "string" ? data.content : message.content,
+                        typeof data?.content === "string"
+                          ? data.content
+                          : getTextFromParts(data?.parts) || message.content,
+                      parts: Array.isArray(data?.parts) ? data.parts : message.parts,
                       isStreaming: false,
                     }
                   : message
@@ -2528,16 +2627,21 @@ const App = () => {
                         {message.role === "assistant" ? (
                           <>
                             <MessageResponse>
-                              {message.content}
+                              {message.content || getTextFromParts(message.parts)}
                             </MessageResponse>
-                            {message.isStreaming && !message.content && isAwaitingFirstToken ? (
+                            {message.isStreaming &&
+                            !message.content &&
+                            !getTextFromParts(message.parts) &&
+                            isAwaitingFirstToken ? (
                               <span className="inline-flex items-center gap-2 text-muted-foreground">
                                 <Loader /> Waiting for response...
                               </span>
                             ) : null}
                           </>
                         ) : (
-                          <MessageResponse>{message.content}</MessageResponse>
+                          <MessageResponse>
+                            {message.content || getTextFromParts(message.parts)}
+                          </MessageResponse>
                         )}
                       </MessageContent>
                     </Message>

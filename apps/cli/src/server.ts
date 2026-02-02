@@ -7,10 +7,12 @@ import { promisify } from "node:util";
 import {
   Conversation,
   GitProvider,
+  MessagePart,
   Project,
   Session,
   TranscriptEntry,
   createProject,
+  getTextFromParts,
   generateId,
   nowIso
 } from "@maestro/core";
@@ -29,6 +31,7 @@ import {
   readSettings,
   readProjectById,
   readSession,
+  readTranscriptEntries,
   readTranscriptHistory,
   setCurrentContext,
   updateConversationTimestamp,
@@ -109,6 +112,67 @@ const sendNotFound = (res: ServerResponse): void => {
 const sendError = (res: ServerResponse, error: unknown): void => {
   const message = error instanceof Error ? error.message : String(error);
   sendJson(res, 500, { error: message });
+};
+
+const isMessagePart = (part: unknown): part is MessagePart => {
+  return (
+    typeof part === "object" &&
+    part !== null &&
+    "type" in part &&
+    typeof (part as { type?: unknown }).type === "string"
+  );
+};
+
+const getPartIndex = (parts: MessagePart[], part: MessagePart): number => {
+  const partIndex = (part as { index?: unknown }).index;
+  if (typeof partIndex === "number" && partIndex >= 0) {
+    return partIndex;
+  }
+  const partId = (part as { id?: unknown }).id;
+  if (typeof partId === "string") {
+    return parts.findIndex((existing) => (existing as { id?: unknown }).id === partId);
+  }
+  return -1;
+};
+
+const mergeMessagePart = (
+  existing: MessagePart | undefined,
+  incoming: MessagePart,
+  delta: unknown
+): MessagePart => {
+  const merged = { ...(existing ?? {}), ...incoming } as MessagePart & { text?: string };
+  const existingText = typeof (existing as { text?: unknown } | undefined)?.text === "string"
+    ? ((existing as { text?: unknown }).text as string)
+    : "";
+  const incomingText = typeof (incoming as { text?: unknown }).text === "string"
+    ? ((incoming as { text?: unknown }).text as string)
+    : "";
+  if (incoming.type === "text" || incoming.type === "reasoning") {
+    let nextText = existingText;
+    if (incomingText && incomingText.startsWith(existingText)) {
+      nextText = incomingText;
+    } else if (typeof delta === "string") {
+      nextText = existingText + delta;
+    } else if (incomingText) {
+      nextText = incomingText;
+    }
+    merged.text = nextText;
+  }
+  return merged;
+};
+
+const upsertMessagePart = (
+  parts: MessagePart[],
+  incoming: MessagePart,
+  delta: unknown
+): MessagePart[] => {
+  const index = getPartIndex(parts, incoming);
+  if (index >= 0) {
+    const nextParts = parts.slice();
+    nextParts[index] = mergeMessagePart(parts[index], incoming, delta);
+    return nextParts;
+  }
+  return [...parts, mergeMessagePart(undefined, incoming, delta)];
 };
 
 const isWorktreeDirty = async (worktreePath: string): Promise<boolean> => {
@@ -1456,6 +1520,7 @@ const handleApi = async (req: IncomingMessage, res: ServerResponse, repoRoot: st
       });
 
       let assistantContent = "";
+      let assistantParts: MessagePart[] = [];
       const eventTask = (async () => {
         for await (const event of eventResponse.stream) {
           await appendEventEntry(requestRepoRoot, conversation.id, session.id, {
@@ -1470,10 +1535,18 @@ const handleApi = async (req: IncomingMessage, res: ServerResponse, repoRoot: st
           }
           const part = (event as any).properties?.part;
           const delta = (event as any).properties?.delta;
-          if (!part || part.type !== "text" || part.sessionID !== opencodeSessionId) {
+          const partSessionId = (part as { sessionID?: unknown })?.sessionID;
+          if (!part || !isMessagePart(part) || partSessionId !== opencodeSessionId) {
             continue;
           }
-          if (typeof delta === "string" && delta.length > 0) {
+          assistantParts = upsertMessagePart(assistantParts, part, delta);
+          sendSseEvent(res, "message_part_updated", {
+            id: assistantMessageId,
+            partType: part.type,
+            delta,
+            part: assistantParts[getPartIndex(assistantParts, part)] ?? part
+          });
+          if (part.type === "text" && typeof delta === "string" && delta.length > 0) {
             assistantContent += delta;
             sendSseEvent(res, "message_delta", { delta });
           }
@@ -1494,6 +1567,14 @@ const handleApi = async (req: IncomingMessage, res: ServerResponse, repoRoot: st
           },
           query: { directory: conversation.workspacePath }
         });
+        const responseData =
+          ((response as { data?: unknown })?.data ?? response ?? {}) as { parts?: unknown[] };
+        const responseParts = Array.isArray(responseData.parts)
+          ? responseData.parts.filter(isMessagePart)
+          : [];
+        if (responseParts.length > 0 && assistantParts.length === 0) {
+          assistantParts = responseParts;
+        }
         if (!assistantContent) {
           const extracted = extractAssistantResponse(response);
           assistantContent = extracted.content;
@@ -1508,11 +1589,16 @@ const handleApi = async (req: IncomingMessage, res: ServerResponse, repoRoot: st
         }
       }
 
-      if (assistantContent.length > 0) {
+      if (!assistantContent && assistantParts.length > 0) {
+        assistantContent = getTextFromParts(assistantParts);
+      }
+
+      if (assistantContent.length > 0 || assistantParts.length > 0) {
         const assistantEntry: TranscriptEntry = {
           ts: nowIso(),
           role: "assistant",
           content: assistantContent,
+          parts: assistantParts.length > 0 ? assistantParts : undefined,
           sessionId: session.id,
           conversationId: conversation.id
         };
@@ -1522,7 +1608,11 @@ const handleApi = async (req: IncomingMessage, res: ServerResponse, repoRoot: st
       await updateSessionTimestamp(requestRepoRoot, conversation.id, session);
       await updateConversationTimestamp(requestRepoRoot, conversation);
 
-      sendSseEvent(res, "message_end", { id: assistantMessageId, content: assistantContent });
+      sendSseEvent(res, "message_end", {
+        id: assistantMessageId,
+        content: assistantContent,
+        parts: assistantParts.length > 0 ? assistantParts : undefined
+      });
       res.end();
       return;
     } catch (error) {
@@ -1549,7 +1639,23 @@ const handleApi = async (req: IncomingMessage, res: ServerResponse, repoRoot: st
     segments[3] === "sessions" &&
     segments[5] === "transcript"
   ) {
-    const transcript = await readTranscriptHistory(requestRepoRoot, segments[2], segments[4]);
+    const entries = await readTranscriptEntries(requestRepoRoot, segments[2], segments[4]);
+    const transcript = entries.map((entry) => {
+      const role: "user" | "assistant" | "system" =
+        entry.role === "user" || entry.role === "assistant" || entry.role === "system"
+          ? entry.role
+          : entry.role === "tool"
+            ? "assistant"
+            : "user";
+      const content = typeof entry.content === "string" ? entry.content : "";
+      const parts = Array.isArray(entry.parts) ? entry.parts.filter(isMessagePart) : [];
+      const partsText = parts.length > 0 ? getTextFromParts(parts) : "";
+      return {
+        role,
+        content: content || partsText,
+        parts: parts.length > 0 ? parts : undefined
+      };
+    });
     sendJson(res, 200, transcript);
     return;
   }
