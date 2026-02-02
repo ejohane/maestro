@@ -192,7 +192,6 @@ const App = () => {
   const [createWorkspaceError, setCreateWorkspaceError] = React.useState<string | null>(
     null
   )
-  const [sessionForm, setSessionForm] = React.useState({ title: "" })
   const [isCreatingSession, setIsCreatingSession] = React.useState(false)
   const [createSessionError, setCreateSessionError] = React.useState<string | null>(null)
   const [deletingSessionId, setDeletingSessionId] = React.useState<string | null>(null)
@@ -868,11 +867,6 @@ const App = () => {
     setWorkspaceForm({ title: value })
   }
 
-  const handleSessionFormChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const value = event.target.value
-    setSessionForm({ title: value })
-  }
-
   const handleSettingsSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     setIsSavingSettings(true)
@@ -1103,7 +1097,6 @@ const App = () => {
     if (!selectedProject || !selectedWorkspace) {
       return
     }
-    const title = sessionForm.title.trim()
     setIsCreatingSession(true)
     setCreateSessionError(null)
     try {
@@ -1112,7 +1105,7 @@ const App = () => {
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ title: title || undefined }),
+          body: JSON.stringify({}),
         }
       )
       if (!response.ok) {
@@ -1128,7 +1121,6 @@ const App = () => {
         throw new Error(message)
       }
       const session = (await response.json()) as ApiSession
-      setSessionForm({ title: "" })
       setIsProjectsView(false)
       setSelectedProjectId(selectedProject.id)
       setSelectedWorkspaceId(selectedWorkspace.id)
@@ -2051,20 +2043,10 @@ const App = () => {
                   <CardHeader>
                     <CardTitle>Create a new session</CardTitle>
                     <CardDescription>
-                      Start a focused chat within this workspace.
+                      Start a focused chat within this workspace. OpenCode will name it.
                     </CardDescription>
                   </CardHeader>
                   <CardContent className="grid gap-3">
-                    <div className="grid gap-2">
-                      <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                        Session name
-                      </label>
-                      <Input
-                        value={sessionForm.title}
-                        onChange={handleSessionFormChange}
-                        placeholder="e.g. Bug bash follow-up"
-                      />
-                    </div>
                     {createSessionError ? (
                       <div className="rounded-md border border-destructive/50 bg-destructive/5 px-3 py-2 text-sm text-destructive">
                         {createSessionError}
@@ -2153,19 +2135,20 @@ const App = () => {
                     <Message key={message.id} role={message.role}>
                       <MessageContent>
                         {message.role === "assistant" ? (
-                          <MessageResponse>
-                            {message.content}
-                            {message.isStreaming && message.content ? (
-                              <span className="ml-1 inline-block h-3 w-1 animate-pulse rounded-sm bg-muted-foreground/60" />
-                            ) : null}
+                          <>
+                            <MessageResponse isAnimating={message.isStreaming}>
+                              {message.content}
+                            </MessageResponse>
                             {message.isStreaming && !message.content && isAwaitingFirstToken ? (
-                              <span className="inline-flex items-center gap-2">
+                              <span className="inline-flex items-center gap-2 text-muted-foreground">
                                 <Loader /> Waiting for response...
                               </span>
                             ) : null}
-                          </MessageResponse>
+                          </>
                         ) : (
-                          message.content
+                          <MessageResponse isAnimating={false}>
+                            {message.content}
+                          </MessageResponse>
                         )}
                       </MessageContent>
                     </Message>
