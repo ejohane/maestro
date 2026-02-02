@@ -9,6 +9,7 @@ import {
   GitProvider,
   Project,
   Session,
+  TranscriptEntry,
   createProject,
   generateId,
   nowIso
@@ -1423,13 +1424,14 @@ const handleApi = async (req: IncomingMessage, res: ServerResponse, repoRoot: st
       }
 
       const ts = nowIso();
-      await appendTranscriptEntry(requestRepoRoot, conversation.id, session.id, {
+      const userEntry: TranscriptEntry = {
         ts,
         role: "user",
         content: message,
         sessionId: session.id,
         conversationId: conversation.id
-      });
+      };
+      await appendTranscriptEntry(requestRepoRoot, conversation.id, session.id, userEntry);
 
       const history = await readTranscriptHistory(requestRepoRoot, conversation.id, session.id);
       const system = buildSystemMessage(conversation.workspacePath, history);
@@ -1507,13 +1509,14 @@ const handleApi = async (req: IncomingMessage, res: ServerResponse, repoRoot: st
       }
 
       if (assistantContent.length > 0) {
-        await appendTranscriptEntry(requestRepoRoot, conversation.id, session.id, {
+        const assistantEntry: TranscriptEntry = {
           ts: nowIso(),
           role: "assistant",
           content: assistantContent,
           sessionId: session.id,
           conversationId: conversation.id
-        });
+        };
+        await appendTranscriptEntry(requestRepoRoot, conversation.id, session.id, assistantEntry);
       }
 
       await updateSessionTimestamp(requestRepoRoot, conversation.id, session);

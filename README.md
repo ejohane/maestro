@@ -70,6 +70,10 @@ Data is stored in `~/.maestro`:
 - `transcript.ndjson` stores user/assistant/system messages.
 - `events.ndjson` stores SDK and tool call events as they stream.
 
+### Message schema
+
+See `MESSAGE_SCHEMA.md` for the canonical structured message schema (parts, tool approvals, citations, attachments) and legacy mapping rules.
+
 ### Git workspace behavior
 
 When starting a conversation, the CLI:
