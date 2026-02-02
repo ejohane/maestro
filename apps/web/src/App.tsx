@@ -47,6 +47,17 @@ import {
   SidebarTrigger,
 } from "./components/ui/sidebar"
 import { useTheme } from "./hooks/use-theme"
+import type { MessageRole } from "@maestro/core"
+import {
+  applyMessageDelta,
+  applyMessageEnd,
+  applyMessagePartUpdate,
+  createClientMessage,
+  getTextFromParts,
+  normalizeMessageParts,
+  type ClientMessage,
+  type StructuredMessagePart,
+} from "./lib/messages"
 
 type GitProvider = "github" | "gitlab"
 
@@ -95,9 +106,10 @@ type ApiPullRequest = {
 }
 
 type ApiTranscriptEntry = {
-  role: "user" | "assistant" | "system"
-  content: string
-  parts?: MessagePart[]
+  role: MessageRole
+  content?: string
+  parts?: StructuredMessagePart[]
+  metadata?: Record<string, unknown>
 }
 
 type CreateConversationResponse = {
@@ -155,14 +167,8 @@ type MergedPullRequestAction = {
   workspaceName?: string
   workspaceDeleted?: boolean
 }
+type ChatMessage = ClientMessage
 
-type ChatMessage = {
-  id: string
-  role: "user" | "assistant" | "system"
-  content: string
-  parts?: MessagePart[]
-  isStreaming?: boolean
-}
 type ModelProviderModel = {
   id: string
   name?: string
@@ -172,64 +178,6 @@ type ModelProvider = {
   id: string
   name?: string
   models: ModelProviderModel[]
-}
-
-type MessagePart = {
-  type: string
-  id?: string
-  index?: number
-  text?: string
-  [key: string]: unknown
-}
-
-const getTextFromParts = (parts?: MessagePart[]): string => {
-  if (!parts?.length) {
-    return ""
-  }
-  return parts
-    .map((part) => (part.type === "text" && typeof part.text === "string" ? part.text : ""))
-    .filter(Boolean)
-    .join("")
-}
-
-const getPartIndex = (parts: MessagePart[], part: MessagePart): number => {
-  if (typeof part.index === "number" && part.index >= 0) {
-    return part.index
-  }
-  if (typeof part.id === "string") {
-    return parts.findIndex((existing) => existing.id === part.id)
-  }
-  return -1
-}
-
-const mergeMessageParts = (
-  parts: MessagePart[] | undefined,
-  incoming: MessagePart,
-  delta: unknown
-): MessagePart[] => {
-  const current = parts ?? []
-  const index = getPartIndex(current, incoming)
-  const existing = index >= 0 ? current[index] : undefined
-  const merged: MessagePart = { ...existing, ...incoming }
-  if (incoming.type === "text" || incoming.type === "reasoning") {
-    const existingText = typeof existing?.text === "string" ? existing.text : ""
-    const incomingText = typeof incoming.text === "string" ? incoming.text : ""
-    let nextText = existingText
-    if (incomingText && incomingText.startsWith(existingText)) {
-      nextText = incomingText
-    } else if (typeof delta === "string") {
-      nextText = existingText + delta
-    } else if (incomingText) {
-      nextText = incomingText
-    }
-    merged.text = nextText
-  }
-  if (index >= 0) {
-    const next = current.slice()
-    next[index] = merged
-    return next
-  }
-  return [...current, merged]
 }
 
 const App = () => {
@@ -698,12 +646,15 @@ const App = () => {
         }
         const transcript = (await response.json()) as ApiTranscriptEntry[]
         setMessages(
-          transcript.map((entry) => ({
-            id: createLocalMessageId(),
-            role: entry.role,
-            content: entry.content || getTextFromParts(entry.parts),
-            parts: entry.parts,
-          }))
+          transcript.map((entry) =>
+            createClientMessage({
+              id: createLocalMessageId(),
+              role: entry.role,
+              content: entry.content,
+              parts: entry.parts,
+              metadata: entry.metadata,
+            })
+          )
         )
       })
       .catch((err) => {
@@ -1419,6 +1370,7 @@ const App = () => {
     const sessionId = selectedChat.id
     const userMessageId = createLocalMessageId()
     const assistantMessageId = createLocalMessageId()
+    const userParts = normalizeMessageParts(content)
 
     setPromptValue("")
     setChatError(null)
@@ -1426,14 +1378,14 @@ const App = () => {
     setChatStatus("streaming")
     setMessages((prev) => [
       ...prev,
-      { id: userMessageId, role: "user", content },
-      {
+      createClientMessage({ id: userMessageId, role: "user", content, parts: userParts }),
+      createClientMessage({
         id: assistantMessageId,
         role: "assistant",
         content: "",
         parts: [],
         isStreaming: true,
-      },
+      }),
     ])
 
     const controller = new AbortController()
@@ -1445,7 +1397,7 @@ const App = () => {
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ message: content }),
+          body: JSON.stringify({ content, parts: userParts }),
           signal: controller.signal,
         }
       )
@@ -1495,11 +1447,7 @@ const App = () => {
             setMessages((prev) =>
               prev.map((message) =>
                 message.id === assistantMessageId
-                  ? {
-                      ...message,
-                      content: message.content + data.delta,
-                      isStreaming: true,
-                    }
+                  ? applyMessageDelta(message, data.delta)
                   : message
               )
             )
@@ -1515,21 +1463,11 @@ const App = () => {
                   if (message.id !== assistantMessageId) {
                     return message
                   }
-                  const updatedParts = mergeMessageParts(
-                    message.parts,
-                    incomingPart as MessagePart,
+                  return applyMessagePartUpdate(
+                    message,
+                    incomingPart as StructuredMessagePart,
                     data?.delta
                   )
-                  const partsText = getTextFromParts(updatedParts)
-                  return {
-                    ...message,
-                    parts: updatedParts,
-                    content:
-                      partsText.length >= message.content.length
-                        ? partsText
-                        : message.content,
-                    isStreaming: true,
-                  }
                 })
               )
             }
@@ -1542,15 +1480,10 @@ const App = () => {
             setMessages((prev) =>
               prev.map((message) =>
                 message.id === assistantMessageId
-                  ? {
-                      ...message,
-                      content:
-                        typeof data?.content === "string"
-                          ? data.content
-                          : getTextFromParts(data?.parts) || message.content,
-                      parts: Array.isArray(data?.parts) ? data.parts : message.parts,
-                      isStreaming: false,
-                    }
+                  ? applyMessageEnd(message, {
+                      content: typeof data?.content === "string" ? data.content : undefined,
+                      parts: Array.isArray(data?.parts) ? data.parts : undefined,
+                    })
                   : message
               )
             )

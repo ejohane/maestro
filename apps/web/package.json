@@ -9,6 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@maestro/core": "0.0.0",
     "ai": "^4.1.0",
     "@streamdown/cjk": "^1.0.1",
     "@streamdown/code": "^1.0.1",
