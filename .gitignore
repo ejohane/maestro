@@ -2,3 +2,6 @@ node_modules/
 .turbo/
 .maestro/
 dist/
+
+# bv (beads viewer) local config and caches
+.bv/
