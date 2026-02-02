@@ -1,4 +1,4 @@
-import { Conversation, CurrentContext, Project, Session } from "@maestro/core";
+import { AgenticLoop, AgenticLoopStep, Conversation, CurrentContext, Project, Session } from "@maestro/core";
 export interface MaestroPaths {
     root: string;
     projectsDir: string;
@@ -35,6 +35,13 @@ export declare const readSettings: (repoRoot: string) => Promise<MaestroSettings
 export declare const writeSettings: (repoRoot: string, settings: MaestroSettings) => Promise<void>;
 export declare const appendTranscriptEntry: (repoRoot: string, conversationId: string, sessionId: string, entry: unknown) => Promise<void>;
 export declare const appendEventEntry: (repoRoot: string, conversationId: string, sessionId: string, entry: unknown) => Promise<void>;
+export declare const writeLoop: (repoRoot: string, conversationId: string, sessionId: string, loop: AgenticLoop) => Promise<void>;
+export declare const readLoop: (repoRoot: string, conversationId: string, sessionId: string, loopId: string) => Promise<AgenticLoop>;
+export declare const listLoops: (repoRoot: string, conversationId: string, sessionId: string) => Promise<AgenticLoop[]>;
+export declare const appendLoopEvent: (repoRoot: string, conversationId: string, sessionId: string, loopId: string, entry: unknown) => Promise<void>;
+export declare const appendLoopStep: (repoRoot: string, conversationId: string, sessionId: string, loopId: string, entry: AgenticLoopStep) => Promise<void>;
+export declare const readLoopEvents: (repoRoot: string, conversationId: string, sessionId: string, loopId: string) => Promise<unknown[]>;
+export declare const readLoopSteps: (repoRoot: string, conversationId: string, sessionId: string, loopId: string) => Promise<AgenticLoopStep[]>;
 export type TranscriptMessage = {
     role: "user" | "assistant" | "system";
     content: string;

@@ -1,4 +1,4 @@
-export type IdPrefix = "p" | "c" | "s";
+export type IdPrefix = "p" | "c" | "s" | "l" | "t";
 
 export type GitProvider = "github" | "gitlab";
 
@@ -48,7 +48,9 @@ export const nowIso = (): string => new Date().toISOString();
 const prefixLabel: Record<IdPrefix, string> = {
   p: "p",
   c: "c",
-  s: "s"
+  s: "s",
+  l: "l",
+  t: "t"
 };
 
 export const generateId = (prefix: IdPrefix): string => {
@@ -90,3 +92,38 @@ export const createSession = (
     ...input
   };
 };
+
+export type AgenticLoopStatus = "idle" | "running" | "stopped" | "completed" | "failed";
+
+export interface AgenticLoopConfig {
+  prompt: string;
+  model?: string;
+  maxIterations?: number;
+  stopRegex?: string;
+}
+
+export interface AgenticLoop {
+  id: string;
+  conversationId: string;
+  sessionId: string;
+  config: AgenticLoopConfig;
+  status: AgenticLoopStatus;
+  currentIteration: number;
+  stopReason?: string;
+  startedAt?: string;
+  endedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AgenticLoopStep {
+  id: string;
+  loopId: string;
+  iteration: number;
+  prompt: string;
+  response?: string;
+  status: "running" | "completed" | "failed";
+  startedAt: string;
+  endedAt?: string;
+  error?: string;
+}

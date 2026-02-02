@@ -98,6 +98,39 @@ type ApiTranscriptEntry = {
   content: string
 }
 
+type ApiLoopConfig = {
+  prompt: string
+  model?: string
+  maxIterations?: number
+  stopRegex?: string
+}
+
+type ApiLoop = {
+  id: string
+  conversationId: string
+  sessionId: string
+  config: ApiLoopConfig
+  status: "idle" | "running" | "stopped" | "completed" | "failed"
+  currentIteration: number
+  stopReason?: string
+  startedAt?: string
+  endedAt?: string
+  createdAt: string
+  updatedAt: string
+}
+
+type ApiLoopStep = {
+  id: string
+  loopId: string
+  iteration: number
+  prompt: string
+  response?: string
+  status: "running" | "completed" | "failed"
+  startedAt: string
+  endedAt?: string
+  error?: string
+}
+
 type CreateConversationResponse = {
   project: ApiProject
   conversation: ApiConversation
@@ -211,6 +244,23 @@ const App = () => {
   const streamAbortRef = React.useRef<AbortController | null>(null)
   const transcriptAbortRef = React.useRef<AbortController | null>(null)
   const autoScrollRef = React.useRef(true)
+  const [loopForm, setLoopForm] = React.useState({
+    prompt: "",
+    model: "",
+    maxIterations: "10",
+    stopRegex: "\\bDONE\\b",
+  })
+  const [loops, setLoops] = React.useState<ApiLoop[]>([])
+  const [activeLoopId, setActiveLoopId] = React.useState<string | null>(null)
+  const [loopSteps, setLoopSteps] = React.useState<ApiLoopStep[]>([])
+  const [loopStatus, setLoopStatus] = React.useState<"idle" | "streaming" | "error">(
+    "idle"
+  )
+  const [loopError, setLoopError] = React.useState<string | null>(null)
+  const [loopStreamError, setLoopStreamError] = React.useState<string | null>(null)
+  const [isStartingLoop, setIsStartingLoop] = React.useState(false)
+  const [isStoppingLoop, setIsStoppingLoop] = React.useState(false)
+  const loopStreamAbortRef = React.useRef<AbortController | null>(null)
   const [openPullRequests, setOpenPullRequests] = React.useState<OpenPullRequest[]>([])
   const [isLoadingPullRequests, setIsLoadingPullRequests] = React.useState(false)
   const [pullRequestsError, setPullRequestsError] = React.useState<string | null>(null)
@@ -407,6 +457,12 @@ const App = () => {
       selectedWorkspace?.chats.find((chat) => chat.id === selectedChatId) ?? null,
     [selectedWorkspace, selectedChatId]
   )
+  const loopWorkspaceId = selectedWorkspace?.id ?? null
+  const loopSession = React.useMemo(
+    () => selectedChat ?? selectedWorkspace?.chats[0] ?? null,
+    [selectedChat, selectedWorkspace]
+  )
+  const loopSessionId = loopSession?.id ?? null
 
   const recentSessions = React.useMemo(() => {
     const sessions: RecentSession[] = []
@@ -521,6 +577,45 @@ const App = () => {
   const createLocalMessageId = React.useCallback(() => {
     return `m_${Math.random().toString(36).slice(2, 10)}`
   }, [])
+  const createLocalLoopStepId = React.useCallback(() => {
+    return `step_${Math.random().toString(36).slice(2, 10)}`
+  }, [])
+
+  const pickActiveLoopId = React.useCallback((items: ApiLoop[]) => {
+    if (!items.length) {
+      return null
+    }
+    const running = items.find((loop) => loop.status === "running" || loop.status === "idle")
+    return running?.id ?? items[0]?.id ?? null
+  }, [])
+
+  const loadLoops = React.useCallback(
+    async (conversationId: string, sessionId: string) => {
+      setLoopError(null)
+      try {
+        const response = await fetch(
+          `/api/conversations/${conversationId}/sessions/${sessionId}/loops`
+        )
+        if (!response.ok) {
+          throw new Error("Failed to load loops.")
+        }
+        const payload = (await response.json()) as ApiLoop[]
+        const sorted = [...payload].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+        setLoops(sorted)
+        setActiveLoopId((current) => {
+          if (current && sorted.some((loop) => loop.id === current)) {
+            return current
+          }
+          return pickActiveLoopId(sorted)
+        })
+      } catch (err) {
+        setLoopError(err instanceof Error ? err.message : "Failed to load loops.")
+        setLoops([])
+        setActiveLoopId(null)
+      }
+    },
+    [pickActiveLoopId]
+  )
 
   const scrollToBottom = React.useCallback(() => {
     const container = scrollContainerRef.current
@@ -552,8 +647,8 @@ const App = () => {
     setIsAwaitingFirstToken(false)
     setShowScrollButton(false)
     autoScrollRef.current = true
-    const conversationId = selectedWorkspace?.id
-    const sessionId = selectedChat?.id
+    const conversationId = loopWorkspaceId
+    const sessionId = loopSessionId
     if (!conversationId || !sessionId) {
       setIsTranscriptLoading(false)
       return
@@ -590,6 +685,260 @@ const App = () => {
         }
       })
   }, [selectedWorkspace?.id, selectedChat?.id, createLocalMessageId])
+
+  React.useEffect(() => {
+    loopStreamAbortRef.current?.abort()
+    setLoops([])
+    setActiveLoopId(null)
+    setLoopSteps([])
+    setLoopStatus("idle")
+    setLoopStreamError(null)
+    const conversationId = selectedWorkspace?.id
+    const sessionId = selectedChat?.id
+    if (!conversationId || !sessionId) {
+      return
+    }
+    void loadLoops(conversationId, sessionId)
+  }, [loopWorkspaceId, loopSessionId, loadLoops])
+
+  React.useEffect(() => {
+    const conversationId = loopWorkspaceId
+    const sessionId = loopSessionId
+    if (!conversationId || !sessionId || !activeLoopId) {
+      setLoopSteps([])
+      return
+    }
+    let isActive = true
+    setLoopStreamError(null)
+    fetch(`/api/conversations/${conversationId}/sessions/${sessionId}/loops/${activeLoopId}/steps`)
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error("Failed to load loop steps.")
+        }
+        const payload = (await response.json()) as ApiLoopStep[]
+        if (isActive) {
+          setLoopSteps(payload)
+        }
+      })
+      .catch((err) => {
+        if (isActive) {
+          setLoopStreamError(err instanceof Error ? err.message : "Failed to load loop steps.")
+          setLoopSteps([])
+        }
+      })
+    return () => {
+      isActive = false
+    }
+  }, [loopWorkspaceId, loopSessionId, activeLoopId])
+
+  React.useEffect(() => {
+    const conversationId = loopWorkspaceId
+    const sessionId = loopSessionId
+    if (!conversationId || !sessionId || !activeLoopId) {
+      return
+    }
+    loopStreamAbortRef.current?.abort()
+    setLoopStatus("streaming")
+    setLoopStreamError(null)
+    const controller = new AbortController()
+    loopStreamAbortRef.current = controller
+    const handleLoopEvent = (payload: any) => {
+      if (!payload || typeof payload.type !== "string") {
+        return
+      }
+      const loopId = payload.loopId as string | undefined
+      if (loopId && loopId !== activeLoopId) {
+        return
+      }
+      if (payload.type === "loop_start") {
+        setLoops((prev) =>
+          prev.map((loop) =>
+            loop.id === activeLoopId
+              ? {
+                  ...loop,
+                  status: "running",
+                  startedAt: payload.ts ?? loop.startedAt,
+                  updatedAt: payload.ts ?? loop.updatedAt,
+                }
+              : loop
+          )
+        )
+        return
+      }
+      if (payload.type === "step_start") {
+        setLoopSteps((prev) => {
+          const existing = prev.find((step) => step.iteration === payload.iteration)
+          if (existing) {
+            return prev.map((step) =>
+              step.iteration === payload.iteration
+                ? { ...step, status: "running", startedAt: payload.ts ?? step.startedAt }
+                : step
+            )
+          }
+          const step: ApiLoopStep = {
+            id: createLocalLoopStepId(),
+            loopId: activeLoopId,
+            iteration: payload.iteration ?? prev.length + 1,
+            prompt: "",
+            response: "",
+            status: "running",
+            startedAt: payload.ts ?? new Date().toISOString(),
+          }
+          return [...prev, step]
+        })
+        setLoops((prev) =>
+          prev.map((loop) =>
+            loop.id === activeLoopId
+              ? {
+                  ...loop,
+                  currentIteration: payload.iteration ?? loop.currentIteration,
+                  updatedAt: payload.ts ?? loop.updatedAt,
+                }
+              : loop
+          )
+        )
+        return
+      }
+      if (payload.type === "assistant_delta") {
+        setLoopSteps((prev) => {
+          const iteration = payload.iteration ?? prev.length
+          const index = prev.findIndex((step) => step.iteration === iteration)
+          if (index === -1) {
+            const step: ApiLoopStep = {
+              id: createLocalLoopStepId(),
+              loopId: activeLoopId,
+              iteration,
+              prompt: "",
+              response: payload.delta ?? "",
+              status: "running",
+              startedAt: payload.ts ?? new Date().toISOString(),
+            }
+            return [...prev, step]
+          }
+          const next = [...prev]
+          const current = next[index]
+          next[index] = {
+            ...current,
+            response: `${current.response ?? ""}${payload.delta ?? ""}`,
+          }
+          return next
+        })
+        return
+      }
+      if (payload.type === "step_end") {
+        setLoopSteps((prev) =>
+          prev.map((step) =>
+            step.iteration === payload.iteration
+              ? {
+                  ...step,
+                  status: "completed",
+                  endedAt: payload.ts ?? step.endedAt,
+                }
+              : step
+          )
+        )
+        return
+      }
+      if (payload.type === "loop_stop") {
+        const status = payload.reason === "manual" ? "stopped" : "completed"
+        setLoops((prev) =>
+          prev.map((loop) =>
+            loop.id === activeLoopId
+              ? {
+                  ...loop,
+                  status,
+                  stopReason: payload.reason ?? loop.stopReason,
+                  endedAt: payload.ts ?? loop.endedAt,
+                  updatedAt: payload.ts ?? loop.updatedAt,
+                }
+              : loop
+          )
+        )
+        setLoopStatus("idle")
+        return
+      }
+      if (payload.type === "loop_error") {
+        setLoops((prev) =>
+          prev.map((loop) =>
+            loop.id === activeLoopId
+              ? {
+                  ...loop,
+                  status: "failed",
+                  stopReason: payload.error ?? "error",
+                  endedAt: payload.ts ?? loop.endedAt,
+                  updatedAt: payload.ts ?? loop.updatedAt,
+                }
+              : loop
+          )
+        )
+        setLoopStatus("error")
+        setLoopStreamError(payload.error ?? "Loop failed.")
+      }
+    }
+
+    const run = async () => {
+      try {
+        const response = await fetch(
+          `/api/conversations/${conversationId}/sessions/${sessionId}/loops/${activeLoopId}/stream`,
+          { signal: controller.signal }
+        )
+        if (!response.ok || !response.body) {
+          throw new Error("Failed to start loop stream.")
+        }
+        const reader = response.body.getReader()
+        const decoder = new TextDecoder()
+        let buffer = ""
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) {
+            break
+          }
+          buffer += decoder.decode(value, { stream: true })
+          const parts = buffer.split("\n\n")
+          buffer = parts.pop() ?? ""
+          for (const part of parts) {
+            const lines = part.split("\n").filter(Boolean)
+            if (!lines.length) {
+              continue
+            }
+            let eventName = "message"
+            const dataLines: string[] = []
+            for (const line of lines) {
+              if (line.startsWith("event:")) {
+                eventName = line.replace(/^event:\s*/, "")
+              } else if (line.startsWith("data:")) {
+                dataLines.push(line.replace(/^data:\s*/, ""))
+              }
+            }
+            if (eventName !== "loop_event") {
+              continue
+            }
+            const rawData = dataLines.join("\n")
+            if (!rawData) {
+              continue
+            }
+            try {
+              const data = JSON.parse(rawData)
+              handleLoopEvent(data)
+            } catch {
+              // ignore parsing errors
+            }
+          }
+        }
+        setLoopStatus("idle")
+      } catch (err) {
+        if (controller.signal.aborted) {
+          return
+        }
+        setLoopStatus("error")
+        setLoopStreamError(err instanceof Error ? err.message : "Loop stream failed.")
+      }
+    }
+    void run()
+    return () => {
+      controller.abort()
+    }
+  }, [loopWorkspaceId, loopSessionId, activeLoopId, createLocalLoopStepId])
 
   React.useEffect(() => {
     if (autoScrollRef.current) {
@@ -1357,6 +1706,99 @@ const App = () => {
     }
   }
 
+  const handleLoopFormChange =
+    (field: keyof typeof loopForm) =>
+    (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+      const value = event.target.value
+      setLoopForm((prev) => ({ ...prev, [field]: value }))
+    }
+
+  const handleStartLoop = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!loopWorkspaceId || !loopSessionId) {
+      return
+    }
+    const prompt = loopForm.prompt.trim()
+    if (!prompt) {
+      setLoopError("Loop prompt is required.")
+      return
+    }
+    setIsStartingLoop(true)
+    setLoopError(null)
+    try {
+      const parsedIterations = Number(loopForm.maxIterations)
+      const maxIterations = Number.isFinite(parsedIterations) ? parsedIterations : undefined
+      const response = await fetch(
+        `/api/conversations/${loopWorkspaceId}/sessions/${loopSessionId}/loops`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            prompt,
+            model: loopForm.model.trim() || undefined,
+            maxIterations,
+            stopRegex: loopForm.stopRegex.trim() || undefined,
+          }),
+        }
+      )
+      if (!response.ok) {
+        let message = "Failed to start loop."
+        try {
+          const payload = (await response.json()) as { error?: string }
+          if (payload.error) {
+            message = payload.error
+          }
+        } catch {
+          // Ignore parsing errors
+        }
+        throw new Error(message)
+      }
+      const loop = (await response.json()) as ApiLoop
+      setLoops((prev) => [loop, ...prev])
+      setActiveLoopId(loop.id)
+      setLoopSteps([])
+    } catch (err) {
+      setLoopError(err instanceof Error ? err.message : "Failed to start loop.")
+    } finally {
+      setIsStartingLoop(false)
+    }
+  }
+
+  const handleStopLoop = async () => {
+    if (!loopWorkspaceId || !loopSessionId || !activeLoopId) {
+      return
+    }
+    if (isStoppingLoop) {
+      return
+    }
+    setIsStoppingLoop(true)
+    setLoopError(null)
+    try {
+      const response = await fetch(
+        `/api/conversations/${loopWorkspaceId}/sessions/${loopSessionId}/loops/${activeLoopId}/stop`,
+        { method: "POST" }
+      )
+      if (!response.ok) {
+        let message = "Failed to stop loop."
+        try {
+          const payload = (await response.json()) as { error?: string }
+          if (payload.error) {
+            message = payload.error
+          }
+        } catch {
+          // Ignore parsing errors
+        }
+        throw new Error(message)
+      }
+      const loop = (await response.json()) as ApiLoop
+      setLoops((prev) => prev.map((item) => (item.id === loop.id ? loop : item)))
+    } catch (err) {
+      setLoopError(err instanceof Error ? err.message : "Failed to stop loop.")
+    } finally {
+      setIsStoppingLoop(false)
+    }
+  }
+
   const formatDate = (value?: string) => {
     if (!value) {
       return "Unknown"
@@ -1392,9 +1834,26 @@ const App = () => {
   const isWorkspaceView = Boolean(!isSettingsView && selectedWorkspace && !selectedChat)
   const isChatView = Boolean(!isSettingsView && selectedChat)
   const isChatStreaming = chatStatus === "streaming"
+  const activeLoop = React.useMemo(
+    () => loops.find((loop) => loop.id === activeLoopId) ?? null,
+    [loops, activeLoopId]
+  )
+  const isLoopRunning = activeLoop?.status === "running"
+  const loopStatusLabel = activeLoop?.status
+    ? activeLoop.status.replace(/_/g, " ")
+    : "idle"
+  const sortedLoopSteps = React.useMemo(
+    () => [...loopSteps].sort((a, b) => a.iteration - b.iteration),
+    [loopSteps]
+  )
   const projectIconValue = selectedProject?.icon?.trim() ?? ""
   const promptDisabled =
     isChatStreaming || !selectedWorkspace || !selectedChat || isTranscriptLoading
+  const loopFormDisabled = !loopWorkspaceId || !loopSessionId || isStartingLoop
+  const startLoopDisabled =
+    loopFormDisabled || !loopForm.prompt.trim() || isLoopRunning
+  const stopLoopDisabled =
+    !activeLoop || (activeLoop.status !== "running" && activeLoop.status !== "idle") || isStoppingLoop
   const nextThemeLabel = theme === "dark" ? "Light" : "Dark"
 
   const viewLabel = isSettingsView
@@ -2037,85 +2496,224 @@ const App = () => {
               />
             ) : null
           ) : isWorkspaceView ? (
-            <div className="grid gap-4 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
-              <Card className="border-dashed">
-                <form onSubmit={handleCreateSession}>
+            <div className="grid gap-4">
+              <div className="grid gap-4 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+                <Card className="border-dashed">
+                  <form onSubmit={handleCreateSession}>
+                    <CardHeader>
+                      <CardTitle>Create a new session</CardTitle>
+                      <CardDescription>
+                        Start a focused chat within this workspace. OpenCode will name it.
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent className="grid gap-3">
+                      {createSessionError ? (
+                        <div className="rounded-md border border-destructive/50 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+                          {createSessionError}
+                        </div>
+                      ) : null}
+                    </CardContent>
+                    <CardFooter>
+                      <Button type="submit" disabled={isCreatingSession}>
+                        {isCreatingSession ? "Creating session..." : "Create session"}
+                      </Button>
+                    </CardFooter>
+                  </form>
+                </Card>
+                <Card>
                   <CardHeader>
-                    <CardTitle>Create a new session</CardTitle>
-                    <CardDescription>
-                      Start a focused chat within this workspace. OpenCode will name it.
-                    </CardDescription>
+                    <CardTitle>Chat sessions</CardTitle>
+                    <CardDescription>Jump back into any active thread.</CardDescription>
                   </CardHeader>
                   <CardContent className="grid gap-3">
-                    {createSessionError ? (
-                      <div className="rounded-md border border-destructive/50 bg-destructive/5 px-3 py-2 text-sm text-destructive">
-                        {createSessionError}
+                    {selectedWorkspace?.chats.length ? (
+                      selectedWorkspace.chats.map((chat) => {
+                        const isDeleting = deletingSessionId === chat.id
+                        return (
+                          <div
+                            key={chat.id}
+                            className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-muted/30 px-4 py-3 text-sm"
+                          >
+                            <div className="min-w-0 flex-1">
+                              <div className="truncate font-medium text-foreground">
+                                {chat.name}
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={() => {
+                                  if (!selectedProject || !selectedWorkspace) {
+                                    return
+                                  }
+                                  handleSelectChat(selectedProject.id, selectedWorkspace.id, chat.id)
+                                }}
+                              >
+                                Open
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleDeleteSession(chat.id)}
+                                disabled={isDeleting}
+                              >
+                                {isDeleting ? "Deleting..." : "Delete"}
+                              </Button>
+                            </div>
+                          </div>
+                        )
+                      })
+                    ) : (
+                      <div className="rounded-lg border border-dashed px-4 py-3 text-sm text-muted-foreground">
+                        No sessions yet. Create your first one.
+                      </div>
+                    )}
+                    {deleteSessionError ? (
+                      <div className="rounded-md border border-destructive/50 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+                        {deleteSessionError}
                       </div>
                     ) : null}
                   </CardContent>
-                  <CardFooter>
-                    <Button type="submit" disabled={isCreatingSession}>
-                      {isCreatingSession ? "Creating session..." : "Create session"}
-                    </Button>
-                  </CardFooter>
-                </form>
-              </Card>
+                </Card>
+              </div>
               <Card>
-                <CardHeader>
-                  <CardTitle>Chat sessions</CardTitle>
-                  <CardDescription>Jump back into any active thread.</CardDescription>
+                <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <CardTitle>Agentic loop</CardTitle>
+                    <CardDescription>
+                      Run a structured loop with stop conditions and live updates.
+                    </CardDescription>
+                  </div>
+                  <Badge variant={isLoopRunning ? "default" : "secondary"}>
+                    {loopStatusLabel}
+                  </Badge>
                 </CardHeader>
-                <CardContent className="grid gap-3">
-                  {selectedWorkspace?.chats.length ? (
-                    selectedWorkspace.chats.map((chat) => {
-                      const isDeleting = deletingSessionId === chat.id
-                      return (
-                        <div
-                          key={chat.id}
-                          className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-muted/30 px-4 py-3 text-sm"
-                        >
-                          <div className="min-w-0 flex-1">
-                            <div className="truncate font-medium text-foreground">
-                              {chat.name}
-                            </div>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="sm"
-                              onClick={() => {
-                                if (!selectedProject || !selectedWorkspace) {
-                                  return
-                                }
-                                handleSelectChat(selectedProject.id, selectedWorkspace.id, chat.id)
-                              }}
-                            >
-                              Open
-                            </Button>
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => handleDeleteSession(chat.id)}
-                              disabled={isDeleting}
-                            >
-                              {isDeleting ? "Deleting..." : "Delete"}
-                            </Button>
-                          </div>
-                        </div>
-                      )
-                    })
-                  ) : (
-                    <div className="rounded-lg border border-dashed px-4 py-3 text-sm text-muted-foreground">
-                      No sessions yet. Create your first one.
+                <CardContent className="grid gap-4">
+                  <form onSubmit={handleStartLoop} className="grid gap-3">
+                    <div className="grid gap-2">
+                      <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                        Loop prompt
+                      </label>
+                      <PromptInputTextarea
+                        value={loopForm.prompt}
+                        onChange={handleLoopFormChange("prompt")}
+                        placeholder="Define the loop task and use {{iteration}} if needed..."
+                        disabled={loopFormDisabled}
+                        className="min-h-[96px]"
+                      />
                     </div>
-                  )}
-                  {deleteSessionError ? (
+                    <div className="grid gap-3 md:grid-cols-[160px_minmax(0,1fr)_minmax(0,1fr)]">
+                      <div className="grid gap-2">
+                        <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                          Max iterations
+                        </label>
+                        <Input
+                          type="number"
+                          min={1}
+                          value={loopForm.maxIterations}
+                          onChange={handleLoopFormChange("maxIterations")}
+                          disabled={loopFormDisabled}
+                        />
+                      </div>
+                      <div className="grid gap-2">
+                        <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                          Stop regex
+                        </label>
+                        <Input
+                          value={loopForm.stopRegex}
+                          onChange={handleLoopFormChange("stopRegex")}
+                          placeholder="\\bDONE\\b"
+                          disabled={loopFormDisabled}
+                        />
+                      </div>
+                      <div className="grid gap-2">
+                        <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                          Model override
+                        </label>
+                        <Input
+                          value={loopForm.model}
+                          onChange={handleLoopFormChange("model")}
+                          placeholder="openai/gpt-5.2-codex"
+                          disabled={loopFormDisabled}
+                        />
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-3">
+                      <Button type="submit" disabled={startLoopDisabled}>
+                        {isStartingLoop ? "Starting loop..." : "Start loop"}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={handleStopLoop}
+                        disabled={stopLoopDisabled}
+                      >
+                        {isStoppingLoop ? "Stopping..." : "Stop loop"}
+                      </Button>
+                      <div className="text-xs text-muted-foreground">
+                        Session: {loopSession?.name ?? "None selected"}
+                      </div>
+                      {activeLoop ? (
+                        <div className="text-xs text-muted-foreground">
+                          Iteration {activeLoop.currentIteration || 0}
+                          {activeLoop.stopReason ? ` · Stop: ${activeLoop.stopReason}` : ""}
+                        </div>
+                      ) : null}
+                    </div>
+                  </form>
+                  {loopError ? (
                     <div className="rounded-md border border-destructive/50 bg-destructive/5 px-3 py-2 text-xs text-destructive">
-                      {deleteSessionError}
+                      {loopError}
                     </div>
                   ) : null}
+                  {loopStreamError ? (
+                    <div className="rounded-md border border-destructive/50 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+                      {loopStreamError}
+                    </div>
+                  ) : null}
+                  <div className="rounded-lg border bg-muted/30 p-3">
+                    <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      Loop steps
+                    </div>
+                    <div className="mt-1 text-xs text-muted-foreground">
+                      Stream {loopStatus === "streaming" ? "live" : "idle"}
+                    </div>
+                    <div className="mt-3 grid gap-3 max-h-64 overflow-auto">
+                      {sortedLoopSteps.length ? (
+                        sortedLoopSteps.map((step) => (
+                          <div
+                            key={step.id}
+                            className="rounded-lg border bg-background px-3 py-2 text-xs"
+                          >
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <div className="font-semibold text-foreground">
+                                Iteration {step.iteration}
+                              </div>
+                              <Badge variant={step.status === "completed" ? "secondary" : "outline"}>
+                                {step.status}
+                              </Badge>
+                            </div>
+                            {step.response ? (
+                              <div className="mt-2 whitespace-pre-wrap text-muted-foreground">
+                                {step.response}
+                              </div>
+                            ) : (
+                              <div className="mt-2 text-muted-foreground">
+                                Awaiting response...
+                              </div>
+                            )}
+                          </div>
+                        ))
+                      ) : (
+                        <div className="rounded-md border border-dashed px-3 py-2 text-xs text-muted-foreground">
+                          No loop steps yet.
+                        </div>
+                      )}
+                    </div>
+                  </div>
                 </CardContent>
               </Card>
             </div>

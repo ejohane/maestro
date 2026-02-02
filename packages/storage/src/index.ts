@@ -2,6 +2,8 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import {
+  AgenticLoop,
+  AgenticLoopStep,
   Conversation,
   CurrentContext,
   Project,
@@ -83,7 +85,7 @@ export const listProjects = async (
     if (options?.includeAll) {
       return projects;
     }
-    return projects.filter((project) => project.repoPath === repoRoot);
+    return projects.filter((project: Project) => project.repoPath === repoRoot);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
       return [];
@@ -299,6 +301,90 @@ export const appendEventEntry = async (
   await appendNdjson(filePath, entry);
 };
 
+export const writeLoop = async (
+  repoRoot: string,
+  conversationId: string,
+  sessionId: string,
+  loop: AgenticLoop
+): Promise<void> => {
+  const loopDir = getLoopDir(repoRoot, conversationId, sessionId, loop.id);
+  await writeJson(path.join(loopDir, "loop.json"), loop);
+  await ensureLoopFiles(repoRoot, conversationId, sessionId, loop.id);
+};
+
+export const readLoop = async (
+  repoRoot: string,
+  conversationId: string,
+  sessionId: string,
+  loopId: string
+): Promise<AgenticLoop> => {
+  const loopDir = getLoopDir(repoRoot, conversationId, sessionId, loopId);
+  return readJson<AgenticLoop>(path.join(loopDir, "loop.json"));
+};
+
+export const listLoops = async (
+  repoRoot: string,
+  conversationId: string,
+  sessionId: string
+): Promise<AgenticLoop[]> => {
+  const loopsDir = getLoopsDir(repoRoot, conversationId, sessionId);
+  try {
+    const entries = await fs.readdir(loopsDir);
+    const loops = await Promise.all(
+      entries.map((entry) => readJson<AgenticLoop>(path.join(loopsDir, entry, "loop.json")))
+    );
+    return loops.sort((a: AgenticLoop, b: AgenticLoop) => b.updatedAt.localeCompare(a.updatedAt));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return [];
+    }
+    throw error;
+  }
+};
+
+export const appendLoopEvent = async (
+  repoRoot: string,
+  conversationId: string,
+  sessionId: string,
+  loopId: string,
+  entry: unknown
+): Promise<void> => {
+  const filePath = getLoopEventsPath(repoRoot, conversationId, sessionId, loopId);
+  await appendNdjson(filePath, entry);
+};
+
+export const appendLoopStep = async (
+  repoRoot: string,
+  conversationId: string,
+  sessionId: string,
+  loopId: string,
+  entry: AgenticLoopStep
+): Promise<void> => {
+  const filePath = getLoopStepsPath(repoRoot, conversationId, sessionId, loopId);
+  await appendNdjson(filePath, entry);
+};
+
+export const readLoopEvents = async (
+  repoRoot: string,
+  conversationId: string,
+  sessionId: string,
+  loopId: string
+): Promise<unknown[]> => {
+  const filePath = getLoopEventsPath(repoRoot, conversationId, sessionId, loopId);
+  return readNdjsonFile(filePath);
+};
+
+export const readLoopSteps = async (
+  repoRoot: string,
+  conversationId: string,
+  sessionId: string,
+  loopId: string
+): Promise<AgenticLoopStep[]> => {
+  const filePath = getLoopStepsPath(repoRoot, conversationId, sessionId, loopId);
+  const entries = await readNdjsonFile(filePath);
+  return entries as unknown as AgenticLoopStep[];
+};
+
 export type TranscriptMessage = { role: "user" | "assistant" | "system"; content: string };
 
 export const readTranscriptHistory = async (
@@ -360,6 +446,38 @@ const getEventsPath = (repoRoot: string, conversationId: string, sessionId: stri
   return path.join(conversationsDir, conversationId, "sessions", sessionId, "events.ndjson");
 };
 
+const getLoopsDir = (repoRoot: string, conversationId: string, sessionId: string): string => {
+  const { conversationsDir } = getMaestroPaths(repoRoot);
+  return path.join(conversationsDir, conversationId, "sessions", sessionId, "loops");
+};
+
+const getLoopDir = (
+  repoRoot: string,
+  conversationId: string,
+  sessionId: string,
+  loopId: string
+): string => {
+  return path.join(getLoopsDir(repoRoot, conversationId, sessionId), loopId);
+};
+
+const getLoopEventsPath = (
+  repoRoot: string,
+  conversationId: string,
+  sessionId: string,
+  loopId: string
+): string => {
+  return path.join(getLoopDir(repoRoot, conversationId, sessionId, loopId), "events.ndjson");
+};
+
+const getLoopStepsPath = (
+  repoRoot: string,
+  conversationId: string,
+  sessionId: string,
+  loopId: string
+): string => {
+  return path.join(getLoopDir(repoRoot, conversationId, sessionId, loopId), "steps.ndjson");
+};
+
 const ensureTranscript = async (
   repoRoot: string,
   conversationId: string,
@@ -385,6 +503,28 @@ const ensureEvents = async (
     await fs.access(filePath);
   } catch {
     await fs.writeFile(filePath, "", "utf-8");
+  }
+};
+
+const ensureLoopFiles = async (
+  repoRoot: string,
+  conversationId: string,
+  sessionId: string,
+  loopId: string
+): Promise<void> => {
+  const loopDir = getLoopDir(repoRoot, conversationId, sessionId, loopId);
+  await fs.mkdir(loopDir, { recursive: true });
+  const eventsPath = getLoopEventsPath(repoRoot, conversationId, sessionId, loopId);
+  const stepsPath = getLoopStepsPath(repoRoot, conversationId, sessionId, loopId);
+  try {
+    await fs.access(eventsPath);
+  } catch {
+    await fs.writeFile(eventsPath, "", "utf-8");
+  }
+  try {
+    await fs.access(stepsPath);
+  } catch {
+    await fs.writeFile(stepsPath, "", "utf-8");
   }
 };
 

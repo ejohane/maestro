@@ -5,6 +5,9 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import {
+  AgenticLoop,
+  AgenticLoopConfig,
+  AgenticLoopStep,
   Conversation,
   GitProvider,
   Project,
@@ -14,14 +17,20 @@ import {
   nowIso
 } from "@maestro/core";
 import {
+  appendLoopEvent,
+  appendLoopStep,
   deleteConversation,
   deleteSession,
   getMaestroPaths,
   listConversations,
+  listLoops,
   listProjects,
   listSessions,
   appendEventEntry,
   appendTranscriptEntry,
+  readLoop,
+  readLoopEvents,
+  readLoopSteps,
   readConversation,
   readCurrentContext,
   readSettings,
@@ -32,6 +41,7 @@ import {
   updateConversationTimestamp,
   updateSessionTimestamp,
   writeConversation,
+  writeLoop,
   writeProject,
   writeSettings,
   writeSession
@@ -570,6 +580,256 @@ const readEventsFile = async (
 
 const createAssistantMessageId = (): string => {
   return `m_${Math.random().toString(36).slice(2, 10)}`;
+};
+
+const loopStreams = new Map<string, Set<ServerResponse>>();
+
+const emitLoopStreamEvent = (loopId: string, event: string, payload: unknown): void => {
+  const streams = loopStreams.get(loopId);
+  if (!streams || streams.size === 0) {
+    return;
+  }
+  for (const res of streams) {
+    sendSseEvent(res, event, payload);
+  }
+};
+
+const appendAndStreamLoopEvent = async (
+  repoRoot: string,
+  conversationId: string,
+  sessionId: string,
+  loopId: string,
+  entry: unknown
+): Promise<void> => {
+  await appendLoopEvent(repoRoot, conversationId, sessionId, loopId, entry);
+  emitLoopStreamEvent(loopId, "loop_event", entry);
+};
+
+const interpolatePrompt = (prompt: string, iteration: number): string => {
+  return prompt.replace(/\{\{\s*iteration\s*\}\}/gi, String(iteration));
+};
+
+const resolveLoopStopRegex = (config: AgenticLoopConfig): RegExp => {
+  const source = config.stopRegex?.trim() || "\\bDONE\\b";
+  return new RegExp(source, "i");
+};
+
+const extractAssistantChunk = (event: { type: string; data: any }): string => {
+  if (event.type !== "assistant_message") {
+    return "";
+  }
+  if (typeof event.data === "string") {
+    return event.data;
+  }
+  if (typeof event.data?.content === "string") {
+    return event.data.content;
+  }
+  if (typeof event.data?.message === "string") {
+    return event.data.message;
+  }
+  if (typeof event.data?.delta === "string") {
+    return event.data.delta;
+  }
+  return "";
+};
+
+const runAgenticLoop = async (
+  repoRoot: string,
+  conversation: Conversation,
+  session: Session,
+  loopId: string
+): Promise<void> => {
+  let loop = await readLoop(repoRoot, conversation.id, session.id, loopId);
+  const startTs = nowIso();
+  loop.status = "running";
+  loop.startedAt = startTs;
+  loop.updatedAt = startTs;
+  await writeLoop(repoRoot, conversation.id, session.id, loop);
+  await appendAndStreamLoopEvent(repoRoot, conversation.id, session.id, loop.id, {
+    ts: startTs,
+    type: "loop_start",
+    loopId: loop.id,
+    conversationId: conversation.id,
+    sessionId: session.id
+  });
+
+  const client = new DirectSDKClient();
+  const opencodeSessionId = await client.ensureSession({
+    sessionId: session.opencodeSessionId,
+    title: session.title ?? conversation.title,
+    workspacePath: conversation.workspacePath
+  } as any);
+  if (opencodeSessionId !== session.opencodeSessionId) {
+    session.opencodeSessionId = opencodeSessionId;
+    await writeSession(repoRoot, conversation.id, session);
+  }
+  let stopRegex: RegExp;
+  try {
+    stopRegex = resolveLoopStopRegex(loop.config);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const ts = nowIso();
+    loop.status = "failed";
+    loop.stopReason = `invalid_regex:${message}`;
+    loop.endedAt = ts;
+    loop.updatedAt = ts;
+    await writeLoop(repoRoot, conversation.id, session.id, loop);
+    await appendAndStreamLoopEvent(repoRoot, conversation.id, session.id, loop.id, {
+      ts,
+      type: "loop_error",
+      loopId: loop.id,
+      error: message
+    });
+    return;
+  }
+
+  const maxIterations = loop.config.maxIterations ?? 10;
+  try {
+    for (let iteration = 1; iteration <= maxIterations; iteration += 1) {
+      const refreshed = await readLoop(repoRoot, conversation.id, session.id, loop.id);
+      if (refreshed.status === "stopped") {
+        loop = refreshed;
+        const ts = nowIso();
+        loop.stopReason = loop.stopReason ?? "manual";
+        loop.endedAt = ts;
+        loop.updatedAt = ts;
+        await writeLoop(repoRoot, conversation.id, session.id, loop);
+        await appendAndStreamLoopEvent(repoRoot, conversation.id, session.id, loop.id, {
+          ts,
+          type: "loop_stop",
+          loopId: loop.id,
+          reason: loop.stopReason
+        });
+        return;
+      }
+
+      const stepStartTs = nowIso();
+      loop.currentIteration = iteration;
+      loop.updatedAt = stepStartTs;
+      await writeLoop(repoRoot, conversation.id, session.id, loop);
+      await appendAndStreamLoopEvent(repoRoot, conversation.id, session.id, loop.id, {
+        ts: stepStartTs,
+        type: "step_start",
+        loopId: loop.id,
+        iteration
+      });
+
+      const prompt = interpolatePrompt(loop.config.prompt, iteration);
+      await appendTranscriptEntry(repoRoot, conversation.id, session.id, {
+        ts: stepStartTs,
+        role: "user",
+        content: prompt,
+        sessionId: session.id,
+        conversationId: conversation.id
+      });
+
+      const history = await readTranscriptHistory(repoRoot, conversation.id, session.id);
+      let assistantContent = "";
+      for await (const event of client.sendMessage({
+        workspacePath: conversation.workspacePath,
+        history,
+        message: prompt,
+        model: loop.config.model ?? session.model,
+        sessionId: session.opencodeSessionId,
+        sessionTitle: session.title ?? conversation.title
+      })) {
+        await appendEventEntry(repoRoot, conversation.id, session.id, {
+          ts: nowIso(),
+          type: event.type,
+          data: event.data,
+          sessionId: session.id,
+          conversationId: conversation.id
+        });
+        const chunk = extractAssistantChunk(event);
+        if (chunk) {
+          assistantContent += chunk;
+          await appendAndStreamLoopEvent(repoRoot, conversation.id, session.id, loop.id, {
+            ts: nowIso(),
+            type: "assistant_delta",
+            loopId: loop.id,
+            iteration,
+            delta: chunk
+          });
+        }
+      }
+
+      if (assistantContent.length > 0) {
+        await appendTranscriptEntry(repoRoot, conversation.id, session.id, {
+          ts: nowIso(),
+          role: "assistant",
+          content: assistantContent,
+          sessionId: session.id,
+          conversationId: conversation.id
+        });
+      }
+
+      const stepEndTs = nowIso();
+      const step: AgenticLoopStep = {
+        id: generateId("t"),
+        loopId: loop.id,
+        iteration,
+        prompt,
+        response: assistantContent,
+        status: "completed",
+        startedAt: stepStartTs,
+        endedAt: stepEndTs
+      };
+      await appendLoopStep(repoRoot, conversation.id, session.id, loop.id, step);
+      await appendAndStreamLoopEvent(repoRoot, conversation.id, session.id, loop.id, {
+        ts: stepEndTs,
+        type: "step_end",
+        loopId: loop.id,
+        iteration,
+        status: "completed"
+      });
+
+      await updateSessionTimestamp(repoRoot, conversation.id, session);
+      await updateConversationTimestamp(repoRoot, conversation);
+
+      if (assistantContent && stopRegex.test(assistantContent)) {
+        const ts = nowIso();
+        loop.status = "completed";
+        loop.stopReason = "regex";
+        loop.endedAt = ts;
+        loop.updatedAt = ts;
+        await writeLoop(repoRoot, conversation.id, session.id, loop);
+        await appendAndStreamLoopEvent(repoRoot, conversation.id, session.id, loop.id, {
+          ts,
+          type: "loop_stop",
+          loopId: loop.id,
+          reason: "regex"
+        });
+        return;
+      }
+    }
+
+    const ts = nowIso();
+    loop.status = "completed";
+    loop.stopReason = "max_iterations";
+    loop.endedAt = ts;
+    loop.updatedAt = ts;
+    await writeLoop(repoRoot, conversation.id, session.id, loop);
+    await appendAndStreamLoopEvent(repoRoot, conversation.id, session.id, loop.id, {
+      ts,
+      type: "loop_stop",
+      loopId: loop.id,
+      reason: "max_iterations"
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const ts = nowIso();
+    loop.status = "failed";
+    loop.stopReason = "error";
+    loop.endedAt = ts;
+    loop.updatedAt = ts;
+    await writeLoop(repoRoot, conversation.id, session.id, loop);
+    await appendAndStreamLoopEvent(repoRoot, conversation.id, session.id, loop.id, {
+      ts,
+      type: "loop_error",
+      loopId: loop.id,
+      error: message
+    });
+  }
 };
 
 const handleApi = async (req: IncomingMessage, res: ServerResponse, repoRoot: string) => {
@@ -1240,6 +1500,87 @@ const handleApi = async (req: IncomingMessage, res: ServerResponse, repoRoot: st
   }
 
   if (
+    req.method === "GET" &&
+    segments.length === 6 &&
+    segments[1] === "conversations" &&
+    segments[3] === "sessions" &&
+    segments[5] === "loops"
+  ) {
+    const loops = await listLoops(requestRepoRoot, segments[2], segments[4]);
+    sendJson(res, 200, loops);
+    return;
+  }
+
+  if (
+    req.method === "GET" &&
+    segments.length === 7 &&
+    segments[1] === "conversations" &&
+    segments[3] === "sessions" &&
+    segments[5] === "loops"
+  ) {
+    const loop = await readLoop(requestRepoRoot, segments[2], segments[4], segments[6]);
+    sendJson(res, 200, loop);
+    return;
+  }
+
+  if (
+    req.method === "GET" &&
+    segments.length === 8 &&
+    segments[1] === "conversations" &&
+    segments[3] === "sessions" &&
+    segments[5] === "loops" &&
+    segments[7] === "events"
+  ) {
+    const events = await readLoopEvents(requestRepoRoot, segments[2], segments[4], segments[6]);
+    sendJson(res, 200, events);
+    return;
+  }
+
+  if (
+    req.method === "GET" &&
+    segments.length === 8 &&
+    segments[1] === "conversations" &&
+    segments[3] === "sessions" &&
+    segments[5] === "loops" &&
+    segments[7] === "steps"
+  ) {
+    const steps = await readLoopSteps(requestRepoRoot, segments[2], segments[4], segments[6]);
+    sendJson(res, 200, steps);
+    return;
+  }
+
+  if (
+    req.method === "GET" &&
+    segments.length === 8 &&
+    segments[1] === "conversations" &&
+    segments[3] === "sessions" &&
+    segments[5] === "loops" &&
+    segments[7] === "stream"
+  ) {
+    const loopId = segments[6];
+    res.writeHead(200, {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-store",
+      Connection: "keep-alive"
+    });
+    const set = loopStreams.get(loopId) ?? new Set<ServerResponse>();
+    set.add(res);
+    loopStreams.set(loopId, set);
+    sendSseEvent(res, "loop_ready", { loopId });
+    req.on("close", () => {
+      const streams = loopStreams.get(loopId);
+      if (!streams) {
+        return;
+      }
+      streams.delete(res);
+      if (streams.size === 0) {
+        loopStreams.delete(loopId);
+      }
+    });
+    return;
+  }
+
+  if (
     req.method === "POST" &&
     segments.length === 7 &&
     segments[1] === "conversations" &&
@@ -1392,6 +1733,125 @@ const handleApi = async (req: IncomingMessage, res: ServerResponse, repoRoot: st
         sendBadRequest(res, "Invalid JSON body.");
         return;
       }
+      sendError(res, error);
+      return;
+    }
+  }
+
+  if (
+    req.method === "POST" &&
+    segments.length === 6 &&
+    segments[1] === "conversations" &&
+    segments[3] === "sessions" &&
+    segments[5] === "loops"
+  ) {
+    try {
+      const body = await readJsonBody<{
+        prompt?: string;
+        model?: string;
+        maxIterations?: number;
+        stopRegex?: string;
+      }>(req);
+      const prompt = body.prompt?.trim();
+      if (!prompt) {
+        sendBadRequest(res, "Loop prompt is required.");
+        return;
+      }
+      let conversation: Conversation;
+      let session: Session;
+      try {
+        conversation = await readConversation(requestRepoRoot, segments[2]);
+        session = await readSession(requestRepoRoot, segments[2], segments[4]);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+          sendNotFound(res);
+          return;
+        }
+        throw error;
+      }
+      if (!session.model) {
+        session.model = getDefaultModel();
+        await writeSession(requestRepoRoot, conversation.id, session);
+      }
+      const config: AgenticLoopConfig = {
+        prompt,
+        model: body.model?.trim() || session.model,
+        maxIterations:
+          typeof body.maxIterations === "number" && Number.isFinite(body.maxIterations)
+            ? Math.max(1, Math.trunc(body.maxIterations))
+            : undefined,
+        stopRegex: body.stopRegex?.trim() || undefined
+      };
+      const ts = nowIso();
+      const loop: AgenticLoop = {
+        id: generateId("l"),
+        conversationId: conversation.id,
+        sessionId: session.id,
+        config,
+        status: "idle",
+        currentIteration: 0,
+        createdAt: ts,
+        updatedAt: ts
+      };
+      await writeLoop(requestRepoRoot, conversation.id, session.id, loop);
+      await appendAndStreamLoopEvent(requestRepoRoot, conversation.id, session.id, loop.id, {
+        ts,
+        type: "loop_created",
+        loopId: loop.id,
+        conversationId: conversation.id,
+        sessionId: session.id
+      });
+      void runAgenticLoop(requestRepoRoot, conversation, session, loop.id);
+      sendJson(res, 201, loop);
+      return;
+    } catch (error) {
+      if (error instanceof SyntaxError) {
+        sendBadRequest(res, "Invalid JSON body.");
+        return;
+      }
+      sendError(res, error);
+      return;
+    }
+  }
+
+  if (
+    req.method === "POST" &&
+    segments.length === 8 &&
+    segments[1] === "conversations" &&
+    segments[3] === "sessions" &&
+    segments[5] === "loops" &&
+    segments[7] === "stop"
+  ) {
+    try {
+      const loopId = segments[6];
+      let loop: AgenticLoop;
+      try {
+        loop = await readLoop(requestRepoRoot, segments[2], segments[4], loopId);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+          sendNotFound(res);
+          return;
+        }
+        throw error;
+      }
+      if (loop.status === "completed" || loop.status === "failed") {
+        sendJson(res, 200, loop);
+        return;
+      }
+      const ts = nowIso();
+      loop.status = "stopped";
+      loop.stopReason = "manual";
+      loop.updatedAt = ts;
+      await writeLoop(requestRepoRoot, segments[2], segments[4], loop);
+      await appendAndStreamLoopEvent(requestRepoRoot, segments[2], segments[4], loopId, {
+        ts,
+        type: "loop_stop",
+        loopId,
+        reason: "manual"
+      });
+      sendJson(res, 200, loop);
+      return;
+    } catch (error) {
       sendError(res, error);
       return;
     }
