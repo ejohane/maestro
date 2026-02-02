@@ -17,6 +17,7 @@ import {
   deleteConversation,
   deleteSession,
   getMaestroPaths,
+  ModelProvider,
   listConversations,
   listProjects,
   listSessions,
@@ -50,6 +51,11 @@ import {
   extractAssistantResponse,
   parseModel
 } from "@maestro/opencode";
+import {
+  STATIC_DEFAULT_MODEL,
+  STATIC_DEFAULT_PROVIDER,
+  STATIC_MODEL_PROVIDERS
+} from "./static-model-providers";
 
 type ServerOptions = {
   port: number;
@@ -203,6 +209,66 @@ const normalizeRepoUrl = (value?: string | null): string | undefined => {
     return candidate.replace(/\.git$/, "");
   }
 };
+
+const normalizeText = (value?: string | null): string | undefined => {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  return trimmed.length ? trimmed : undefined;
+};
+
+const normalizeModelProviders = (value: unknown): ModelProvider[] | undefined => {
+  if (value === null) {
+    return [];
+  }
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  return value
+    .map((provider) => {
+      if (!provider || typeof provider !== "object") {
+        return undefined;
+      }
+      const id = normalizeText((provider as { id?: string }).id);
+      if (!id) {
+        return undefined;
+      }
+      const name = normalizeText((provider as { name?: string }).name);
+      const modelsRaw = (provider as { models?: unknown }).models;
+      const models = Array.isArray(modelsRaw)
+        ? modelsRaw
+            .map((model) => {
+              if (!model || typeof model !== "object") {
+                return undefined;
+              }
+              const modelId = normalizeText((model as { id?: string }).id);
+              if (!modelId) {
+                return undefined;
+              }
+              const modelName = normalizeText((model as { name?: string }).name);
+              return { id: modelId, name: modelName };
+            })
+            .filter(Boolean)
+        : [];
+      return { id, name, models } as ModelProvider;
+    })
+    .filter(Boolean) as ModelProvider[];
+};
+
+const resolveDefaultModelSelection = (
+  providers: ModelProvider[],
+  defaultProvider?: string,
+  defaultModel?: string
+): { defaultProvider?: string; defaultModel?: string } => {
+  if (!providers.length) {
+    return { defaultProvider: undefined, defaultModel: undefined };
+  }
+  const provider = providers.find((item) => item.id === defaultProvider) ?? providers[0];
+  const model = provider.models.find((item) => item.id === defaultModel) ?? provider.models[0];
+  return { defaultProvider: provider?.id, defaultModel: model?.id };
+};
+
 
 const inferGitProvider = (repoUrl?: string): GitProvider | undefined => {
   if (!repoUrl) {
@@ -592,7 +658,31 @@ const handleApi = async (req: IncomingMessage, res: ServerResponse, repoRoot: st
 
   if (req.method === "GET" && segments.length === 2 && segments[1] === "settings") {
     const settings = await readSettings(repoRoot);
-    sendJson(res, 200, settings);
+    let modelProviders = settings.modelProviders;
+    let defaultProvider = settings.defaultProvider;
+    let defaultModel = settings.defaultModel;
+    if (modelProviders === undefined) {
+      modelProviders = STATIC_MODEL_PROVIDERS;
+      defaultProvider = defaultProvider ?? STATIC_DEFAULT_PROVIDER;
+      defaultModel = defaultModel ?? STATIC_DEFAULT_MODEL;
+      await writeSettings(repoRoot, {
+        ...settings,
+        modelProviders,
+        defaultProvider,
+        defaultModel
+      });
+    }
+    const resolved = resolveDefaultModelSelection(
+      modelProviders ?? [],
+      defaultProvider,
+      defaultModel
+    );
+    sendJson(res, 200, {
+      ...settings,
+      modelProviders: modelProviders ?? [],
+      defaultProvider: resolved.defaultProvider,
+      defaultModel: resolved.defaultModel
+    });
     return;
   }
 
@@ -601,7 +691,11 @@ const handleApi = async (req: IncomingMessage, res: ServerResponse, repoRoot: st
       const body = await readJsonBody<{
         githubToken?: string | null;
         gotlandToken?: string | null;
+        modelProviders?: unknown;
+        defaultProvider?: string | null;
+        defaultModel?: string | null;
       }>(req);
+      const currentSettings = await readSettings(repoRoot);
       const normalizeToken = (value?: string | null): string | undefined => {
         if (typeof value !== "string") {
           return undefined;
@@ -609,9 +703,30 @@ const handleApi = async (req: IncomingMessage, res: ServerResponse, repoRoot: st
         const trimmed = value.trim();
         return trimmed.length ? trimmed : undefined;
       };
+      const normalizedProviders = normalizeModelProviders(body.modelProviders);
+      const modelProviders =
+        body.modelProviders === null
+          ? []
+          : normalizedProviders ?? currentSettings.modelProviders ?? [];
+      const hasDefaultProvider = Object.prototype.hasOwnProperty.call(body, "defaultProvider");
+      const hasDefaultModel = Object.prototype.hasOwnProperty.call(body, "defaultModel");
+      const requestedDefaultProvider = hasDefaultProvider
+        ? normalizeText(body.defaultProvider ?? null)
+        : currentSettings.defaultProvider;
+      const requestedDefaultModel = hasDefaultModel
+        ? normalizeText(body.defaultModel ?? null)
+        : currentSettings.defaultModel;
+      const resolved = resolveDefaultModelSelection(
+        modelProviders,
+        requestedDefaultProvider,
+        requestedDefaultModel
+      );
       const nextSettings = {
         githubToken: normalizeToken(body.githubToken),
-        gotlandToken: normalizeToken(body.gotlandToken)
+        gotlandToken: normalizeToken(body.gotlandToken),
+        modelProviders,
+        defaultProvider: resolved.defaultProvider,
+        defaultModel: resolved.defaultModel
       };
       await writeSettings(repoRoot, nextSettings);
       sendJson(res, 200, nextSettings);

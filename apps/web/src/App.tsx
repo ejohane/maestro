@@ -161,6 +161,17 @@ type ChatMessage = {
   isStreaming?: boolean
 }
 
+type ModelProviderModel = {
+  id: string
+  name?: string
+}
+
+type ModelProvider = {
+  id: string
+  name?: string
+  models: ModelProviderModel[]
+}
+
 const App = () => {
   const { theme, toggleTheme } = useTheme()
   const [projects, setProjects] = React.useState<Project[]>([])
@@ -192,7 +203,11 @@ const App = () => {
   const [createWorkspaceError, setCreateWorkspaceError] = React.useState<string | null>(
     null
   )
-  const [sessionForm, setSessionForm] = React.useState({ title: "" })
+  const [sessionForm, setSessionForm] = React.useState({
+    title: "",
+    providerId: "",
+    modelId: "",
+  })
   const [isCreatingSession, setIsCreatingSession] = React.useState(false)
   const [createSessionError, setCreateSessionError] = React.useState<string | null>(null)
   const [deletingSessionId, setDeletingSessionId] = React.useState<string | null>(null)
@@ -218,6 +233,9 @@ const App = () => {
   const [settingsForm, setSettingsForm] = React.useState({
     githubToken: "",
     gotlandToken: "",
+    modelProviders: [] as ModelProvider[],
+    defaultProvider: "",
+    defaultModel: "",
   })
   const [settingsError, setSettingsError] = React.useState<string | null>(null)
   const [settingsSavedMessage, setSettingsSavedMessage] = React.useState<string | null>(
@@ -338,10 +356,16 @@ const App = () => {
       const payload = (await response.json()) as {
         githubToken?: string
         gotlandToken?: string
+        modelProviders?: ModelProvider[]
+        defaultProvider?: string
+        defaultModel?: string
       }
       setSettingsForm({
         githubToken: payload.githubToken ?? "",
         gotlandToken: payload.gotlandToken ?? "",
+        modelProviders: payload.modelProviders ?? [],
+        defaultProvider: payload.defaultProvider ?? "",
+        defaultModel: payload.defaultModel ?? "",
       })
     } catch (err) {
       setSettingsError(
@@ -357,6 +381,74 @@ const App = () => {
   React.useEffect(() => {
     void loadSettings()
   }, [loadSettings])
+
+  React.useEffect(() => {
+    if (settingsForm.modelProviders.length === 0) {
+      return
+    }
+    setSessionForm((prev) => {
+      const providerIds = settingsForm.modelProviders.map((provider) => provider.id)
+      const resolvedProviderId = providerIds.includes(prev.providerId)
+        ? prev.providerId
+        : providerIds.includes(settingsForm.defaultProvider)
+          ? settingsForm.defaultProvider
+          : settingsForm.modelProviders[0]?.id || ""
+      const provider = settingsForm.modelProviders.find(
+        (item) => item.id === resolvedProviderId
+      )
+      const modelIds = provider?.models.map((model) => model.id) ?? []
+      const resolvedModelId = modelIds.includes(prev.modelId)
+        ? prev.modelId
+        : modelIds.includes(settingsForm.defaultModel)
+          ? settingsForm.defaultModel
+          : provider?.models[0]?.id || ""
+      if (
+        resolvedProviderId === prev.providerId &&
+        resolvedModelId === prev.modelId
+      ) {
+        return prev
+      }
+      return {
+        ...prev,
+        providerId: resolvedProviderId,
+        modelId: resolvedModelId,
+      }
+    })
+  }, [
+    settingsForm.modelProviders,
+    settingsForm.defaultProvider,
+    settingsForm.defaultModel,
+  ])
+
+  React.useEffect(() => {
+    if (settingsForm.modelProviders.length === 0) {
+      return
+    }
+    setSettingsForm((prev) => {
+      const providerIds = prev.modelProviders.map((provider) => provider.id)
+      const resolvedProviderId = providerIds.includes(prev.defaultProvider)
+        ? prev.defaultProvider
+        : prev.modelProviders[0]?.id || ""
+      const provider = prev.modelProviders.find(
+        (item) => item.id === resolvedProviderId
+      )
+      const modelIds = provider?.models.map((model) => model.id) ?? []
+      const resolvedModelId = modelIds.includes(prev.defaultModel)
+        ? prev.defaultModel
+        : provider?.models[0]?.id || ""
+      if (
+        resolvedProviderId === prev.defaultProvider &&
+        resolvedModelId === prev.defaultModel
+      ) {
+        return prev
+      }
+      return {
+        ...prev,
+        defaultProvider: resolvedProviderId,
+        defaultModel: resolvedModelId,
+      }
+    })
+  }, [settingsForm.modelProviders])
 
   React.useEffect(() => {
     if (!projects.length) {
@@ -855,7 +947,7 @@ const App = () => {
     }
   }
 
-  const handleSettingsChange = (field: keyof typeof settingsForm) => {
+  const handleSettingsChange = (field: "githubToken" | "gotlandToken") => {
     return (event: React.ChangeEvent<HTMLInputElement>) => {
       const value = event.target.value
       setSettingsForm((prev) => ({ ...prev, [field]: value }))
@@ -870,7 +962,86 @@ const App = () => {
 
   const handleSessionFormChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const value = event.target.value
-    setSessionForm({ title: value })
+    setSessionForm((prev) => ({ ...prev, title: value }))
+  }
+
+  const handleSessionProviderChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
+    const value = event.target.value
+    setSessionForm((prev) => {
+      const provider = settingsForm.modelProviders.find((item) => item.id === value)
+      const modelId = provider?.models[0]?.id ?? ""
+      return { ...prev, providerId: value, modelId }
+    })
+  }
+
+  const handleSessionModelChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
+    const value = event.target.value
+    setSessionForm((prev) => ({ ...prev, modelId: value }))
+  }
+
+  const updateModelProvider = (
+    index: number,
+    updater: (provider: ModelProvider) => ModelProvider
+  ) => {
+    setSettingsForm((prev) => {
+      const nextProviders = prev.modelProviders.map((provider, providerIndex) =>
+        providerIndex === index ? updater(provider) : provider
+      )
+      return { ...prev, modelProviders: nextProviders }
+    })
+    setSettingsSavedMessage(null)
+  }
+
+  const handleAddProvider = () => {
+    setSettingsForm((prev) => ({
+      ...prev,
+      modelProviders: [
+        ...prev.modelProviders,
+        { id: "", name: "", models: [] },
+      ],
+    }))
+    setSettingsSavedMessage(null)
+  }
+
+  const handleRemoveProvider = (index: number) => {
+    setSettingsForm((prev) => ({
+      ...prev,
+      modelProviders: prev.modelProviders.filter((_, providerIndex) => providerIndex !== index),
+    }))
+    setSettingsSavedMessage(null)
+  }
+
+  const handleAddModel = (providerIndex: number) => {
+    updateModelProvider(providerIndex, (provider) => ({
+      ...provider,
+      models: [...provider.models, { id: "", name: "" }],
+    }))
+  }
+
+  const handleRemoveModel = (providerIndex: number, modelIndex: number) => {
+    updateModelProvider(providerIndex, (provider) => ({
+      ...provider,
+      models: provider.models.filter((_, index) => index !== modelIndex),
+    }))
+  }
+
+  const handleDefaultProviderChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
+    const value = event.target.value
+    setSettingsForm((prev) => {
+      const provider = prev.modelProviders.find((item) => item.id === value)
+      const modelId =
+        provider?.models.find((model) => model.id === prev.defaultModel)?.id ??
+        provider?.models[0]?.id ??
+        ""
+      return { ...prev, defaultProvider: value, defaultModel: modelId }
+    })
+    setSettingsSavedMessage(null)
+  }
+
+  const handleDefaultModelChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
+    const value = event.target.value
+    setSettingsForm((prev) => ({ ...prev, defaultModel: value }))
+    setSettingsSavedMessage(null)
   }
 
   const handleSettingsSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -885,6 +1056,9 @@ const App = () => {
         body: JSON.stringify({
           githubToken: settingsForm.githubToken.trim() || null,
           gotlandToken: settingsForm.gotlandToken.trim() || null,
+          modelProviders: settingsForm.modelProviders,
+          defaultProvider: settingsForm.defaultProvider.trim() || null,
+          defaultModel: settingsForm.defaultModel.trim() || null,
         }),
       })
       if (!response.ok) {
@@ -902,10 +1076,16 @@ const App = () => {
       const payload = (await response.json()) as {
         githubToken?: string
         gotlandToken?: string
+        modelProviders?: ModelProvider[]
+        defaultProvider?: string
+        defaultModel?: string
       }
       setSettingsForm({
         githubToken: payload.githubToken ?? "",
         gotlandToken: payload.gotlandToken ?? "",
+        modelProviders: payload.modelProviders ?? [],
+        defaultProvider: payload.defaultProvider ?? "",
+        defaultModel: payload.defaultModel ?? "",
       })
       setSettingsSavedMessage("Settings saved.")
     } catch (err) {
@@ -1104,6 +1284,9 @@ const App = () => {
       return
     }
     const title = sessionForm.title.trim()
+    const providerId = sessionForm.providerId.trim()
+    const modelId = sessionForm.modelId.trim()
+    const model = providerId && modelId ? `${providerId}/${modelId}` : undefined
     setIsCreatingSession(true)
     setCreateSessionError(null)
     try {
@@ -1112,7 +1295,7 @@ const App = () => {
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ title: title || undefined }),
+          body: JSON.stringify({ title: title || undefined, model }),
         }
       )
       if (!response.ok) {
@@ -1128,7 +1311,7 @@ const App = () => {
         throw new Error(message)
       }
       const session = (await response.json()) as ApiSession
-      setSessionForm({ title: "" })
+      setSessionForm((prev) => ({ ...prev, title: "" }))
       setIsProjectsView(false)
       setSelectedProjectId(selectedProject.id)
       setSelectedWorkspaceId(selectedWorkspace.id)
@@ -1399,6 +1582,14 @@ const App = () => {
   )
   const isWorkspaceView = Boolean(!isSettingsView && selectedWorkspace && !selectedChat)
   const isChatView = Boolean(!isSettingsView && selectedChat)
+  const sessionProvider = settingsForm.modelProviders.find(
+    (provider) => provider.id === sessionForm.providerId
+  )
+  const sessionModels = sessionProvider?.models ?? []
+  const settingsDefaultProvider = settingsForm.modelProviders.find(
+    (provider) => provider.id === settingsForm.defaultProvider
+  )
+  const settingsDefaultModels = settingsDefaultProvider?.models ?? []
   const isChatStreaming = chatStatus === "streaming"
   const projectIconValue = selectedProject?.icon?.trim() ?? ""
   const promptDisabled =
@@ -1621,6 +1812,190 @@ const App = () => {
                       <div className="text-xs text-muted-foreground">
                         Stored locally in ~/.maestro/settings.json.
                       </div>
+                    </div>
+                    <div className="h-px w-full bg-border/60" />
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <div className="text-sm font-semibold text-foreground">
+                          Model providers
+                        </div>
+                        <div className="text-xs text-muted-foreground">
+                          Seeded from OpenCode, fully editable.
+                        </div>
+                      </div>
+                      <Button type="button" variant="outline" onClick={handleAddProvider}>
+                        Add provider
+                      </Button>
+                    </div>
+                    <div className="grid gap-3">
+                      <div className="grid gap-2">
+                        <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                          Default provider
+                        </label>
+                        <select
+                          value={settingsForm.defaultProvider}
+                          onChange={handleDefaultProviderChange}
+                          className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-base ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 md:text-sm"
+                        >
+                          {settingsForm.modelProviders.length ? (
+                            settingsForm.modelProviders.map((provider) => (
+                              <option key={provider.id} value={provider.id}>
+                                {provider.name?.trim() || provider.id}
+                              </option>
+                            ))
+                          ) : (
+                            <option value="">No providers available</option>
+                          )}
+                        </select>
+                      </div>
+                      <div className="grid gap-2">
+                        <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                          Default model
+                        </label>
+                        <select
+                          value={settingsForm.defaultModel}
+                          onChange={handleDefaultModelChange}
+                          disabled={!settingsDefaultModels.length}
+                          className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-base ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 md:text-sm"
+                        >
+                          {settingsDefaultModels.length ? (
+                            settingsDefaultModels.map((model) => (
+                              <option key={model.id} value={model.id}>
+                                {model.name?.trim() || model.id}
+                              </option>
+                            ))
+                          ) : (
+                            <option value="">No models available</option>
+                          )}
+                        </select>
+                      </div>
+                    </div>
+                    <div className="grid gap-3">
+                      {settingsForm.modelProviders.length ? (
+                        settingsForm.modelProviders.map((provider, providerIndex) => (
+                          <div
+                            key={`${provider.id}-${providerIndex}`}
+                            className="rounded-lg border bg-muted/20 p-4"
+                          >
+                            <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] sm:items-end">
+                              <div className="grid gap-2">
+                                <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                                  Provider name
+                                </label>
+                                <Input
+                                  value={provider.name ?? ""}
+                                  onChange={(event) =>
+                                    updateModelProvider(providerIndex, (current) => ({
+                                      ...current,
+                                      name: event.target.value,
+                                    }))
+                                  }
+                                  placeholder="OpenAI"
+                                />
+                              </div>
+                              <div className="grid gap-2">
+                                <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                                  Provider id
+                                </label>
+                                <Input
+                                  value={provider.id}
+                                  onChange={(event) =>
+                                    updateModelProvider(providerIndex, (current) => ({
+                                      ...current,
+                                      id: event.target.value,
+                                    }))
+                                  }
+                                  placeholder="openai"
+                                />
+                              </div>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                onClick={() => handleRemoveProvider(providerIndex)}
+                              >
+                                Remove
+                              </Button>
+                            </div>
+                            <div className="mt-4 grid gap-3">
+                              <div className="flex flex-wrap items-center justify-between gap-3">
+                                <div className="text-sm font-semibold text-foreground">Models</div>
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => handleAddModel(providerIndex)}
+                                >
+                                  Add model
+                                </Button>
+                              </div>
+                              {provider.models.length ? (
+                                provider.models.map((model, modelIndex) => (
+                                  <div
+                                    key={`${model.id}-${modelIndex}`}
+                                    className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] sm:items-end"
+                                  >
+                                    <div className="grid gap-2">
+                                      <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                                        Model name
+                                      </label>
+                                      <Input
+                                        value={model.name ?? ""}
+                                        onChange={(event) =>
+                                          updateModelProvider(providerIndex, (current) => ({
+                                            ...current,
+                                            models: current.models.map((item, index) =>
+                                              index === modelIndex
+                                                ? { ...item, name: event.target.value }
+                                                : item
+                                            ),
+                                          }))
+                                        }
+                                        placeholder="GPT-5.2 Codex"
+                                      />
+                                    </div>
+                                    <div className="grid gap-2">
+                                      <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                                        Model id
+                                      </label>
+                                      <Input
+                                        value={model.id}
+                                        onChange={(event) =>
+                                          updateModelProvider(providerIndex, (current) => ({
+                                            ...current,
+                                            models: current.models.map((item, index) =>
+                                              index === modelIndex
+                                                ? { ...item, id: event.target.value }
+                                                : item
+                                            ),
+                                          }))
+                                        }
+                                        placeholder="gpt-5.2-codex"
+                                      />
+                                    </div>
+                                    <Button
+                                      type="button"
+                                      variant="ghost"
+                                      onClick={() =>
+                                        handleRemoveModel(providerIndex, modelIndex)
+                                      }
+                                    >
+                                      Remove
+                                    </Button>
+                                  </div>
+                                ))
+                              ) : (
+                                <div className="rounded-md border border-dashed px-3 py-2 text-xs text-muted-foreground">
+                                  No models yet. Add one to enable selection.
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        ))
+                      ) : (
+                        <div className="rounded-md border border-dashed px-3 py-3 text-sm text-muted-foreground">
+                          No providers yet. Add one or check OpenCode connection.
+                        </div>
+                      )}
                     </div>
                     {settingsError ? (
                       <div className="rounded-md border border-destructive/50 bg-destructive/5 px-3 py-2 text-sm text-destructive">
@@ -2064,6 +2439,50 @@ const App = () => {
                         onChange={handleSessionFormChange}
                         placeholder="e.g. Bug bash follow-up"
                       />
+                    </div>
+                    <div className="grid gap-2">
+                      <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                        Provider
+                      </label>
+                      <select
+                        value={sessionForm.providerId}
+                        onChange={handleSessionProviderChange}
+                        className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-base ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 md:text-sm"
+                      >
+                        {settingsForm.modelProviders.length ? (
+                          settingsForm.modelProviders.map((provider) => (
+                            <option key={provider.id} value={provider.id}>
+                              {provider.name?.trim() || provider.id}
+                            </option>
+                          ))
+                        ) : (
+                          <option value="">No providers available</option>
+                        )}
+                      </select>
+                    </div>
+                    <div className="grid gap-2">
+                      <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                        Model
+                      </label>
+                      <select
+                        value={sessionForm.modelId}
+                        onChange={handleSessionModelChange}
+                        disabled={!sessionModels.length}
+                        className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-base ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 md:text-sm"
+                      >
+                        {sessionModels.length ? (
+                          sessionModels.map((model) => (
+                            <option key={model.id} value={model.id}>
+                              {model.name?.trim() || model.id}
+                            </option>
+                          ))
+                        ) : (
+                          <option value="">No models available</option>
+                        )}
+                      </select>
+                      <div className="text-xs text-muted-foreground">
+                        Manage providers and models from Settings.
+                      </div>
                     </div>
                     {createSessionError ? (
                       <div className="rounded-md border border-destructive/50 bg-destructive/5 px-3 py-2 text-sm text-destructive">

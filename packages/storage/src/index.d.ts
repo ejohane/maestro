@@ -7,9 +7,21 @@ export interface MaestroPaths {
     currentFile: string;
     settingsFile: string;
 }
+export interface ModelProviderModel {
+    id: string;
+    name?: string;
+}
+export interface ModelProvider {
+    id: string;
+    name?: string;
+    models: ModelProviderModel[];
+}
 export interface MaestroSettings {
     githubToken?: string;
     gotlandToken?: string;
+    modelProviders?: ModelProvider[];
+    defaultProvider?: string;
+    defaultModel?: string;
 }
 export declare const getMaestroPaths: (repoRoot: string) => MaestroPaths;
 export declare const ensureMaestroRoot: (repoRoot: string) => Promise<MaestroPaths>;
