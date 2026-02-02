@@ -269,6 +269,27 @@ const resolveDefaultModelSelection = (
   return { defaultProvider: provider?.id, defaultModel: model?.id };
 };
 
+const resolveSettingsModel = async (repoRoot: string): Promise<string | undefined> => {
+  const settings = await readSettings(repoRoot);
+  let modelProviders = settings.modelProviders;
+  let defaultProvider = settings.defaultProvider;
+  let defaultModel = settings.defaultModel;
+  if (modelProviders === undefined) {
+    modelProviders = STATIC_MODEL_PROVIDERS;
+    defaultProvider = defaultProvider ?? STATIC_DEFAULT_PROVIDER;
+    defaultModel = defaultModel ?? STATIC_DEFAULT_MODEL;
+  }
+  const resolved = resolveDefaultModelSelection(
+    modelProviders ?? [],
+    defaultProvider,
+    defaultModel
+  );
+  if (!resolved.defaultProvider || !resolved.defaultModel) {
+    return undefined;
+  }
+  return `${resolved.defaultProvider}/${resolved.defaultModel}`;
+};
+
 
 const inferGitProvider = (repoUrl?: string): GitProvider | undefined => {
   if (!repoUrl) {
@@ -1271,7 +1292,9 @@ const handleApi = async (req: IncomingMessage, res: ServerResponse, repoRoot: st
         throw error;
       }
       const ts = nowIso();
-      const model = body.model?.trim() || getDefaultModel();
+      const requestedModel = body.model?.trim();
+      const model =
+        requestedModel ?? (await resolveSettingsModel(requestRepoRoot)) ?? getDefaultModel();
       const sessionTitle = body.title?.trim() || undefined;
       const session: Session = {
         id: generateId("s"),
@@ -1383,7 +1406,8 @@ const handleApi = async (req: IncomingMessage, res: ServerResponse, repoRoot: st
       }
 
       if (!session.model) {
-        session.model = getDefaultModel();
+        session.model =
+          (await resolveSettingsModel(requestRepoRoot)) ?? getDefaultModel();
         await writeSession(requestRepoRoot, conversation.id, session);
       }
 
@@ -1455,7 +1479,10 @@ const handleApi = async (req: IncomingMessage, res: ServerResponse, repoRoot: st
       })();
 
       try {
-        const resolvedModel = parseModel(session.model) ?? parseModel(getDefaultModel());
+        const resolvedModel =
+          parseModel(session.model) ??
+          parseModel(await resolveSettingsModel(requestRepoRoot)) ??
+          parseModel(getDefaultModel());
         const response = await client.session.prompt({
           path: { id: opencodeSessionId },
           body: {
