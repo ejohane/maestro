@@ -2,6 +2,7 @@ import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react"
 import type { ComponentProps, HTMLAttributes, ReactElement } from "react"
 import { createContext, memo, useContext, useEffect, useState } from "react"
 import { Streamdown } from "streamdown"
+import { FileImage, FileText, X } from "lucide-react"
 
 import { cjk } from "@streamdown/cjk"
 import { code } from "@streamdown/code"
@@ -335,3 +336,145 @@ export const MessageToolbar = ({
     {children}
   </div>
 )
+
+type MessageAttachmentMeta = {
+  id: string
+  name?: string
+  path?: string
+  mimeType?: string
+  size?: number
+  source?: "upload" | "workspace" | "tool" | "generated"
+}
+
+export type MessageAttachmentsProps = HTMLAttributes<HTMLDivElement> & {
+  attachments: MessageAttachmentMeta[]
+  onRemove?: (id: string) => void
+}
+
+const isImageType = (mimeType?: string, name?: string) => {
+  if (mimeType?.startsWith("image/")) {
+    return true
+  }
+  const extension = name?.split(".").pop()?.toLowerCase()
+  if (!extension) {
+    return false
+  }
+  return ["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg"].includes(extension)
+}
+
+const formatFileSize = (size?: number) => {
+  if (!size || size <= 0) {
+    return undefined
+  }
+  const units = ["B", "KB", "MB", "GB"]
+  let current = size
+  let unitIndex = 0
+  while (current >= 1024 && unitIndex < units.length - 1) {
+    current /= 1024
+    unitIndex += 1
+  }
+  return `${current.toFixed(current >= 10 || unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`
+}
+
+const getAttachmentLabel = (attachment: MessageAttachmentMeta, index: number) => {
+  if (attachment.name?.trim()) {
+    return attachment.name
+  }
+  if (attachment.path) {
+    const segments = attachment.path.split("/")
+    const last = segments[segments.length - 1]
+    if (last) {
+      return last
+    }
+  }
+  return `Attachment ${index + 1}`
+}
+
+export const MessageAttachments = ({
+  attachments,
+  onRemove,
+  className,
+  ...props
+}: MessageAttachmentsProps) => {
+  if (!attachments.length) {
+    return null
+  }
+
+  return (
+    <TooltipProvider delayDuration={200}>
+      <div className={cn("grid gap-2 sm:grid-cols-2", className)} {...props}>
+        {attachments.map((attachment, index) => {
+          const label = getAttachmentLabel(attachment, index)
+          const isImage = isImageType(attachment.mimeType, attachment.name)
+          const previewUrl = attachment.path
+          const canPreview = isImage && typeof previewUrl === "string"
+          const sizeLabel = formatFileSize(attachment.size)
+
+          const card = (
+            <div className="group relative flex min-w-0 items-center gap-3 rounded-xl border bg-muted/20 p-2">
+              <div className="relative flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-lg border bg-background">
+                {canPreview ? (
+                  <img
+                    alt={label}
+                    className="h-full w-full object-cover"
+                    loading="lazy"
+                    src={previewUrl}
+                  />
+                ) : isImage ? (
+                  <FileImage className="h-6 w-6 text-muted-foreground" />
+                ) : (
+                  <FileText className="h-6 w-6 text-muted-foreground" />
+                )}
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-sm font-medium text-foreground">{label}</div>
+                <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                  {attachment.mimeType ? <span>{attachment.mimeType}</span> : null}
+                  {sizeLabel ? <span>{sizeLabel}</span> : null}
+                  {attachment.source ? <span className="capitalize">{attachment.source}</span> : null}
+                </div>
+              </div>
+              {onRemove ? (
+                <Button
+                  aria-label={`Remove ${label}`}
+                  className="absolute right-1 top-1 h-7 w-7 rounded-full bg-background/80 text-muted-foreground opacity-0 shadow-sm transition group-hover:opacity-100"
+                  onClick={() => onRemove(attachment.id)}
+                  size="icon-xs"
+                  type="button"
+                  variant="ghost"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </Button>
+              ) : null}
+            </div>
+          )
+
+          return (
+            <Tooltip key={attachment.id}>
+              <TooltipTrigger asChild>{card}</TooltipTrigger>
+              <TooltipContent className="max-w-xs">
+                {canPreview ? (
+                  <div className="grid gap-2">
+                    <img
+                      alt={label}
+                      className="h-40 w-40 rounded-md object-cover"
+                      loading="lazy"
+                      src={previewUrl}
+                    />
+                    <div className="text-xs text-muted-foreground">{label}</div>
+                  </div>
+                ) : (
+                  <div className="grid gap-1 text-xs text-muted-foreground">
+                    <span className="font-medium text-foreground">{label}</span>
+                    {attachment.mimeType ? <span>{attachment.mimeType}</span> : null}
+                    {sizeLabel ? <span>{sizeLabel}</span> : null}
+                  </div>
+                )}
+              </TooltipContent>
+            </Tooltip>
+          )
+        })}
+      </div>
+    </TooltipProvider>
+  )
+}

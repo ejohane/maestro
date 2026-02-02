@@ -12,6 +12,7 @@ import { Loader } from "./components/ai-elements/loader"
 import {
   Message,
   MessageContent,
+  MessageAttachments,
   MessageResponse,
 } from "./components/ai-elements/message"
 import {
@@ -48,7 +49,7 @@ import {
   SidebarTrigger,
 } from "./components/ui/sidebar"
 import { useTheme } from "./hooks/use-theme"
-import type { MessageRole } from "@maestro/core"
+import type { FileReference, MessageRole } from "@maestro/core"
 import {
   applyMessageDelta,
   applyMessageEnd,
@@ -2555,31 +2556,54 @@ const App = () => {
                     <Loader className="mr-2" /> Loading transcript...
                   </div>
                 ) : messages.length ? (
-                  messages.map((message) => (
-                    <Message key={message.id} from={message.role}>
-                      <MessageContent>
-                        {message.role === "assistant" ? (
-                          <>
+                  messages.map((message) => {
+                    const attachmentParts = message.parts.filter(
+                      (part): part is StructuredMessagePart & {
+                        type: "file"
+                        file: FileReference
+                      } => part.type === "file"
+                    )
+                    const attachments = attachmentParts.map((part, index) => {
+                      const file = part.file
+                      return {
+                        id: file.id || part.id || `attachment-${message.id}-${index}`,
+                        name: file.name,
+                        path: file.path,
+                        mimeType: file.mimeType,
+                        size: file.size,
+                        source: file.source,
+                      }
+                    })
+
+                    return (
+                      <Message key={message.id} from={message.role}>
+                        <MessageContent>
+                          {attachments.length ? (
+                            <MessageAttachments attachments={attachments} />
+                          ) : null}
+                          {message.role === "assistant" ? (
+                            <>
+                              <MessageResponse>
+                                {message.content || getTextFromParts(message.parts)}
+                              </MessageResponse>
+                              {message.isStreaming &&
+                              !message.content &&
+                              !getTextFromParts(message.parts) &&
+                              isAwaitingFirstToken ? (
+                                <span className="inline-flex items-center gap-2 text-muted-foreground">
+                                  <Loader /> Waiting for response...
+                                </span>
+                              ) : null}
+                            </>
+                          ) : (
                             <MessageResponse>
                               {message.content || getTextFromParts(message.parts)}
                             </MessageResponse>
-                            {message.isStreaming &&
-                            !message.content &&
-                            !getTextFromParts(message.parts) &&
-                            isAwaitingFirstToken ? (
-                              <span className="inline-flex items-center gap-2 text-muted-foreground">
-                                <Loader /> Waiting for response...
-                              </span>
-                            ) : null}
-                          </>
-                        ) : (
-                          <MessageResponse>
-                            {message.content || getTextFromParts(message.parts)}
-                          </MessageResponse>
-                        )}
-                      </MessageContent>
-                    </Message>
-                  ))
+                          )}
+                        </MessageContent>
+                      </Message>
+                    )
+                  })
                 ) : (
                   <ConversationEmptyState
                     className="min-h-[320px]"
