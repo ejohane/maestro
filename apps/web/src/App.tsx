@@ -18,6 +18,7 @@ import {
   PromptInputFooter,
   PromptInputSubmit,
   PromptInputTextarea,
+  type PromptInputMessage,
 } from "./components/ai-elements/prompt-input"
 import {
   Breadcrumb,
@@ -222,11 +223,8 @@ const App = () => {
   const [promptValue, setPromptValue] = React.useState("")
   const [isTranscriptLoading, setIsTranscriptLoading] = React.useState(false)
   const [isAwaitingFirstToken, setIsAwaitingFirstToken] = React.useState(false)
-  const [showScrollButton, setShowScrollButton] = React.useState(false)
-  const scrollContainerRef = React.useRef<HTMLDivElement | null>(null)
   const streamAbortRef = React.useRef<AbortController | null>(null)
   const transcriptAbortRef = React.useRef<AbortController | null>(null)
-  const autoScrollRef = React.useRef(true)
   const [openPullRequests, setOpenPullRequests] = React.useState<OpenPullRequest[]>([])
   const [isLoadingPullRequests, setIsLoadingPullRequests] = React.useState(false)
   const [pullRequestsError, setPullRequestsError] = React.useState<string | null>(null)
@@ -615,26 +613,6 @@ const App = () => {
     return `m_${Math.random().toString(36).slice(2, 10)}`
   }, [])
 
-  const scrollToBottom = React.useCallback(() => {
-    const container = scrollContainerRef.current
-    if (!container) {
-      return
-    }
-    container.scrollTop = container.scrollHeight
-  }, [])
-
-  const handleScroll = React.useCallback(() => {
-    const container = scrollContainerRef.current
-    if (!container) {
-      return
-    }
-    const distanceFromBottom =
-      container.scrollHeight - container.scrollTop - container.clientHeight
-    const shouldAutoScroll = distanceFromBottom < 32
-    autoScrollRef.current = shouldAutoScroll
-    setShowScrollButton(!shouldAutoScroll)
-  }, [])
-
   React.useEffect(() => {
     streamAbortRef.current?.abort()
     transcriptAbortRef.current?.abort()
@@ -643,8 +621,6 @@ const App = () => {
     setChatStatus("idle")
     setChatError(null)
     setIsAwaitingFirstToken(false)
-    setShowScrollButton(false)
-    autoScrollRef.current = true
     const conversationId = selectedWorkspace?.id
     const sessionId = selectedChat?.id
     if (!conversationId || !sessionId) {
@@ -683,12 +659,6 @@ const App = () => {
         }
       })
   }, [selectedWorkspace?.id, selectedChat?.id, createLocalMessageId])
-
-  React.useEffect(() => {
-    if (autoScrollRef.current) {
-      scrollToBottom()
-    }
-  }, [messages, isTranscriptLoading, scrollToBottom])
 
   React.useEffect(() => {
     setDeleteWorkspaceError(null)
@@ -1373,24 +1343,14 @@ const App = () => {
     setPromptValue(event.target.value)
   }
 
-  const handlePromptKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.key === "Enter" && !event.shiftKey) {
-      event.preventDefault()
-      void handlePromptSubmit(event)
-    }
-  }
-
-  const handlePromptSubmit = async (
-    event: React.FormEvent<HTMLFormElement> | React.KeyboardEvent<HTMLTextAreaElement>
-  ) => {
-    event.preventDefault()
+  const handlePromptSubmit = async (message: PromptInputMessage) => {
     if (!selectedWorkspace || !selectedChat) {
       return
     }
     if (chatStatus === "streaming") {
       return
     }
-    const content = promptValue.trim()
+    const content = message.text.trim()
     if (!content) {
       return
     }
@@ -1403,7 +1363,6 @@ const App = () => {
     setPromptValue("")
     setChatError(null)
     setIsAwaitingFirstToken(true)
-    autoScrollRef.current = true
     setChatStatus("streaming")
     setMessages((prev) => [
       ...prev,
@@ -2556,23 +2515,19 @@ const App = () => {
               </Card>
             </div>
           ) : isChatView ? (
-            <Conversation className="min-h-[520px]">
-              <ConversationContent
-                ref={scrollContainerRef}
-                onScroll={handleScroll}
-                className="space-y-4"
-              >
+            <Conversation className="min-h-[520px] rounded-xl border bg-card shadow-sm">
+              <ConversationContent className="gap-4">
                 {isTranscriptLoading ? (
                   <div className="flex h-full min-h-[320px] items-center justify-center text-sm text-muted-foreground">
                     <Loader className="mr-2" /> Loading transcript...
                   </div>
                 ) : messages.length ? (
                   messages.map((message) => (
-                    <Message key={message.id} role={message.role}>
+                    <Message key={message.id} from={message.role}>
                       <MessageContent>
                         {message.role === "assistant" ? (
                           <>
-                            <MessageResponse isAnimating={message.isStreaming}>
+                            <MessageResponse>
                               {message.content}
                             </MessageResponse>
                             {message.isStreaming && !message.content && isAwaitingFirstToken ? (
@@ -2582,9 +2537,7 @@ const App = () => {
                             ) : null}
                           </>
                         ) : (
-                          <MessageResponse isAnimating={false}>
-                            {message.content}
-                          </MessageResponse>
+                          <MessageResponse>{message.content}</MessageResponse>
                         )}
                       </MessageContent>
                     </Message>
@@ -2595,17 +2548,12 @@ const App = () => {
                   </div>
                 )}
               </ConversationContent>
-              {showScrollButton ? (
-                <ConversationScrollButton onClick={scrollToBottom}>
-                  Jump to latest
-                </ConversationScrollButton>
-              ) : null}
+              <ConversationScrollButton />
               <div className="border-t bg-background/80 p-4">
                 <PromptInput onSubmit={handlePromptSubmit}>
                   <PromptInputTextarea
                     value={promptValue}
                     onChange={handlePromptChange}
-                    onKeyDown={handlePromptKeyDown}
                     placeholder="Ask for a review, summary, or next steps..."
                     disabled={promptDisabled}
                   />
