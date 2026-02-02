@@ -1,4 +1,3 @@
-import type { ChatStatus, FileUIPart, SourceDocumentUIPart } from "ai"
 import {
   CornerDownLeftIcon,
   ImageIcon,
@@ -61,6 +60,19 @@ import {
 } from "../ui/select"
 import { Spinner } from "../ui/spinner"
 import { cn } from "../../lib/utils"
+
+type ChatStatus = "idle" | "submitted" | "streaming" | "error"
+
+type FileUIPart = {
+  type: "file"
+  url?: string
+  mediaType?: string
+  filename?: string
+}
+
+type SourceDocumentUIPart = {
+  type?: string
+} & Record<string, unknown>
 
 // ============================================================================
 // Provider Context & Types
