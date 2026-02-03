@@ -50,6 +50,7 @@ import {
   type PromptInputMessage,
   usePromptInputAttachments,
 } from "./components/ai-elements/prompt-input"
+import { ModelSelector, type ModelOption } from "./components/ai-elements/model-selector"
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -166,6 +167,11 @@ type ApiTranscriptEntry = {
   metadata?: Record<string, unknown>
 }
 
+type ApiModelsResponse = {
+  defaultModel: string
+  models: string[]
+}
+
 type CreateConversationResponse = {
   project: ApiProject
   conversation: ApiConversation
@@ -175,6 +181,7 @@ type CreateConversationResponse = {
 type ChatSession = {
   id: string
   name: string
+  model?: string
   createdAt?: string
   updatedAt?: string
 }
@@ -318,6 +325,10 @@ const App = () => {
     null
   )
   const [isSavingSettings, setIsSavingSettings] = React.useState(false)
+  const [defaultModel, setDefaultModel] = React.useState<string | null>(null)
+  const [availableModels, setAvailableModels] = React.useState<string[]>([])
+  const [isUpdatingModel, setIsUpdatingModel] = React.useState(false)
+  const [updateModelError, setUpdateModelError] = React.useState<string | null>(null)
   const [mergingPullRequests, setMergingPullRequests] = React.useState<
     Record<string, boolean>
   >({})
@@ -391,6 +402,7 @@ const App = () => {
             chats: sessions.map((session) => ({
               id: session.id,
               name: session.title?.trim() || session.model || session.id,
+              model: session.model,
               createdAt: session.createdAt,
               updatedAt: session.updatedAt,
             })),
@@ -447,6 +459,23 @@ const App = () => {
       setSettingsError(
         err instanceof Error ? err.message : "Failed to load settings."
       )
+    }
+  }, [])
+
+  const loadModels = React.useCallback(async () => {
+    try {
+      const response = await fetch("/api/models")
+      if (!response.ok) {
+        return
+      }
+      const payload = (await response.json()) as ApiModelsResponse
+      const modelValues = Array.isArray(payload.models)
+        ? payload.models.map((model) => model.trim()).filter(Boolean)
+        : []
+      setDefaultModel(payload.defaultModel?.trim() || null)
+      setAvailableModels(Array.from(new Set(modelValues)))
+    } catch {
+      // Ignore model load errors and fall back to defaults
     }
   }, [])
 
@@ -527,6 +556,10 @@ const App = () => {
   }, [settingsForm.modelProviders])
 
   React.useEffect(() => {
+    void loadModels()
+  }, [loadModels])
+
+  React.useEffect(() => {
     if (!projects.length) {
       setSelectedProjectId(null)
       setSelectedWorkspaceId(null)
@@ -576,6 +609,28 @@ const App = () => {
       selectedWorkspace?.chats.find((chat) => chat.id === selectedChatId) ?? null,
     [selectedWorkspace, selectedChatId]
   )
+
+  const fallbackModel = defaultModel?.trim() || "openai/gpt-5.2-codex"
+  const modelOptions = React.useMemo(() => {
+    const candidates = [fallbackModel, ...availableModels, selectedChat?.model].filter(
+      (value): value is string => Boolean(value)
+    )
+    const seen = new Set<string>()
+    const options: ModelOption[] = []
+    for (const model of candidates) {
+      const normalized = model.trim()
+      if (!normalized || seen.has(normalized)) {
+        continue
+      }
+      seen.add(normalized)
+      const [provider, modelId] = normalized.split("/")
+      const label = modelId ? modelId : normalized
+      const description = modelId && provider ? provider : undefined
+      options.push({ id: normalized, label, description })
+    }
+    return options
+  }, [availableModels, fallbackModel, selectedChat?.model])
+  const selectedModel = selectedChat?.model ?? fallbackModel
 
   const recentSessions = React.useMemo(() => {
     const sessions: RecentSession[] = []
@@ -936,6 +991,10 @@ const App = () => {
   React.useEffect(() => {
     setDeleteSessionError(null)
   }, [selectedWorkspaceId])
+
+  React.useEffect(() => {
+    setUpdateModelError(null)
+  }, [selectedChatId])
 
   React.useEffect(() => {
     if (!projects.length) {
@@ -1605,6 +1664,78 @@ const App = () => {
       )
     } finally {
       setDeletingSessionId((current) => (current === sessionId ? null : current))
+    }
+  }
+
+  const handleUpdateSessionModel = async (modelId: string) => {
+    if (!selectedWorkspace || !selectedChat) {
+      return
+    }
+    if (selectedChat.model === modelId) {
+      return
+    }
+    setIsUpdatingModel(true)
+    setUpdateModelError(null)
+    try {
+      const response = await fetch(
+        `/api/conversations/${selectedWorkspace.id}/sessions/${selectedChat.id}`,
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ model: modelId }),
+        }
+      )
+      if (!response.ok) {
+        let message = "Failed to update session model."
+        try {
+          const payload = (await response.json()) as { error?: string }
+          if (payload.error) {
+            message = payload.error
+          }
+        } catch {
+          // Ignore parsing errors
+        }
+        throw new Error(message)
+      }
+      const updatedSession = (await response.json()) as ApiSession
+      setProjects((prev) =>
+        prev.map((project) => ({
+          ...project,
+          workspaces: project.workspaces.map((workspace) => {
+            if (workspace.id !== updatedSession.conversationId) {
+              return workspace
+            }
+            return {
+              ...workspace,
+              chats: workspace.chats.map((chat) =>
+                chat.id === updatedSession.id
+                  ? {
+                      ...chat,
+                      name:
+                        updatedSession.title?.trim() ||
+                        updatedSession.model ||
+                        updatedSession.id,
+                      model: updatedSession.model,
+                      updatedAt: updatedSession.updatedAt,
+                    }
+                  : chat
+              ),
+            }
+          }),
+        }))
+      )
+      const updatedModel = updatedSession.model?.trim()
+      if (updatedModel) {
+        setAvailableModels((prev) =>
+          prev.includes(updatedModel) ? prev : [...prev, updatedModel]
+        )
+      }
+    } catch (err) {
+      setUpdateModelError(
+        err instanceof Error ? err.message : "Failed to update session model."
+      )
+    } finally {
+      setIsUpdatingModel(false)
     }
   }
 
@@ -3179,6 +3310,12 @@ const App = () => {
                   <PromptInputFooter>
                     <div className="flex items-center gap-2 text-xs text-muted-foreground">
                       <PromptInputTools>
+                        <ModelSelector
+                          models={modelOptions}
+                          value={selectedModel}
+                          disabled={promptDisabled || isUpdatingModel}
+                          onSelect={handleUpdateSessionModel}
+                        />
                         <PromptInputActionMenu>
                           <PromptInputActionMenuTrigger
                             aria-label="Prompt actions"
@@ -3199,6 +3336,11 @@ const App = () => {
                     </PromptInputSubmit>
                   </PromptInputFooter>
                 </PromptInput>
+                {updateModelError ? (
+                  <div className="mt-3 rounded-md border border-destructive/50 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+                    {updateModelError}
+                  </div>
+                ) : null}
                 {chatError ? (
                   <div className="mt-3 rounded-md border border-destructive/50 bg-destructive/5 px-3 py-2 text-xs text-destructive">
                     {chatError}

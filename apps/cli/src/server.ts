@@ -895,6 +895,32 @@ const handleApi = async (req: IncomingMessage, res: ServerResponse, repoRoot: st
     return;
   }
 
+  if (req.method === "GET" && segments.length === 2 && segments[1] === "models") {
+    try {
+      const defaultModel = getDefaultModel();
+      const conversations = await listConversations(requestRepoRoot);
+      const sessionLists = await Promise.all(
+        conversations.map((conversation) =>
+          listSessions(requestRepoRoot, conversation.id).catch(() => [])
+        )
+      );
+      const models = new Set<string>();
+      models.add(defaultModel);
+      for (const sessions of sessionLists) {
+        for (const session of sessions) {
+          if (session.model?.trim()) {
+            models.add(session.model.trim());
+          }
+        }
+      }
+      sendJson(res, 200, { defaultModel, models: Array.from(models) });
+      return;
+    } catch (error) {
+      sendError(res, error);
+      return;
+    }
+  }
+
   if (req.method === "POST" && segments.length === 2 && segments[1] === "projects") {
     try {
       const body = await readJsonBody<{
@@ -1416,6 +1442,42 @@ const handleApi = async (req: IncomingMessage, res: ServerResponse, repoRoot: st
         sessionId: session.id
       });
       sendJson(res, 201, session);
+      return;
+    } catch (error) {
+      if (error instanceof SyntaxError) {
+        sendBadRequest(res, "Invalid JSON body.");
+        return;
+      }
+      sendError(res, error);
+      return;
+    }
+  }
+
+  if (
+    req.method === "PUT" &&
+    segments.length === 5 &&
+    segments[1] === "conversations" &&
+    segments[3] === "sessions"
+  ) {
+    try {
+      const body = await readJsonBody<{ model?: string }>(req);
+      let conversation: Conversation;
+      let session: Session;
+      try {
+        conversation = await readConversation(requestRepoRoot, segments[2]);
+        session = await readSession(requestRepoRoot, segments[2], segments[4]);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+          sendNotFound(res);
+          return;
+        }
+        throw error;
+      }
+      const nextModel = body.model?.trim() || getDefaultModel();
+      session.model = nextModel;
+      await updateSessionTimestamp(requestRepoRoot, conversation.id, session);
+      await updateConversationTimestamp(requestRepoRoot, conversation);
+      sendJson(res, 200, session);
       return;
     } catch (error) {
       if (error instanceof SyntaxError) {
