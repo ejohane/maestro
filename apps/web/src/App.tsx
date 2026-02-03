@@ -50,6 +50,10 @@ import {
   type PromptInputMessage,
   usePromptInputAttachments,
 } from "./components/ai-elements/prompt-input"
+import {
+  ContextUsageIndicator,
+  type ContextUsage,
+} from "./components/ai-elements/context-usage"
 import { ModelSelector, type ModelOption } from "./components/ai-elements/model-selector"
 import {
   Breadcrumb,
@@ -254,6 +258,69 @@ type MessageBranchEntry = {
   parts: StructuredMessagePart[]
   sources: SourceCitation[]
   label?: string
+}
+
+const parseUsageNumber = (value: unknown): number | undefined => {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value
+  }
+  if (typeof value === "string") {
+    const parsed = Number.parseFloat(value)
+    if (Number.isFinite(parsed)) {
+      return parsed
+    }
+  }
+  return undefined
+}
+
+const extractUsageFromMetadata = (
+  metadata?: Record<string, unknown>
+): ContextUsage | null => {
+  if (!metadata) {
+    return null
+  }
+  const usageCandidate =
+    (metadata.usage ??
+      metadata.usageSummary ??
+      metadata.usage_summary ??
+      metadata.tokenUsage ??
+      metadata.tokens) as Record<string, unknown> | undefined
+  if (!usageCandidate || typeof usageCandidate !== "object" || Array.isArray(usageCandidate)) {
+    return null
+  }
+  const record = usageCandidate as Record<string, unknown>
+  const inputTokens = parseUsageNumber(
+    record.inputTokens ?? record.promptTokens ?? record.input_tokens ?? record.prompt_tokens
+  )
+  const outputTokens = parseUsageNumber(
+    record.outputTokens ??
+      record.completionTokens ??
+      record.output_tokens ??
+      record.completion_tokens
+  )
+  const totalTokens = parseUsageNumber(
+    record.totalTokens ?? record.total_tokens ?? record.total
+  )
+  const costUsd = parseUsageNumber(
+    record.costUsd ?? record.cost_usd ?? record.cost ?? record.totalCostUsd ?? record.total_cost_usd
+  )
+  const model = typeof record.model === "string" ? record.model : undefined
+  if (
+    typeof inputTokens !== "number" &&
+    typeof outputTokens !== "number" &&
+    typeof totalTokens !== "number" &&
+    typeof costUsd !== "number"
+  ) {
+    return null
+  }
+  return {
+    inputTokens,
+    outputTokens,
+    totalTokens,
+    costUsd,
+    model,
+    source: "metadata",
+  }
 }
 
 const App = () => {
@@ -637,6 +704,27 @@ const App = () => {
     return options
   }, [availableModels, fallbackModel, selectedChat?.model])
   const selectedModel = selectedChat?.model ?? fallbackModel
+  const usageFromMessages = React.useMemo(() => {
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      const usage = extractUsageFromMetadata(messages[index]?.metadata)
+      if (usage) {
+        return usage
+      }
+    }
+    return null
+  }, [messages])
+  const stubUsage = React.useMemo<ContextUsage>(
+    () => ({
+      inputTokens: 1200,
+      outputTokens: 840,
+      totalTokens: 2040,
+      costUsd: 0.08,
+      model: selectedModel,
+      source: "stub",
+    }),
+    [selectedModel]
+  )
+  const contextUsage = usageFromMessages ?? stubUsage
 
   const recentSessions = React.useMemo(() => {
     const sessions: RecentSession[] = []
@@ -3353,7 +3441,7 @@ const App = () => {
                     disabled={promptDisabled}
                   />
                   <PromptInputFooter>
-                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                       <PromptInputTools>
                         <ModelSelector
                           models={modelOptions}
@@ -3371,6 +3459,7 @@ const App = () => {
                           </PromptInputActionMenuContent>
                         </PromptInputActionMenu>
                       </PromptInputTools>
+                      <ContextUsageIndicator usage={contextUsage} />
                       <span>Shift + Enter for a new line</span>
                     </div>
                     <PromptInputSubmit
