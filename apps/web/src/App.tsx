@@ -34,6 +34,11 @@ import {
 import { ReasoningSection } from "./components/ai-elements/reasoning"
 import { PlanSection, type PlanStep } from "./components/ai-elements/plan"
 import {
+  QueueSection,
+  TaskListSection,
+  type TaskItem,
+} from "./components/ai-elements/task-queue"
+import {
   ToolInvocationCard,
   ToolResultCard,
 } from "./components/ai-elements/tool-invocation"
@@ -261,6 +266,18 @@ type PlanEntry = {
   isStreaming?: boolean
 }
 
+type TaskEntry = {
+  id: string
+  title?: string
+  summary?: string
+  items: TaskItem[]
+  isStreaming?: boolean
+}
+
+type QueueEntry = TaskEntry & {
+  totalCount?: number
+}
+
 type MessageBranchEntry = {
   id: string
   content: string
@@ -341,6 +358,149 @@ const parsePlanSteps = (value: unknown, fallbackId: string): PlanStep[] => {
       .filter((step): step is PlanStep => Boolean(step))
   }
   const single = parsePlanStep(value, fallbackId, 0)
+  return single ? [single] : []
+}
+
+const parseProgressNumber = (value: unknown): number | undefined => {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value
+  }
+  if (typeof value === "string") {
+    const parsed = Number.parseFloat(value)
+    if (Number.isFinite(parsed)) {
+      return parsed
+    }
+  }
+  return undefined
+}
+
+const normalizePercent = (value: number): number => {
+  if (!Number.isFinite(value)) {
+    return 0
+  }
+  return value <= 1 && value >= 0 ? value * 100 : value
+}
+
+const clampPercent = (value: number): number => {
+  return Math.max(0, Math.min(100, value))
+}
+
+const parseProgressValue = (
+  value: unknown
+): { value: number; label?: string } | null => {
+  if (value === null || value === undefined) {
+    return null
+  }
+  if (typeof value === "object" && !Array.isArray(value)) {
+    const record = value as Record<string, unknown>
+    const current = parseProgressNumber(record.current ?? record.completed ?? record.done)
+    const total = parseProgressNumber(record.total ?? record.max ?? record.goal)
+    if (typeof current === "number" && typeof total === "number" && total > 0) {
+      const percent = clampPercent((current / total) * 100)
+      return { value: percent, label: `${current}/${total}` }
+    }
+    const nested = parseProgressValue(
+      record.percent ?? record.percentage ?? record.progress ?? record.value
+    )
+    if (nested) {
+      return nested
+    }
+  }
+  if (typeof value === "string") {
+    const trimmed = value.trim()
+    if (!trimmed) {
+      return null
+    }
+    if (trimmed.endsWith("%")) {
+      const parsed = Number.parseFloat(trimmed.slice(0, -1))
+      if (Number.isFinite(parsed)) {
+        return { value: clampPercent(parsed), label: trimmed }
+      }
+    }
+    const fractionMatch = trimmed.match(/^(\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)$/)
+    if (fractionMatch) {
+      const current = Number.parseFloat(fractionMatch[1])
+      const total = Number.parseFloat(fractionMatch[2])
+      if (Number.isFinite(current) && Number.isFinite(total) && total > 0) {
+        return { value: clampPercent((current / total) * 100), label: trimmed }
+      }
+    }
+    const parsed = Number.parseFloat(trimmed)
+    if (Number.isFinite(parsed)) {
+      const percent = clampPercent(normalizePercent(parsed))
+      return { value: percent, label: `${Math.round(percent)}%` }
+    }
+    return null
+  }
+  if (typeof value === "number") {
+    const percent = clampPercent(normalizePercent(value))
+    return { value: percent, label: `${Math.round(percent)}%` }
+  }
+  return null
+}
+
+const parseTaskItem = (
+  value: unknown,
+  fallbackId: string,
+  index: number
+): TaskItem | null => {
+  if (typeof value === "string") {
+    const title = value.trim()
+    if (!title) {
+      return null
+    }
+    return { id: `${fallbackId}-item-${index}`, title }
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null
+  }
+  const record = value as Record<string, unknown>
+  const titleCandidate =
+    toTrimmedString(
+      record.title ?? record.label ?? record.name ?? record.task ?? record.item ?? record.summary
+    ) ?? toTrimmedString(record.text)
+  const descriptionCandidate = toTrimmedString(
+    record.description ?? record.detail ?? record.summary ?? record.text
+  )
+  const statusCandidate = toTrimmedString(record.status ?? record.state ?? record.phase)
+  const progressCandidate = parseProgressValue(
+    record.progress ?? record.percent ?? record.percentage ?? record.completion
+  )
+  const isDone =
+    typeof record.done === "boolean"
+      ? record.done
+      : typeof record.completed === "boolean"
+        ? record.completed
+        : typeof record.isDone === "boolean"
+          ? record.isDone
+          : undefined
+  let title = titleCandidate
+  let description = descriptionCandidate
+  if (!title && description) {
+    title = description
+    description = undefined
+  }
+  if (!title) {
+    return null
+  }
+  const status = statusCandidate ?? (isDone ? "Done" : undefined)
+  return {
+    id: typeof record.id === "string" ? record.id : `${fallbackId}-item-${index}`,
+    title,
+    description,
+    status,
+    progress: progressCandidate?.value,
+    progressLabel: progressCandidate?.label,
+  }
+}
+
+const parseTaskItems = (value: unknown, fallbackId: string): TaskItem[] => {
+  if (Array.isArray(value)) {
+    return value
+      .map((item, index) => parseTaskItem(item, fallbackId, index))
+      .filter((item): item is TaskItem => Boolean(item))
+  }
+  const single = parseTaskItem(value, fallbackId, 0)
   return single ? [single] : []
 }
 
@@ -1049,6 +1209,116 @@ const App = () => {
         }
       })
       .filter((entry) => entry.steps.length > 0 || entry.title || entry.summary || entry.isStreaming)
+  }
+
+  const getTaskEntries = (
+    parts: StructuredMessagePart[],
+    messageId: string
+  ): TaskEntry[] => {
+    const taskParts = parts.filter(
+      (
+        part
+      ): part is StructuredMessagePart & { type: "data-task" | "data-tasks"; data?: unknown } =>
+        part.type === "data-task" || part.type === "data-tasks"
+    )
+
+    return taskParts
+      .map((part, index) => {
+        const taskId = part.id ?? `${messageId}-task-${index}`
+        const data = part.data
+        const record =
+          data && typeof data === "object" && !Array.isArray(data)
+            ? (data as Record<string, unknown>)
+            : undefined
+        const title =
+          toTrimmedString(part.label) ??
+          toTrimmedString(record?.title ?? record?.label ?? record?.name ?? record?.task)
+        const summary = toTrimmedString(
+          record?.summary ?? record?.description ?? record?.detail ?? record?.overview
+        )
+        const itemsSource =
+          record?.items ?? record?.tasks ?? record?.steps ?? record?.list ?? record?.queue
+        const items =
+          itemsSource !== undefined
+            ? parseTaskItems(itemsSource, taskId)
+            : parseTaskItems(data, taskId)
+        const statusValue = toTrimmedString(record?.status ?? record?.state)
+        const isStreaming =
+          typeof record?.isStreaming === "boolean"
+            ? record.isStreaming
+            : typeof record?.streaming === "boolean"
+              ? record.streaming
+              : typeof statusValue === "string" &&
+                  ["streaming", "running", "in_progress", "pending"].includes(
+                    statusValue.toLowerCase()
+                  )
+
+        return {
+          id: taskId,
+          title,
+          summary,
+          items,
+          isStreaming,
+        }
+      })
+      .filter((entry) => entry.items.length > 0 || entry.title || entry.summary || entry.isStreaming)
+  }
+
+  const getQueueEntries = (
+    parts: StructuredMessagePart[],
+    messageId: string
+  ): QueueEntry[] => {
+    const queueParts = parts.filter(
+      (
+        part
+      ): part is StructuredMessagePart & { type: "data-queue" | "data-queues"; data?: unknown } =>
+        part.type === "data-queue" || part.type === "data-queues"
+    )
+
+    return queueParts
+      .map((part, index) => {
+        const queueId = part.id ?? `${messageId}-queue-${index}`
+        const data = part.data
+        const record =
+          data && typeof data === "object" && !Array.isArray(data)
+            ? (data as Record<string, unknown>)
+            : undefined
+        const title =
+          toTrimmedString(part.label) ??
+          toTrimmedString(record?.title ?? record?.label ?? record?.name ?? record?.queue)
+        const summary = toTrimmedString(
+          record?.summary ?? record?.description ?? record?.detail ?? record?.overview
+        )
+        const itemsSource =
+          record?.items ?? record?.queue ?? record?.tasks ?? record?.entries ?? record?.list
+        const items =
+          itemsSource !== undefined
+            ? parseTaskItems(itemsSource, queueId)
+            : parseTaskItems(data, queueId)
+        const totalCount = parseProgressNumber(
+          record?.total ?? record?.count ?? record?.size ?? record?.length
+        )
+        const statusValue = toTrimmedString(record?.status ?? record?.state)
+        const isStreaming =
+          typeof record?.isStreaming === "boolean"
+            ? record.isStreaming
+            : typeof record?.streaming === "boolean"
+              ? record.streaming
+              : typeof statusValue === "string" &&
+                  ["streaming", "running", "in_progress", "pending"].includes(
+                    statusValue.toLowerCase()
+                  )
+
+        return {
+          id: queueId,
+          title,
+          summary,
+          items,
+          totalCount,
+          isStreaming,
+        }
+      })
+      .filter((entry) => entry.items.length > 0 || entry.title || entry.summary || entry.isStreaming)
   }
 
   const parseBranchEntries = (
@@ -3339,6 +3609,8 @@ const App = () => {
                     const showReasoning = message.role === "assistant" && Boolean(reasoningText)
                     const checkpointMarkers = getCheckpointMarkers(message.parts, message.id)
                     const planEntries = getPlanEntries(message.parts, message.id)
+                    const taskEntries = getTaskEntries(message.parts, message.id)
+                    const queueEntries = getQueueEntries(message.parts, message.id)
                     const { branches: messageBranches, defaultBranch } = getMessageBranches(
                       message,
                       messageText,
@@ -3435,6 +3707,33 @@ const App = () => {
                                       summary={plan.summary}
                                       steps={plan.steps}
                                       isStreaming={plan.isStreaming ?? message.isStreaming}
+                                    />
+                                  ))}
+                                </div>
+                              ) : null}
+                              {taskEntries.length ? (
+                                <div className="grid gap-2">
+                                  {taskEntries.map((task) => (
+                                    <TaskListSection
+                                      key={task.id}
+                                      title={task.title}
+                                      summary={task.summary}
+                                      items={task.items}
+                                      isStreaming={task.isStreaming ?? message.isStreaming}
+                                    />
+                                  ))}
+                                </div>
+                              ) : null}
+                              {queueEntries.length ? (
+                                <div className="grid gap-2">
+                                  {queueEntries.map((queue) => (
+                                    <QueueSection
+                                      key={queue.id}
+                                      title={queue.title}
+                                      summary={queue.summary}
+                                      items={queue.items}
+                                      totalCount={queue.totalCount}
+                                      isStreaming={queue.isStreaming ?? message.isStreaming}
                                     />
                                   ))}
                                 </div>
