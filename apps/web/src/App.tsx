@@ -32,6 +32,7 @@ import {
   SourcesList,
 } from "./components/ai-elements/sources"
 import { ReasoningSection } from "./components/ai-elements/reasoning"
+import { PlanSection, type PlanStep } from "./components/ai-elements/plan"
 import {
   ToolInvocationCard,
   ToolResultCard,
@@ -252,12 +253,95 @@ type CheckpointMarker = {
   timestamp?: string
 }
 
+type PlanEntry = {
+  id: string
+  title?: string
+  summary?: string
+  steps: PlanStep[]
+  isStreaming?: boolean
+}
+
 type MessageBranchEntry = {
   id: string
   content: string
   parts: StructuredMessagePart[]
   sources: SourceCitation[]
   label?: string
+}
+
+const toTrimmedString = (value: unknown): string | undefined => {
+  if (typeof value !== "string") {
+    return undefined
+  }
+  const trimmed = value.trim()
+  return trimmed.length > 0 ? trimmed : undefined
+}
+
+const toStringArray = (value: unknown): string[] => {
+  if (!Array.isArray(value)) {
+    return []
+  }
+  return value
+    .map((item) => (typeof item === "string" ? item.trim() : ""))
+    .filter((item) => item.length > 0)
+}
+
+const parsePlanStep = (
+  value: unknown,
+  fallbackId: string,
+  index: number
+): PlanStep | null => {
+  if (typeof value === "string") {
+    const title = value.trim()
+    if (!title) {
+      return null
+    }
+    return {
+      id: `${fallbackId}-step-${index}`,
+      title,
+    }
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null
+  }
+  const record = value as Record<string, unknown>
+  const titleCandidate =
+    toTrimmedString(record.title ?? record.label ?? record.name ?? record.step ?? record.summary) ??
+    toTrimmedString(record.text)
+  const descriptionCandidate = toTrimmedString(
+    record.description ?? record.detail ?? record.summary ?? record.text
+  )
+  const bullets = toStringArray(record.items ?? record.steps ?? record.tasks ?? record.bullets)
+  const status = toTrimmedString(record.status ?? record.state)
+  let title = titleCandidate
+  let description = descriptionCandidate
+  if (!title && description) {
+    title = description
+    description = undefined
+  }
+  if (!title && bullets.length > 0) {
+    title = `Step ${index + 1}`
+  }
+  if (!title) {
+    return null
+  }
+  return {
+    id: typeof record.id === "string" ? record.id : `${fallbackId}-step-${index}`,
+    title,
+    description,
+    bullets: bullets.length > 0 ? bullets : undefined,
+    status,
+  }
+}
+
+const parsePlanSteps = (value: unknown, fallbackId: string): PlanStep[] => {
+  if (Array.isArray(value)) {
+    return value
+      .map((item, index) => parsePlanStep(item, fallbackId, index))
+      .filter((step): step is PlanStep => Boolean(step))
+  }
+  const single = parsePlanStep(value, fallbackId, 0)
+  return single ? [single] : []
 }
 
 const parseUsageNumber = (value: unknown): number | undefined => {
@@ -909,6 +993,62 @@ const App = () => {
           timestamp,
         }
       })
+  }
+
+  const getPlanEntries = (
+    parts: StructuredMessagePart[],
+    messageId: string
+  ): PlanEntry[] => {
+    const planParts = parts.filter(
+      (
+        part
+      ): part is StructuredMessagePart & { type: "data-plan" | "data-plans"; data?: unknown } =>
+        part.type === "data-plan" || part.type === "data-plans"
+    )
+
+    return planParts
+      .map((part, index) => {
+        const planId = part.id ?? `${messageId}-plan-${index}`
+        const data = part.data
+        const record =
+          data && typeof data === "object" && !Array.isArray(data)
+            ? (data as Record<string, unknown>)
+            : undefined
+        const title =
+          toTrimmedString(part.label) ??
+          toTrimmedString(record?.title ?? record?.label ?? record?.name)
+        const summary = toTrimmedString(
+          record?.summary ?? record?.description ?? record?.detail ?? record?.overview
+        )
+        const stepsSource =
+          record?.steps ??
+          record?.items ??
+          record?.plan ??
+          record?.tasks ??
+          record?.phases ??
+          record?.checklist
+        const steps =
+          stepsSource !== undefined ? parsePlanSteps(stepsSource, planId) : parsePlanSteps(data, planId)
+        const statusValue = toTrimmedString(record?.status ?? record?.state)
+        const statusStreaming =
+          typeof statusValue === "string" &&
+          ["streaming", "in_progress", "running", "pending"].includes(statusValue.toLowerCase())
+        const streamingFlag =
+          typeof record?.isStreaming === "boolean"
+            ? record.isStreaming
+            : typeof record?.streaming === "boolean"
+              ? record.streaming
+              : undefined
+
+        return {
+          id: planId,
+          title,
+          summary,
+          steps,
+          isStreaming: streamingFlag ?? statusStreaming,
+        }
+      })
+      .filter((entry) => entry.steps.length > 0 || entry.title || entry.summary || entry.isStreaming)
   }
 
   const parseBranchEntries = (
@@ -3198,6 +3338,7 @@ const App = () => {
                     const messageMarkdown = prepareCitationMarkdown(messageText, sources)
                     const showReasoning = message.role === "assistant" && Boolean(reasoningText)
                     const checkpointMarkers = getCheckpointMarkers(message.parts, message.id)
+                    const planEntries = getPlanEntries(message.parts, message.id)
                     const { branches: messageBranches, defaultBranch } = getMessageBranches(
                       message,
                       messageText,
@@ -3284,6 +3425,19 @@ const App = () => {
                                   text={reasoningText}
                                   isStreaming={message.isStreaming}
                                 />
+                              ) : null}
+                              {planEntries.length ? (
+                                <div className="grid gap-2">
+                                  {planEntries.map((plan) => (
+                                    <PlanSection
+                                      key={plan.id}
+                                      title={plan.title}
+                                      summary={plan.summary}
+                                      steps={plan.steps}
+                                      isStreaming={plan.isStreaming ?? message.isStreaming}
+                                    />
+                                  ))}
+                                </div>
                               ) : null}
                               {toolParts.length ? (
                                 <div className="grid gap-2">
