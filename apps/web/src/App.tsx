@@ -17,6 +17,10 @@ import {
 } from "./components/ai-elements/message"
 import { ReasoningSection } from "./components/ai-elements/reasoning"
 import {
+  ToolInvocationCard,
+  ToolResultCard,
+} from "./components/ai-elements/tool-invocation"
+import {
   PromptInput,
   PromptInputFooter,
   PromptInputSubmit,
@@ -1541,6 +1545,33 @@ const App = () => {
     }
   }
 
+  const handleToolApproval = (
+    messageId: string,
+    callId: string,
+    status: "approved" | "rejected"
+  ) => {
+    setMessages((prev) =>
+      prev.map((message) => {
+        if (message.id !== messageId) {
+          return message
+        }
+        const nextParts = message.parts.map((part) => {
+          if (part.type !== "tool" || part.callId !== callId) {
+            return part
+          }
+          return {
+            ...part,
+            approval: {
+              ...(part.approval ?? {}),
+              status,
+            },
+          }
+        })
+        return { ...message, parts: nextParts }
+      })
+    )
+  }
+
   const formatDate = (value?: string) => {
     if (!value) {
       return "Unknown"
@@ -2586,6 +2617,13 @@ const App = () => {
                           typeof text === "string" && text.trim().length > 0
                       )
                       .join("\n\n")
+                    const toolParts = message.parts.filter(
+                      (
+                        part
+                      ): part is StructuredMessagePart & {
+                        type: "tool" | "tool_result"
+                      } => part.type === "tool" || part.type === "tool_result"
+                    )
                     const messageText = getTextFromParts(message.parts) || message.content
                     const hasMessageText = Boolean(messageText)
                     const showReasoning = message.role === "assistant" && Boolean(reasoningText)
@@ -2603,6 +2641,44 @@ const App = () => {
                                   text={reasoningText}
                                   isStreaming={message.isStreaming}
                                 />
+                              ) : null}
+                              {toolParts.length ? (
+                                <div className="grid gap-2">
+                                  {toolParts.map((part, index) =>
+                                    part.type === "tool" ? (
+                                      <ToolInvocationCard
+                                        key={part.id ?? `${message.id}-tool-${index}`}
+                                        call={part}
+                                        isStreaming={message.isStreaming}
+                                        onApprove={
+                                          part.approval?.status === "pending"
+                                            ? () =>
+                                                handleToolApproval(
+                                                  message.id,
+                                                  part.callId,
+                                                  "approved"
+                                                )
+                                            : undefined
+                                        }
+                                        onReject={
+                                          part.approval?.status === "pending"
+                                            ? () =>
+                                                handleToolApproval(
+                                                  message.id,
+                                                  part.callId,
+                                                  "rejected"
+                                                )
+                                            : undefined
+                                        }
+                                      />
+                                    ) : (
+                                      <ToolResultCard
+                                        key={part.id ?? `${message.id}-tool-result-${index}`}
+                                        result={part}
+                                      />
+                                    )
+                                  )}
+                                </div>
                               ) : null}
                               {hasMessageText ? (
                                 <MessageResponse>{messageText}</MessageResponse>
