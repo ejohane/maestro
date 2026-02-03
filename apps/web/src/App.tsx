@@ -81,6 +81,7 @@ import {
 } from "./components/ui/card"
 import { Input } from "./components/ui/input"
 import { Separator } from "./components/ui/separator"
+import { Shimmer } from "./components/ui/shimmer"
 import {
   SidebarInset,
   SidebarProvider,
@@ -3562,8 +3563,17 @@ const App = () => {
             <Conversation className="min-h-[520px] rounded-xl border bg-card shadow-sm">
               <ConversationContent className="gap-4">
                 {isTranscriptLoading ? (
-                  <div className="flex h-full min-h-[320px] items-center justify-center text-sm text-muted-foreground">
-                    <Loader className="mr-2" /> Loading transcript...
+                  <div className="flex h-full min-h-[320px] items-center justify-center">
+                    <div className="grid w-full max-w-lg gap-3 px-4 text-sm text-muted-foreground">
+                      <div className="inline-flex items-center gap-2">
+                        <Loader className="mr-1" /> Loading transcript...
+                      </div>
+                      <div className="grid gap-2">
+                        <Shimmer className="h-4 w-32" />
+                        <Shimmer className="h-3 w-full" />
+                        <Shimmer className="h-3 w-5/6" />
+                      </div>
+                    </div>
                   </div>
                 ) : messages.length ? (
                   messages.map((message, messageIndex) => {
@@ -3830,9 +3840,15 @@ const App = () => {
                                 </MessageToolbar>
                               ) : null}
                               {message.isStreaming && !hasMessageText && isAwaitingFirstToken ? (
-                                <span className="inline-flex items-center gap-2 text-muted-foreground">
-                                  <Loader /> Waiting for response...
-                                </span>
+                                <div className="grid gap-2">
+                                  <span className="inline-flex items-center gap-2 text-muted-foreground">
+                                    <Loader /> Waiting for response...
+                                  </span>
+                                  <div className="grid gap-1">
+                                    <Shimmer className="h-3 w-4/5" />
+                                    <Shimmer className="h-3 w-2/3" />
+                                  </div>
+                                </div>
                               ) : null}
                             </>
                           ) : (

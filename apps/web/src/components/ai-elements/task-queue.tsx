@@ -4,7 +4,7 @@ import type { HTMLAttributes } from "react"
 import { cn } from "../../lib/utils"
 import { Badge } from "../ui/badge"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "../ui/collapsible"
-import { Skeleton } from "../ui/skeleton"
+import { Shimmer } from "../ui/shimmer"
 
 export type TaskItem = {
   id: string
@@ -33,9 +33,9 @@ const ItemStatusBadge = ({ status }: { status: string }) => (
 
 const SectionShimmer = () => (
   <div className="grid gap-2 rounded-lg border border-dashed bg-muted/10 p-3">
-    <Skeleton className="h-3 w-28" />
-    <Skeleton className="h-3 w-4/5" />
-    <Skeleton className="h-3 w-2/3" />
+    <Shimmer className="h-3 w-28" />
+    <Shimmer className="h-3 w-4/5" />
+    <Shimmer className="h-3 w-2/3" />
   </div>
 )
 
