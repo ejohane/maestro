@@ -11,9 +11,19 @@ import {
 import { Loader } from "./components/ai-elements/loader"
 import {
   Message,
+  MessageAction,
+  MessageActions,
+  MessageBranch,
+  MessageBranchContent,
+  MessageBranchNext,
+  MessageBranchPage,
+  MessageBranchPrevious,
+  MessageBranchSelector,
+  MessageCheckpoint,
   MessageContent,
   MessageAttachments,
   MessageResponse,
+  MessageToolbar,
 } from "./components/ai-elements/message"
 import {
   CitationAnchor,
@@ -61,6 +71,7 @@ import {
 } from "./components/ui/sidebar"
 import { useTheme } from "./hooks/use-theme"
 import type { FileReference, MessageRole, SourceCitation } from "@maestro/core"
+import { Check, Copy, RotateCcw } from "lucide-react"
 import {
   applyMessageDelta,
   applyMessageEnd,
@@ -181,7 +192,6 @@ type MergedPullRequestAction = {
   workspaceDeleted?: boolean
 }
 type ChatMessage = ClientMessage
-
 type ModelProviderModel = {
   id: string
   name?: string
@@ -191,6 +201,22 @@ type ModelProvider = {
   id: string
   name?: string
   models: ModelProviderModel[]
+}
+
+type CheckpointMarker = {
+  id: string
+  label: string
+  description?: string
+  status?: string
+  timestamp?: string
+}
+
+type MessageBranchEntry = {
+  id: string
+  content: string
+  parts: StructuredMessagePart[]
+  sources: SourceCitation[]
+  label?: string
 }
 
 const App = () => {
@@ -236,6 +262,7 @@ const App = () => {
   const [isDeletingWorkspace, setIsDeletingWorkspace] = React.useState(false)
   const [deleteWorkspaceError, setDeleteWorkspaceError] = React.useState<string | null>(null)
   const [messages, setMessages] = React.useState<ChatMessage[]>([])
+  const [copiedMessageId, setCopiedMessageId] = React.useState<string | null>(null)
   const [chatStatus, setChatStatus] = React.useState<"idle" | "streaming" | "error">(
     "idle"
   )
@@ -245,6 +272,7 @@ const App = () => {
   const [isAwaitingFirstToken, setIsAwaitingFirstToken] = React.useState(false)
   const streamAbortRef = React.useRef<AbortController | null>(null)
   const transcriptAbortRef = React.useRef<AbortController | null>(null)
+  const copyTimeoutRef = React.useRef<number | null>(null)
   const [openPullRequests, setOpenPullRequests] = React.useState<OpenPullRequest[]>([])
   const [isLoadingPullRequests, setIsLoadingPullRequests] = React.useState(false)
   const [pullRequestsError, setPullRequestsError] = React.useState<string | null>(null)
@@ -632,6 +660,190 @@ const App = () => {
   const createLocalMessageId = React.useCallback(() => {
     return `m_${Math.random().toString(36).slice(2, 10)}`
   }, [])
+
+  React.useEffect(() => {
+    return () => {
+      if (copyTimeoutRef.current !== null) {
+        window.clearTimeout(copyTimeoutRef.current)
+      }
+    }
+  }, [])
+
+  const getSourcesFromParts = (parts: StructuredMessagePart[]): SourceCitation[] => {
+    return parts
+      .filter(
+        (
+          part
+        ): part is StructuredMessagePart & {
+          type: "sources"
+          sources: SourceCitation[]
+        } => part.type === "sources"
+      )
+      .flatMap((part) => part.sources)
+      .filter((source): source is SourceCitation => Boolean(source))
+  }
+
+  const getCheckpointMarkers = (
+    parts: StructuredMessagePart[],
+    messageId: string
+  ): CheckpointMarker[] => {
+    return parts
+      .filter(
+        (
+          part
+        ): part is StructuredMessagePart & { type: "data-checkpoint"; data?: unknown } =>
+          part.type === "data-checkpoint"
+      )
+      .map((part, index) => {
+        const data =
+          part.data && typeof part.data === "object" ? (part.data as Record<string, unknown>) : {}
+        const labelCandidate =
+          typeof part.label === "string"
+            ? part.label
+            : typeof data.label === "string"
+              ? data.label
+              : typeof data.name === "string"
+                ? data.name
+                : undefined
+        const label = labelCandidate?.trim() || `Checkpoint ${index + 1}`
+        const description =
+          typeof data.description === "string"
+            ? data.description
+            : typeof data.detail === "string"
+              ? data.detail
+              : undefined
+        const status = typeof data.status === "string" ? data.status : undefined
+        const timestamp =
+          typeof data.timestamp === "string"
+            ? data.timestamp
+            : typeof data.ts === "string"
+              ? data.ts
+              : undefined
+        return {
+          id: part.id ?? `${messageId}-checkpoint-${index}`,
+          label,
+          description,
+          status,
+          timestamp,
+        }
+      })
+  }
+
+  const parseBranchEntries = (
+    value: unknown,
+    messageId: string
+  ): MessageBranchEntry[] => {
+    if (!Array.isArray(value)) {
+      return []
+    }
+
+    return value
+      .map((branch, index) => {
+        if (typeof branch === "string") {
+          const content = branch.trim()
+          if (!content) {
+            return null
+          }
+          const parts = normalizeMessageParts(content)
+          return {
+            id: `${messageId}-branch-${index}`,
+            content,
+            parts,
+            sources: getSourcesFromParts(parts),
+          }
+        }
+
+        if (branch && typeof branch === "object") {
+          const record = branch as Record<string, unknown>
+          const contentValue =
+            typeof record.content === "string"
+              ? record.content
+              : typeof record.text === "string"
+                ? record.text
+                : ""
+          const partsValue = Array.isArray(record.parts)
+            ? (record.parts as StructuredMessagePart[])
+            : normalizeMessageParts(contentValue)
+          const sourcesValue = Array.isArray(record.sources)
+            ? (record.sources as SourceCitation[]).filter(Boolean)
+            : getSourcesFromParts(partsValue)
+          const content = contentValue || getTextFromParts(partsValue)
+          if (!content.trim()) {
+            return null
+          }
+          const label = typeof record.label === "string" ? record.label : undefined
+          return {
+            id:
+              typeof record.id === "string"
+                ? record.id
+                : `${messageId}-branch-${index}`,
+            content,
+            parts: partsValue,
+            sources: sourcesValue,
+            label,
+          }
+        }
+
+        return null
+      })
+      .filter((branch): branch is MessageBranchEntry => Boolean(branch))
+  }
+
+  const getMessageBranches = (
+    message: ChatMessage,
+    baseText: string,
+    baseSources: SourceCitation[]
+  ) => {
+    const metadata =
+      message.metadata && typeof message.metadata === "object"
+        ? (message.metadata as Record<string, unknown>)
+        : undefined
+    const metadataBranches = metadata?.branches
+    const dataBranchParts = message.parts.filter(
+      (part) => part.type === "data-branch" || part.type === "data-branches"
+    ) as Array<StructuredMessagePart & { data?: unknown }>
+    const parsedBranches = [
+      ...parseBranchEntries(metadataBranches, message.id),
+      ...dataBranchParts.flatMap((part) => {
+        if (Array.isArray(part.data)) {
+          return parseBranchEntries(part.data, message.id)
+        }
+        if (part.data && typeof part.data === "object") {
+          const record = part.data as Record<string, unknown>
+          if (Array.isArray(record.branches)) {
+            return parseBranchEntries(record.branches, message.id)
+          }
+        }
+        return []
+      }),
+    ]
+
+    const normalizedBase = baseText.trim()
+    const uniqueBranches = parsedBranches.filter(
+      (branch) => branch.content.trim() && branch.content.trim() !== normalizedBase
+    )
+    const baseBranch = normalizedBase
+      ? [
+          {
+            id: `${message.id}-branch-base`,
+            content: baseText,
+            parts: message.parts,
+            sources: baseSources,
+          },
+        ]
+      : []
+    const branches = [...baseBranch, ...uniqueBranches]
+    const metadataBranchIndex =
+      typeof metadata?.branchIndex === "number" ? metadata.branchIndex : undefined
+    const defaultBranch =
+      typeof metadataBranchIndex === "number" &&
+      metadataBranchIndex >= 0 &&
+      metadataBranchIndex < branches.length
+        ? metadataBranchIndex
+        : 0
+
+    return { branches, defaultBranch }
+  }
 
   React.useEffect(() => {
     streamAbortRef.current?.abort()
@@ -1550,6 +1762,63 @@ const App = () => {
       streamAbortRef.current = null
     }
   }
+
+  const handleCopyMessage = React.useCallback(
+    async (messageId: string, text: string) => {
+      const trimmed = text.trim()
+      if (!trimmed) {
+        return
+      }
+
+      try {
+        if (navigator.clipboard?.writeText) {
+          await navigator.clipboard.writeText(trimmed)
+        } else {
+          const textarea = document.createElement("textarea")
+          textarea.value = trimmed
+          textarea.style.position = "fixed"
+          textarea.style.opacity = "0"
+          document.body.appendChild(textarea)
+          textarea.select()
+          document.execCommand("copy")
+          document.body.removeChild(textarea)
+        }
+      } catch {
+        return
+      }
+
+      setCopiedMessageId(messageId)
+      if (copyTimeoutRef.current !== null) {
+        window.clearTimeout(copyTimeoutRef.current)
+      }
+      copyTimeoutRef.current = window.setTimeout(() => {
+        setCopiedMessageId((current) => (current === messageId ? null : current))
+      }, 2000)
+    },
+    [setCopiedMessageId]
+  )
+
+  const handleRetryMessage = React.useCallback(
+    (messageIndex: number) => {
+      if (chatStatus === "streaming") {
+        return
+      }
+
+      for (let index = messageIndex; index >= 0; index -= 1) {
+        const candidate = messages[index]
+        if (candidate?.role !== "user") {
+          continue
+        }
+        const candidateText =
+          getTextFromParts(candidate.parts) || candidate.content || ""
+        if (candidateText.trim()) {
+          void handlePromptSubmit({ text: candidateText, files: [] })
+          return
+        }
+      }
+    },
+    [chatStatus, messages, handlePromptSubmit]
+  )
 
   const handleToolApproval = (
     messageId: string,
@@ -2594,7 +2863,7 @@ const App = () => {
                     <Loader className="mr-2" /> Loading transcript...
                   </div>
                 ) : messages.length ? (
-                  messages.map((message) => {
+                  messages.map((message, messageIndex) => {
                     const attachmentParts = message.parts.filter(
                       (part): part is StructuredMessagePart & {
                         type: "file"
@@ -2630,27 +2899,90 @@ const App = () => {
                         type: "tool" | "tool_result"
                       } => part.type === "tool" || part.type === "tool_result"
                     )
-                    const sourcesParts = message.parts.filter(
-                      (
-                        part
-                      ): part is StructuredMessagePart & {
-                        type: "sources"
-                        sources: SourceCitation[]
-                      } => part.type === "sources"
-                    )
-                    const sources = sourcesParts
-                      .flatMap((part) => part.sources)
-                      .filter((source): source is SourceCitation => Boolean(source))
+                    const sources = getSourcesFromParts(message.parts)
                     const messageText = getTextFromParts(message.parts) || message.content || ""
                     const hasMessageText = Boolean(messageText)
                     const messageMarkdown = prepareCitationMarkdown(messageText, sources)
                     const showReasoning = message.role === "assistant" && Boolean(reasoningText)
+                    const checkpointMarkers = getCheckpointMarkers(message.parts, message.id)
+                    const { branches: messageBranches, defaultBranch } = getMessageBranches(
+                      message,
+                      messageText,
+                      sources
+                    )
+                    const hasBranches = messageBranches.length > 1
+                    const isCopied = copiedMessageId === message.id
+                    const lastUserMessageText =
+                      message.role === "assistant"
+                        ? (() => {
+                            for (let index = messageIndex; index >= 0; index -= 1) {
+                              const candidate = messages[index]
+                              if (candidate?.role !== "user") {
+                                continue
+                              }
+                              const candidateText =
+                                getTextFromParts(candidate.parts) ||
+                                candidate.content ||
+                                ""
+                              if (candidateText.trim()) {
+                                return candidateText
+                              }
+                            }
+                            return ""
+                          })()
+                        : ""
+                    const canRetry =
+                      message.role === "assistant" &&
+                      !message.isStreaming &&
+                      !isChatStreaming &&
+                      Boolean(lastUserMessageText.trim())
+                    const canCopy = Boolean(messageText.trim())
+                    const showActions = canCopy || canRetry
+                    const showToolbar = showActions || hasBranches
+                    const toolbarClassName = hasBranches ? undefined : "justify-end"
+                    const actionButtons = showActions ? (
+                      <MessageActions>
+                        {canCopy ? (
+                          <MessageAction
+                            aria-label={isCopied ? "Copied" : "Copy message"}
+                            label={isCopied ? "Copied" : "Copy message"}
+                            onClick={() => void handleCopyMessage(message.id, messageText)}
+                            tooltip={isCopied ? "Copied" : "Copy"}
+                          >
+                            {isCopied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
+                          </MessageAction>
+                        ) : null}
+                        {canRetry ? (
+                          <MessageAction
+                            aria-label="Retry"
+                            label="Retry"
+                            onClick={() => handleRetryMessage(messageIndex)}
+                            tooltip="Retry"
+                          >
+                            <RotateCcw className="size-3.5" />
+                          </MessageAction>
+                        ) : null}
+                      </MessageActions>
+                    ) : null
 
                     return (
                       <Message key={message.id} from={message.role}>
                         <MessageContent>
                           {attachments.length ? (
                             <MessageAttachments attachments={attachments} />
+                          ) : null}
+                          {checkpointMarkers.length ? (
+                            <div className="flex flex-wrap gap-2">
+                              {checkpointMarkers.map((checkpoint) => (
+                                <MessageCheckpoint
+                                  key={checkpoint.id}
+                                  label={checkpoint.label}
+                                  description={checkpoint.description}
+                                  status={checkpoint.status}
+                                  timestamp={checkpoint.timestamp}
+                                />
+                              ))}
+                            </div>
                           ) : null}
                           {message.role === "assistant" ? (
                             <>
@@ -2698,14 +3030,59 @@ const App = () => {
                                   )}
                                 </div>
                               ) : null}
-                              {hasMessageText ? (
-                                <CitationProvider sources={sources}>
-                                  <MessageResponse components={{ a: CitationAnchor }}>
-                                    {messageMarkdown}
-                                  </MessageResponse>
-                                </CitationProvider>
+                              {hasBranches ? (
+                                <MessageBranch defaultBranch={defaultBranch}>
+                                  <MessageBranchContent>
+                                    {messageBranches.map((branch) => {
+                                      const branchMarkdown = prepareCitationMarkdown(
+                                        branch.content,
+                                        branch.sources
+                                      )
+
+                                      return (
+                                        <div className="grid gap-2" key={branch.id}>
+                                          <CitationProvider sources={branch.sources}>
+                                            <MessageResponse components={{ a: CitationAnchor }}>
+                                              {branchMarkdown}
+                                            </MessageResponse>
+                                          </CitationProvider>
+                                          {branch.sources.length ? (
+                                            <SourcesList sources={branch.sources} />
+                                          ) : null}
+                                        </div>
+                                      )
+                                    })}
+                                  </MessageBranchContent>
+                                  {showToolbar ? (
+                                    <MessageToolbar className={toolbarClassName}>
+                                      {actionButtons}
+                                      <MessageBranchSelector from={message.role}>
+                                        <MessageBranchPrevious />
+                                        <MessageBranchPage />
+                                        <MessageBranchNext />
+                                      </MessageBranchSelector>
+                                    </MessageToolbar>
+                                  ) : null}
+                                </MessageBranch>
+                              ) : hasMessageText ? (
+                                <>
+                                  <CitationProvider sources={sources}>
+                                    <MessageResponse components={{ a: CitationAnchor }}>
+                                      {messageMarkdown}
+                                    </MessageResponse>
+                                  </CitationProvider>
+                                  {sources.length ? <SourcesList sources={sources} /> : null}
+                                  {showToolbar ? (
+                                    <MessageToolbar className={toolbarClassName}>
+                                      {actionButtons}
+                                    </MessageToolbar>
+                                  ) : null}
+                                </>
+                              ) : showToolbar ? (
+                                <MessageToolbar className={toolbarClassName}>
+                                  {actionButtons}
+                                </MessageToolbar>
                               ) : null}
-                              {sources.length ? <SourcesList sources={sources} /> : null}
                               {message.isStreaming && !hasMessageText && isAwaitingFirstToken ? (
                                 <span className="inline-flex items-center gap-2 text-muted-foreground">
                                   <Loader /> Waiting for response...
@@ -2713,11 +3090,18 @@ const App = () => {
                               ) : null}
                             </>
                           ) : (
-                            <CitationProvider sources={sources}>
-                              <MessageResponse components={{ a: CitationAnchor }}>
-                                {messageMarkdown}
-                              </MessageResponse>
-                            </CitationProvider>
+                            <>
+                              <CitationProvider sources={sources}>
+                                <MessageResponse components={{ a: CitationAnchor }}>
+                                  {messageMarkdown}
+                                </MessageResponse>
+                              </CitationProvider>
+                              {showToolbar ? (
+                                <MessageToolbar className={toolbarClassName}>
+                                  {actionButtons}
+                                </MessageToolbar>
+                              ) : null}
+                            </>
                           )}
                         </MessageContent>
                       </Message>

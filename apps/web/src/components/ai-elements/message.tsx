@@ -337,6 +337,36 @@ export const MessageToolbar = ({
   </div>
 )
 
+export type MessageCheckpointProps = HTMLAttributes<HTMLDivElement> & {
+  label: string
+  description?: string
+  status?: string
+  timestamp?: string
+}
+
+export const MessageCheckpoint = ({
+  label,
+  description,
+  status,
+  timestamp,
+  className,
+  ...props
+}: MessageCheckpointProps) => (
+  <div
+    className={cn(
+      "inline-flex flex-wrap items-center gap-2 rounded-full border bg-muted/30 px-3 py-1 text-xs text-muted-foreground",
+      className
+    )}
+    {...props}
+  >
+    <span className="h-1.5 w-1.5 rounded-full bg-emerald-500/70" aria-hidden="true" />
+    <span className="font-medium text-foreground">{label}</span>
+    {status ? <span className="text-[10px] uppercase tracking-[0.2em]">{status}</span> : null}
+    {timestamp ? <span className="text-[10px]">{timestamp}</span> : null}
+    {description ? <span>{description}</span> : null}
+  </div>
+)
+
 type MessageAttachmentMeta = {
   id: string
   name?: string
