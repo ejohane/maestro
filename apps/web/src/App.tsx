@@ -15,6 +15,12 @@ import {
   MessageAttachments,
   MessageResponse,
 } from "./components/ai-elements/message"
+import {
+  CitationAnchor,
+  CitationProvider,
+  prepareCitationMarkdown,
+  SourcesList,
+} from "./components/ai-elements/sources"
 import { ReasoningSection } from "./components/ai-elements/reasoning"
 import {
   ToolInvocationCard,
@@ -54,7 +60,7 @@ import {
   SidebarTrigger,
 } from "./components/ui/sidebar"
 import { useTheme } from "./hooks/use-theme"
-import type { FileReference, MessageRole } from "@maestro/core"
+import type { FileReference, MessageRole, SourceCitation } from "@maestro/core"
 import {
   applyMessageDelta,
   applyMessageEnd,
@@ -2624,8 +2630,20 @@ const App = () => {
                         type: "tool" | "tool_result"
                       } => part.type === "tool" || part.type === "tool_result"
                     )
-                    const messageText = getTextFromParts(message.parts) || message.content
+                    const sourcesParts = message.parts.filter(
+                      (
+                        part
+                      ): part is StructuredMessagePart & {
+                        type: "sources"
+                        sources: SourceCitation[]
+                      } => part.type === "sources"
+                    )
+                    const sources = sourcesParts
+                      .flatMap((part) => part.sources)
+                      .filter((source): source is SourceCitation => Boolean(source))
+                    const messageText = getTextFromParts(message.parts) || message.content || ""
                     const hasMessageText = Boolean(messageText)
+                    const messageMarkdown = prepareCitationMarkdown(messageText, sources)
                     const showReasoning = message.role === "assistant" && Boolean(reasoningText)
 
                     return (
@@ -2681,8 +2699,13 @@ const App = () => {
                                 </div>
                               ) : null}
                               {hasMessageText ? (
-                                <MessageResponse>{messageText}</MessageResponse>
+                                <CitationProvider sources={sources}>
+                                  <MessageResponse components={{ a: CitationAnchor }}>
+                                    {messageMarkdown}
+                                  </MessageResponse>
+                                </CitationProvider>
                               ) : null}
+                              {sources.length ? <SourcesList sources={sources} /> : null}
                               {message.isStreaming && !hasMessageText && isAwaitingFirstToken ? (
                                 <span className="inline-flex items-center gap-2 text-muted-foreground">
                                   <Loader /> Waiting for response...
@@ -2690,7 +2713,11 @@ const App = () => {
                               ) : null}
                             </>
                           ) : (
-                            <MessageResponse>{messageText}</MessageResponse>
+                            <CitationProvider sources={sources}>
+                              <MessageResponse components={{ a: CitationAnchor }}>
+                                {messageMarkdown}
+                              </MessageResponse>
+                            </CitationProvider>
                           )}
                         </MessageContent>
                       </Message>
