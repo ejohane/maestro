@@ -38,10 +38,17 @@ import {
 } from "./components/ai-elements/tool-invocation"
 import {
   PromptInput,
+  PromptInputActionAddAttachments,
+  PromptInputActionMenu,
+  PromptInputActionMenuContent,
+  PromptInputActionMenuTrigger,
   PromptInputFooter,
+  PromptInputHeader,
   PromptInputSubmit,
   PromptInputTextarea,
+  PromptInputTools,
   type PromptInputMessage,
+  usePromptInputAttachments,
 } from "./components/ai-elements/prompt-input"
 import {
   Breadcrumb,
@@ -82,6 +89,29 @@ import {
   type ClientMessage,
   type StructuredMessagePart,
 } from "./lib/messages"
+
+const PromptInputAttachmentsPreview = () => {
+  const attachments = usePromptInputAttachments()
+
+  if (!attachments.files.length) {
+    return null
+  }
+
+  const items = attachments.files.map((file) => ({
+    id: file.id,
+    name: file.filename,
+    path: file.url,
+    mimeType: file.mediaType,
+    size: file.size,
+    source: "upload" as const,
+  }))
+
+  return (
+    <PromptInputHeader className="text-foreground">
+      <MessageAttachments attachments={items} onRemove={attachments.remove} />
+    </PromptInputHeader>
+  )
+}
 
 type GitProvider = "github" | "gitlab"
 
@@ -659,6 +689,9 @@ const App = () => {
   )
   const createLocalMessageId = React.useCallback(() => {
     return `m_${Math.random().toString(36).slice(2, 10)}`
+  }, [])
+  const createLocalFileId = React.useCallback(() => {
+    return `f_${Math.random().toString(36).slice(2, 10)}`
   }, [])
 
   React.useEffect(() => {
@@ -1595,7 +1628,25 @@ const App = () => {
     const sessionId = selectedChat.id
     const userMessageId = createLocalMessageId()
     const assistantMessageId = createLocalMessageId()
-    const userParts = normalizeMessageParts(content)
+    const attachmentParts: StructuredMessagePart[] = message.files.map((file) => {
+      const attachmentId = createLocalFileId()
+      return {
+        type: "file",
+        id: attachmentId,
+        file: {
+          id: attachmentId,
+          name: file.filename,
+          path: file.url,
+          mimeType: file.mediaType,
+          size: file.size,
+          source: "upload",
+        },
+      }
+    })
+    const userParts = normalizeMessageParts(content, [
+      { type: "text", text: content },
+      ...attachmentParts,
+    ])
 
     setPromptValue("")
     setChatError(null)
@@ -3117,7 +3168,8 @@ const App = () => {
               </ConversationContent>
               <ConversationScrollButton />
               <div className="border-t bg-background/80 p-4">
-                <PromptInput onSubmit={handlePromptSubmit}>
+                <PromptInput multiple onSubmit={handlePromptSubmit}>
+                  <PromptInputAttachmentsPreview />
                   <PromptInputTextarea
                     value={promptValue}
                     onChange={handlePromptChange}
@@ -3125,8 +3177,19 @@ const App = () => {
                     disabled={promptDisabled}
                   />
                   <PromptInputFooter>
-                    <div className="text-xs text-muted-foreground">
-                      Shift + Enter for a new line
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <PromptInputTools>
+                        <PromptInputActionMenu>
+                          <PromptInputActionMenuTrigger
+                            aria-label="Prompt actions"
+                            disabled={promptDisabled}
+                          />
+                          <PromptInputActionMenuContent>
+                            <PromptInputActionAddAttachments disabled={promptDisabled} />
+                          </PromptInputActionMenuContent>
+                        </PromptInputActionMenu>
+                      </PromptInputTools>
+                      <span>Shift + Enter for a new line</span>
                     </div>
                     <PromptInputSubmit
                       type="submit"

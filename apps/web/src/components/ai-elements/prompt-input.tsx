@@ -68,6 +68,7 @@ type FileUIPart = {
   url?: string
   mediaType?: string
   filename?: string
+  size?: number
 }
 
 type SourceDocumentUIPart = {
@@ -157,6 +158,7 @@ export function PromptInputProvider({
           url: URL.createObjectURL(file),
           mediaType: file.type,
           filename: file.name,
+          size: file.size,
         }))
       )
     )
@@ -424,6 +426,7 @@ export const PromptInput = ({
             url: URL.createObjectURL(file),
             mediaType: file.type,
             filename: file.name,
+            size: file.size,
           })
         }
         return prev.concat(next)
