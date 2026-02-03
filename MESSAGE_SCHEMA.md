@@ -131,6 +131,88 @@ Any part with a type that starts with `data-` is reserved for structured payload
 }
 ```
 
+## Streaming events (SSE)
+
+The web client streams assistant responses via the SSE endpoint:
+
+`POST /api/conversations/{conversationId}/sessions/{sessionId}/chat/stream`
+
+Events are emitted as `event:` + `data:` pairs. The client accepts both `message_part_updated` and
+`message.part.updated` for backward compatibility.
+
+### Event: `message_start`
+
+```json
+{ "id": "msg_abc", "role": "assistant" }
+```
+
+### Event: `message_part_updated`
+
+```json
+{
+  "id": "msg_abc",
+  "partType": "text",
+  "delta": "more text",
+  "part": { "type": "text", "id": "part_1", "text": "Hello world" }
+}
+```
+
+Notes:
+- `part` is the merged, latest view of the part.
+- `delta` is passed through to the client for incremental updates.
+- Include a stable `id` or `index` on parts to ensure deterministic updates.
+
+### Event: `message_delta`
+
+```json
+{ "delta": "more text" }
+```
+
+Used as a fast path for updating the text part and message content when streaming.
+
+### Event: `message_end`
+
+```json
+{
+  "id": "msg_abc",
+  "content": "Final response",
+  "parts": [{ "type": "text", "text": "Final response" }]
+}
+```
+
+### Event: `error`
+
+```json
+{ "message": "Streaming failed." }
+```
+
+## Client rendering and part mapping
+
+The web UI builds its rendering model from message parts in `apps/web/src/App.tsx`:
+
+- Text is rendered from `getTextFromParts(parts)` (fallbacks to `content`).
+- `reasoning` parts are grouped and shown in the assistant reasoning panel.
+- `tool` and `tool_result` parts are shown in the tool output section.
+- `file` parts render as attachments.
+- `sources` parts are flattened into citations and injected into markdown.
+- `data-checkpoint` parts become checkpoint markers.
+- `data-plan` / `data-plans` parts become plan cards.
+- `data-task` / `data-tasks` parts become task lists.
+- `data-queue` / `data-queues` parts become queue views.
+- `data-branch` / `data-branches` (or `metadata.branches`) provide alternative branches.
+
+Core helpers that normalize and merge streaming parts live in `apps/web/src/lib/messages.ts`.
+
+## Extending part rendering
+
+When introducing a new structured part:
+
+1. Pick a unique `type` (prefer the `data-*` namespace for app-specific payloads).
+2. Ensure the server streams and stores the part with a stable `id` or `index` to support updates.
+3. Add a selector/mapping in `apps/web/src/App.tsx` to translate the new part into a render model.
+4. Render the new model in the chat view alongside other message sections.
+5. Update this document with the new part shape and any streaming notes.
+
 ## Legacy mapping rules
 
 - If `content` is present and `parts` is missing or empty, treat the message as a single text part:
