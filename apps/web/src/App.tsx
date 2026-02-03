@@ -251,12 +251,22 @@ type ModelProvider = {
   models: ModelProviderModel[]
 }
 
+type CheckpointRestore = {
+  messageId?: string
+  partId?: string
+  url?: string
+  method?: string
+  payload?: unknown
+  label?: string
+}
+
 type CheckpointMarker = {
   id: string
   label: string
   description?: string
   status?: string
   timestamp?: string
+  restore?: CheckpointRestore
 }
 
 type PlanEntry = {
@@ -293,6 +303,13 @@ const toTrimmedString = (value: unknown): string | undefined => {
   }
   const trimmed = value.trim()
   return trimmed.length > 0 ? trimmed : undefined
+}
+
+const toRecord = (value: unknown): Record<string, unknown> | undefined => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined
+  }
+  return value as Record<string, unknown>
 }
 
 const toStringArray = (value: unknown): string[] => {
@@ -616,6 +633,12 @@ const App = () => {
     "idle"
   )
   const [chatError, setChatError] = React.useState<string | null>(null)
+  const [restoreCheckpointError, setRestoreCheckpointError] = React.useState<
+    string | null
+  >(null)
+  const [restoringCheckpoints, setRestoringCheckpoints] = React.useState<
+    Record<string, boolean>
+  >({})
   const [promptValue, setPromptValue] = React.useState("")
   const [isTranscriptLoading, setIsTranscriptLoading] = React.useState(false)
   const [isAwaitingFirstToken, setIsAwaitingFirstToken] = React.useState(false)
@@ -1122,8 +1145,7 @@ const App = () => {
           part.type === "data-checkpoint"
       )
       .map((part, index) => {
-        const data =
-          part.data && typeof part.data === "object" ? (part.data as Record<string, unknown>) : {}
+        const data = toRecord(part.data) ?? {}
         const labelCandidate =
           typeof part.label === "string"
             ? part.label
@@ -1146,12 +1168,60 @@ const App = () => {
             : typeof data.ts === "string"
               ? data.ts
               : undefined
+        const restoreSource = toRecord(data.restore) ?? toRecord(data)
+        const restoreAvailable =
+          typeof restoreSource?.available === "boolean"
+            ? restoreSource.available
+            : typeof restoreSource?.enabled === "boolean"
+              ? restoreSource.enabled
+              : true
+        const messageIdCandidate = toTrimmedString(
+          restoreSource?.messageId ??
+            restoreSource?.messageID ??
+            restoreSource?.message_id ??
+            restoreSource?.message
+        )
+        const partIdCandidate = toTrimmedString(
+          restoreSource?.partId ??
+            restoreSource?.partID ??
+            restoreSource?.part_id ??
+            restoreSource?.part
+        )
+        const urlCandidate = toTrimmedString(
+          restoreSource?.url ??
+            restoreSource?.href ??
+            restoreSource?.restoreUrl ??
+            restoreSource?.restore_url
+        )
+        const methodCandidate = toTrimmedString(
+          restoreSource?.method ?? restoreSource?.httpMethod ?? restoreSource?.http_method
+        )
+        const restoreLabel = toTrimmedString(
+          restoreSource?.label ??
+            restoreSource?.actionLabel ??
+            restoreSource?.action_label ??
+            restoreSource?.title
+        )
+        const restorePayload = restoreSource?.payload ?? restoreSource?.body
+        const fallbackPartId = typeof part.id === "string" ? part.id : undefined
+        const restore =
+          restoreAvailable && (messageIdCandidate || urlCandidate)
+            ? {
+                messageId: messageIdCandidate,
+                partId: partIdCandidate ?? fallbackPartId,
+                url: urlCandidate,
+                method: methodCandidate,
+                payload: restorePayload,
+                label: restoreLabel,
+              }
+            : undefined
         return {
           id: part.id ?? `${messageId}-checkpoint-${index}`,
           label,
           description,
           status,
           timestamp,
+          restore,
         }
       })
   }
@@ -1438,56 +1508,72 @@ const App = () => {
     return { branches, defaultBranch }
   }
 
-  React.useEffect(() => {
-    streamAbortRef.current?.abort()
-    transcriptAbortRef.current?.abort()
-    setMessages([])
-    setPromptValue("")
-    setChatStatus("idle")
-    setChatError(null)
-    setIsAwaitingFirstToken(false)
-    const conversationId = selectedWorkspace?.id
-    const sessionId = selectedChat?.id
-    if (!conversationId || !sessionId) {
-      setIsTranscriptLoading(false)
-      return
-    }
-    const controller = new AbortController()
-    transcriptAbortRef.current = controller
-    setIsTranscriptLoading(true)
-    fetch(`/api/conversations/${conversationId}/sessions/${sessionId}/transcript`, {
-      signal: controller.signal,
-    })
-      .then(async (response) => {
-        if (!response.ok) {
-          throw new Error("Failed to load transcript.")
-        }
-        const transcript = (await response.json()) as ApiTranscriptEntry[]
-        setMessages(
-          transcript.map((entry) =>
-            createClientMessage({
-              id: createLocalMessageId(),
-              role: entry.role,
-              content: entry.content,
-              parts: entry.parts,
-              metadata: entry.metadata,
-            })
-          )
+  const fetchTranscript = React.useCallback(
+    async (conversationId: string, sessionId: string, signal: AbortSignal) => {
+      const response = await fetch(
+        `/api/conversations/${conversationId}/sessions/${sessionId}/transcript`,
+        { signal }
+      )
+      if (!response.ok) {
+        throw new Error("Failed to load transcript.")
+      }
+      const transcript = (await response.json()) as ApiTranscriptEntry[]
+      setMessages(
+        transcript.map((entry) =>
+          createClientMessage({
+            id: createLocalMessageId(),
+            role: entry.role,
+            content: entry.content,
+            parts: entry.parts,
+            metadata: entry.metadata,
+          })
         )
-      })
-      .catch((err) => {
+      )
+    },
+    [createLocalMessageId]
+  )
+
+  const loadTranscript = React.useCallback(
+    async (resetPrompt: boolean) => {
+      streamAbortRef.current?.abort()
+      transcriptAbortRef.current?.abort()
+      if (resetPrompt) {
+        setMessages([])
+        setPromptValue("")
+        setChatStatus("idle")
+        setChatError(null)
+        setRestoreCheckpointError(null)
+        setIsAwaitingFirstToken(false)
+      }
+      const conversationId = selectedWorkspace?.id
+      const sessionId = selectedChat?.id
+      if (!conversationId || !sessionId) {
+        setIsTranscriptLoading(false)
+        return
+      }
+      const controller = new AbortController()
+      transcriptAbortRef.current = controller
+      setIsTranscriptLoading(true)
+      try {
+        await fetchTranscript(conversationId, sessionId, controller.signal)
+      } catch (err) {
         if (controller.signal.aborted) {
           return
         }
         setChatError(err instanceof Error ? err.message : "Failed to load transcript.")
         setMessages([])
-      })
-      .finally(() => {
+      } finally {
         if (!controller.signal.aborted) {
           setIsTranscriptLoading(false)
         }
-      })
-  }, [selectedWorkspace?.id, selectedChat?.id, createLocalMessageId])
+      }
+    },
+    [selectedWorkspace?.id, selectedChat?.id, fetchTranscript]
+  )
+
+  React.useEffect(() => {
+    void loadTranscript(true)
+  }, [selectedWorkspace?.id, selectedChat?.id, loadTranscript])
 
   React.useEffect(() => {
     setDeleteWorkspaceError(null)
@@ -2522,6 +2608,79 @@ const App = () => {
       }
     },
     [chatStatus, messages, handlePromptSubmit]
+  )
+
+  const handleRestoreCheckpoint = React.useCallback(
+    async (checkpoint: CheckpointMarker) => {
+      if (!selectedWorkspace || !selectedChat) {
+        return
+      }
+      if (!checkpoint.restore) {
+        return
+      }
+      if (restoringCheckpoints[checkpoint.id]) {
+        return
+      }
+      setRestoreCheckpointError(null)
+      setRestoringCheckpoints((prev) => ({ ...prev, [checkpoint.id]: true }))
+      try {
+        let response: Response
+        if (checkpoint.restore.url) {
+          const method = (checkpoint.restore.method ?? "POST").toUpperCase()
+          const hasBody = checkpoint.restore.payload !== undefined && method !== "GET"
+          response = await fetch(checkpoint.restore.url, {
+            method,
+            headers: hasBody ? { "Content-Type": "application/json" } : undefined,
+            body: hasBody ? JSON.stringify(checkpoint.restore.payload) : undefined,
+          })
+        } else {
+          if (!checkpoint.restore.messageId) {
+            throw new Error("Checkpoint restore is missing a message id.")
+          }
+          response = await fetch(
+            `/api/conversations/${selectedWorkspace.id}/sessions/${selectedChat.id}/checkpoints/restore`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                messageId: checkpoint.restore.messageId,
+                partId: checkpoint.restore.partId,
+              }),
+            }
+          )
+        }
+        if (!response.ok) {
+          let message = "Failed to restore checkpoint."
+          try {
+            const payload = (await response.json()) as { error?: string }
+            if (payload.error) {
+              message = payload.error
+            }
+          } catch {
+            // Ignore parsing errors
+          }
+          throw new Error(message)
+        }
+        await loadTranscript(false)
+      } catch (err) {
+        setRestoreCheckpointError(
+          err instanceof Error ? err.message : "Failed to restore checkpoint."
+        )
+      } finally {
+        setRestoringCheckpoints((prev) => {
+          const next = { ...prev }
+          delete next[checkpoint.id]
+          return next
+        })
+      }
+    },
+    [
+      selectedWorkspace,
+      selectedChat,
+      restoringCheckpoints,
+      loadTranscript,
+      setRestoreCheckpointError,
+    ]
   )
 
   const handleToolApproval = (
@@ -3656,6 +3815,7 @@ const App = () => {
                     const showActions = canCopy || canRetry
                     const showToolbar = showActions || hasBranches
                     const toolbarClassName = hasBranches ? undefined : "justify-end"
+                    const canRestoreCheckpoint = !isChatStreaming && !isTranscriptLoading
                     const actionButtons = showActions ? (
                       <MessageActions>
                         {canCopy ? (
@@ -3696,6 +3856,14 @@ const App = () => {
                                   description={checkpoint.description}
                                   status={checkpoint.status}
                                   timestamp={checkpoint.timestamp}
+                                  onRestore={
+                                    checkpoint.restore
+                                      ? () => void handleRestoreCheckpoint(checkpoint)
+                                      : undefined
+                                  }
+                                  restoreLabel={checkpoint.restore?.label}
+                                  isRestoring={Boolean(restoringCheckpoints[checkpoint.id])}
+                                  restoreDisabled={!canRestoreCheckpoint}
                                 />
                               ))}
                             </div>
@@ -3947,6 +4115,11 @@ const App = () => {
                 {chatError ? (
                   <div className="mt-3 rounded-md border border-destructive/50 bg-destructive/5 px-3 py-2 text-xs text-destructive">
                     {chatError}
+                  </div>
+                ) : null}
+                {restoreCheckpointError ? (
+                  <div className="mt-3 rounded-md border border-destructive/50 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+                    {restoreCheckpointError}
                   </div>
                 ) : null}
               </div>

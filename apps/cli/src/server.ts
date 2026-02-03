@@ -1739,6 +1739,76 @@ const handleApi = async (req: IncomingMessage, res: ServerResponse, repoRoot: st
   }
 
   if (
+    req.method === "POST" &&
+    segments.length === 7 &&
+    segments[1] === "conversations" &&
+    segments[3] === "sessions" &&
+    segments[5] === "checkpoints" &&
+    segments[6] === "restore"
+  ) {
+    try {
+      const body = await readJsonBody<{
+        messageId?: string;
+        messageID?: string;
+        partId?: string;
+        partID?: string;
+      }>(req);
+      const messageId = (body.messageId ?? body.messageID)?.trim();
+      const partId = (body.partId ?? body.partID)?.trim();
+      if (!messageId) {
+        sendBadRequest(res, "Message id is required to restore a checkpoint.");
+        return;
+      }
+      let conversation: Conversation;
+      let session: Session;
+      try {
+        conversation = await readConversation(requestRepoRoot, segments[2]);
+        session = await readSession(requestRepoRoot, segments[2], segments[4]);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+          sendNotFound(res);
+          return;
+        }
+        throw error;
+      }
+
+      const directClient = new DirectSDKClient();
+      const opencodeSessionId = await directClient.ensureSession({
+        sessionId: session.opencodeSessionId,
+        title: session.title?.trim() || undefined,
+        workspacePath: conversation.workspacePath
+      } as any);
+      if (opencodeSessionId !== session.opencodeSessionId) {
+        session.opencodeSessionId = opencodeSessionId;
+        await writeSession(requestRepoRoot, conversation.id, session);
+      }
+
+      const client = createAuthedOpencodeClient();
+      await client.session.revert({
+        path: { id: opencodeSessionId },
+        body: {
+          messageID: messageId,
+          partID: partId
+        },
+        query: { directory: conversation.workspacePath }
+      });
+
+      await updateSessionTimestamp(requestRepoRoot, conversation.id, session);
+      await updateConversationTimestamp(requestRepoRoot, conversation);
+
+      sendJson(res, 200, { ok: true });
+      return;
+    } catch (error) {
+      if (error instanceof SyntaxError) {
+        sendBadRequest(res, "Invalid JSON body.");
+        return;
+      }
+      sendError(res, error);
+      return;
+    }
+  }
+
+  if (
     req.method === "GET" &&
     segments.length === 6 &&
     segments[1] === "conversations" &&

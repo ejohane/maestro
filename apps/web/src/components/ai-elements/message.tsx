@@ -342,6 +342,10 @@ export type MessageCheckpointProps = HTMLAttributes<HTMLDivElement> & {
   description?: string
   status?: string
   timestamp?: string
+  onRestore?: () => void
+  restoreLabel?: string
+  isRestoring?: boolean
+  restoreDisabled?: boolean
 }
 
 export const MessageCheckpoint = ({
@@ -349,23 +353,44 @@ export const MessageCheckpoint = ({
   description,
   status,
   timestamp,
+  onRestore,
+  restoreLabel,
+  isRestoring,
+  restoreDisabled,
   className,
   ...props
-}: MessageCheckpointProps) => (
-  <div
-    className={cn(
-      "inline-flex flex-wrap items-center gap-2 rounded-full border bg-muted/30 px-3 py-1 text-xs text-muted-foreground",
-      className
-    )}
-    {...props}
-  >
-    <span className="h-1.5 w-1.5 rounded-full bg-emerald-500/70" aria-hidden="true" />
-    <span className="font-medium text-foreground">{label}</span>
-    {status ? <span className="text-[10px] uppercase tracking-[0.2em]">{status}</span> : null}
-    {timestamp ? <span className="text-[10px]">{timestamp}</span> : null}
-    {description ? <span>{description}</span> : null}
-  </div>
-)
+}: MessageCheckpointProps) => {
+  const showRestore = typeof onRestore === "function"
+  const restoreText = isRestoring ? "Restoring..." : restoreLabel ?? "Restore"
+
+  return (
+    <div
+      className={cn(
+        "inline-flex flex-wrap items-center gap-2 rounded-full border bg-muted/30 px-3 py-1 text-xs text-muted-foreground",
+        className
+      )}
+      {...props}
+    >
+      <span className="h-1.5 w-1.5 rounded-full bg-emerald-500/70" aria-hidden="true" />
+      <span className="font-medium text-foreground">{label}</span>
+      {status ? <span className="text-[10px] uppercase tracking-[0.2em]">{status}</span> : null}
+      {timestamp ? <span className="text-[10px]">{timestamp}</span> : null}
+      {description ? <span>{description}</span> : null}
+      {showRestore ? (
+        <Button
+          type="button"
+          size="xs"
+          variant="outline"
+          onClick={onRestore}
+          disabled={Boolean(restoreDisabled || isRestoring)}
+          aria-label={isRestoring ? "Restoring checkpoint" : "Restore checkpoint"}
+        >
+          {restoreText}
+        </Button>
+      ) : null}
+    </div>
+  )
+}
 
 type MessageAttachmentMeta = {
   id: string
