@@ -345,6 +345,12 @@ const App = () => {
     Record<string, string>
   >({})
   const recentSessionsLimit = 6
+  const emptyStateSuggestions = [
+    "Summarize the repo focus",
+    "List key files to review",
+    "Draft next steps for this task",
+    "Explain the current workspace",
+  ]
 
   const loadProjects = React.useCallback(async () => {
     setIsLoading(true)
@@ -1742,6 +1748,23 @@ const App = () => {
   const handlePromptChange = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
     setPromptValue(event.target.value)
   }
+
+  const handleSuggestionClick = React.useCallback((suggestion: string) => {
+    setPromptValue(suggestion)
+    if (typeof document === "undefined") {
+      return
+    }
+    window.requestAnimationFrame(() => {
+      const textarea = document.querySelector(
+        'textarea[name="message"]'
+      ) as HTMLTextAreaElement | null
+      if (!textarea) {
+        return
+      }
+      textarea.focus()
+      textarea.setSelectionRange(suggestion.length, suggestion.length)
+    })
+  }, [])
 
   const handlePromptSubmit = async (message: PromptInputMessage) => {
     if (!selectedWorkspace || !selectedChat) {
@@ -3292,9 +3315,31 @@ const App = () => {
                 ) : (
                   <ConversationEmptyState
                     className="min-h-[320px]"
-                    title="No messages yet"
-                    description="Ask a question to start the session."
-                  />
+                  >
+                    <div className="flex flex-col items-center gap-4 text-center">
+                      <div className="space-y-1">
+                        <h3 className="text-sm font-medium">No messages yet</h3>
+                        <p className="text-sm text-muted-foreground">
+                          Ask a question to start the session.
+                        </p>
+                      </div>
+                      <div className="flex w-full max-w-xl flex-wrap justify-center gap-2">
+                        {emptyStateSuggestions.map((suggestion) => (
+                          <Button
+                            key={suggestion}
+                            className="rounded-full text-xs"
+                            disabled={promptDisabled}
+                            onClick={() => handleSuggestionClick(suggestion)}
+                            size="xs"
+                            type="button"
+                            variant="outline"
+                          >
+                            {suggestion}
+                          </Button>
+                        ))}
+                      </div>
+                    </div>
+                  </ConversationEmptyState>
                 )}
               </ConversationContent>
               <ConversationScrollButton />
