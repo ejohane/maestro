@@ -5,20 +5,58 @@ import { ProjectWorkspacesTable } from "./components/project-workspaces-table"
 import {
   Conversation,
   ConversationContent,
+  ConversationEmptyState,
   ConversationScrollButton,
 } from "./components/ai-elements/conversation"
 import { Loader } from "./components/ai-elements/loader"
 import {
   Message,
+  MessageAction,
+  MessageActions,
+  MessageBranch,
+  MessageBranchContent,
+  MessageBranchNext,
+  MessageBranchPage,
+  MessageBranchPrevious,
+  MessageBranchSelector,
+  MessageCheckpoint,
   MessageContent,
+  MessageAttachments,
   MessageResponse,
+  MessageToolbar,
 } from "./components/ai-elements/message"
 import {
+  CitationAnchor,
+  CitationProvider,
+  prepareCitationMarkdown,
+  SourcesList,
+} from "./components/ai-elements/sources"
+import { ReasoningSection } from "./components/ai-elements/reasoning"
+import { PlanSection, type PlanStep } from "./components/ai-elements/plan"
+import {
+  QueueSection,
+  TaskListSection,
+  type TaskItem,
+} from "./components/ai-elements/task-queue"
+import {
   PromptInput,
+  PromptInputActionAddAttachments,
+  PromptInputActionMenu,
+  PromptInputActionMenuContent,
+  PromptInputActionMenuTrigger,
   PromptInputFooter,
+  PromptInputHeader,
   PromptInputSubmit,
   PromptInputTextarea,
+  PromptInputTools,
+  type PromptInputMessage,
+  usePromptInputAttachments,
 } from "./components/ai-elements/prompt-input"
+import {
+  ContextUsageIndicator,
+  type ContextUsage,
+} from "./components/ai-elements/context-usage"
+import { ModelSelector, type ModelOption } from "./components/ai-elements/model-selector"
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -39,6 +77,7 @@ import {
 } from "./components/ui/card"
 import { Input } from "./components/ui/input"
 import { Separator } from "./components/ui/separator"
+import { Shimmer } from "./components/ui/shimmer"
 import {
   SidebarInset,
   SidebarProvider,
@@ -46,6 +85,42 @@ import {
   SidebarTrigger,
 } from "./components/ui/sidebar"
 import { useTheme } from "./hooks/use-theme"
+import type { FileReference, MessageRole, SourceCitation } from "@maestro/core"
+import { Check, Copy, RotateCcw } from "lucide-react"
+import { cn } from "./lib/utils"
+import {
+  applyMessageDelta,
+  applyMessageEnd,
+  applyMessagePartUpdate,
+  createClientMessage,
+  getTextFromParts,
+  normalizeMessageParts,
+  type ClientMessage,
+  type StructuredMessagePart,
+} from "./lib/messages"
+
+const PromptInputAttachmentsPreview = () => {
+  const attachments = usePromptInputAttachments()
+
+  if (!attachments.files.length) {
+    return null
+  }
+
+  const items = attachments.files.map((file) => ({
+    id: file.id,
+    name: file.filename,
+    path: file.url,
+    mimeType: file.mediaType,
+    size: file.size,
+    source: "upload" as const,
+  }))
+
+  return (
+    <PromptInputHeader className="text-foreground">
+      <MessageAttachments attachments={items} onRemove={attachments.remove} />
+    </PromptInputHeader>
+  )
+}
 
 type GitProvider = "github" | "gitlab"
 
@@ -94,8 +169,15 @@ type ApiPullRequest = {
 }
 
 type ApiTranscriptEntry = {
-  role: "user" | "assistant" | "system"
-  content: string
+  role: MessageRole
+  content?: string
+  parts?: StructuredMessagePart[]
+  metadata?: Record<string, unknown>
+}
+
+type ApiModelsResponse = {
+  defaultModel: string
+  models: string[]
 }
 
 type CreateConversationResponse = {
@@ -107,6 +189,7 @@ type CreateConversationResponse = {
 type ChatSession = {
   id: string
   name: string
+  model?: string
   createdAt?: string
   updatedAt?: string
 }
@@ -153,14 +236,7 @@ type MergedPullRequestAction = {
   workspaceName?: string
   workspaceDeleted?: boolean
 }
-
-type ChatMessage = {
-  id: string
-  role: "user" | "assistant" | "system"
-  content: string
-  isStreaming?: boolean
-}
-
+type ChatMessage = ClientMessage
 type ModelProviderModel = {
   id: string
   name?: string
@@ -170,6 +246,340 @@ type ModelProvider = {
   id: string
   name?: string
   models: ModelProviderModel[]
+}
+
+type CheckpointRestore = {
+  messageId?: string
+  partId?: string
+  url?: string
+  method?: string
+  payload?: unknown
+  label?: string
+}
+
+type CheckpointMarker = {
+  id: string
+  label: string
+  description?: string
+  status?: string
+  timestamp?: string
+  restore?: CheckpointRestore
+}
+
+type PlanEntry = {
+  id: string
+  title?: string
+  summary?: string
+  steps: PlanStep[]
+  isStreaming?: boolean
+}
+
+type TaskEntry = {
+  id: string
+  title?: string
+  summary?: string
+  items: TaskItem[]
+  isStreaming?: boolean
+}
+
+type QueueEntry = TaskEntry & {
+  totalCount?: number
+}
+
+type MessageBranchEntry = {
+  id: string
+  content: string
+  parts: StructuredMessagePart[]
+  sources: SourceCitation[]
+  label?: string
+}
+
+const toTrimmedString = (value: unknown): string | undefined => {
+  if (typeof value !== "string") {
+    return undefined
+  }
+  const trimmed = value.trim()
+  return trimmed.length > 0 ? trimmed : undefined
+}
+
+const toRecord = (value: unknown): Record<string, unknown> | undefined => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined
+  }
+  return value as Record<string, unknown>
+}
+
+const toStringArray = (value: unknown): string[] => {
+  if (!Array.isArray(value)) {
+    return []
+  }
+  return value
+    .map((item) => (typeof item === "string" ? item.trim() : ""))
+    .filter((item) => item.length > 0)
+}
+
+const parsePlanStep = (
+  value: unknown,
+  fallbackId: string,
+  index: number
+): PlanStep | null => {
+  if (typeof value === "string") {
+    const title = value.trim()
+    if (!title) {
+      return null
+    }
+    return {
+      id: `${fallbackId}-step-${index}`,
+      title,
+    }
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null
+  }
+  const record = value as Record<string, unknown>
+  const titleCandidate =
+    toTrimmedString(record.title ?? record.label ?? record.name ?? record.step ?? record.summary) ??
+    toTrimmedString(record.text)
+  const descriptionCandidate = toTrimmedString(
+    record.description ?? record.detail ?? record.summary ?? record.text
+  )
+  const bullets = toStringArray(record.items ?? record.steps ?? record.tasks ?? record.bullets)
+  const status = toTrimmedString(record.status ?? record.state)
+  let title = titleCandidate
+  let description = descriptionCandidate
+  if (!title && description) {
+    title = description
+    description = undefined
+  }
+  if (!title && bullets.length > 0) {
+    title = `Step ${index + 1}`
+  }
+  if (!title) {
+    return null
+  }
+  return {
+    id: typeof record.id === "string" ? record.id : `${fallbackId}-step-${index}`,
+    title,
+    description,
+    bullets: bullets.length > 0 ? bullets : undefined,
+    status,
+  }
+}
+
+const parsePlanSteps = (value: unknown, fallbackId: string): PlanStep[] => {
+  if (Array.isArray(value)) {
+    return value
+      .map((item, index) => parsePlanStep(item, fallbackId, index))
+      .filter((step): step is PlanStep => Boolean(step))
+  }
+  const single = parsePlanStep(value, fallbackId, 0)
+  return single ? [single] : []
+}
+
+const parseProgressNumber = (value: unknown): number | undefined => {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value
+  }
+  if (typeof value === "string") {
+    const parsed = Number.parseFloat(value)
+    if (Number.isFinite(parsed)) {
+      return parsed
+    }
+  }
+  return undefined
+}
+
+const normalizePercent = (value: number): number => {
+  if (!Number.isFinite(value)) {
+    return 0
+  }
+  return value <= 1 && value >= 0 ? value * 100 : value
+}
+
+const clampPercent = (value: number): number => {
+  return Math.max(0, Math.min(100, value))
+}
+
+const parseProgressValue = (
+  value: unknown
+): { value: number; label?: string } | null => {
+  if (value === null || value === undefined) {
+    return null
+  }
+  if (typeof value === "object" && !Array.isArray(value)) {
+    const record = value as Record<string, unknown>
+    const current = parseProgressNumber(record.current ?? record.completed ?? record.done)
+    const total = parseProgressNumber(record.total ?? record.max ?? record.goal)
+    if (typeof current === "number" && typeof total === "number" && total > 0) {
+      const percent = clampPercent((current / total) * 100)
+      return { value: percent, label: `${current}/${total}` }
+    }
+    const nested = parseProgressValue(
+      record.percent ?? record.percentage ?? record.progress ?? record.value
+    )
+    if (nested) {
+      return nested
+    }
+  }
+  if (typeof value === "string") {
+    const trimmed = value.trim()
+    if (!trimmed) {
+      return null
+    }
+    if (trimmed.endsWith("%")) {
+      const parsed = Number.parseFloat(trimmed.slice(0, -1))
+      if (Number.isFinite(parsed)) {
+        return { value: clampPercent(parsed), label: trimmed }
+      }
+    }
+    const fractionMatch = trimmed.match(/^(\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)$/)
+    if (fractionMatch) {
+      const current = Number.parseFloat(fractionMatch[1])
+      const total = Number.parseFloat(fractionMatch[2])
+      if (Number.isFinite(current) && Number.isFinite(total) && total > 0) {
+        return { value: clampPercent((current / total) * 100), label: trimmed }
+      }
+    }
+    const parsed = Number.parseFloat(trimmed)
+    if (Number.isFinite(parsed)) {
+      const percent = clampPercent(normalizePercent(parsed))
+      return { value: percent, label: `${Math.round(percent)}%` }
+    }
+    return null
+  }
+  if (typeof value === "number") {
+    const percent = clampPercent(normalizePercent(value))
+    return { value: percent, label: `${Math.round(percent)}%` }
+  }
+  return null
+}
+
+const parseTaskItem = (
+  value: unknown,
+  fallbackId: string,
+  index: number
+): TaskItem | null => {
+  if (typeof value === "string") {
+    const title = value.trim()
+    if (!title) {
+      return null
+    }
+    return { id: `${fallbackId}-item-${index}`, title }
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null
+  }
+  const record = value as Record<string, unknown>
+  const titleCandidate =
+    toTrimmedString(
+      record.title ?? record.label ?? record.name ?? record.task ?? record.item ?? record.summary
+    ) ?? toTrimmedString(record.text)
+  const descriptionCandidate = toTrimmedString(
+    record.description ?? record.detail ?? record.summary ?? record.text
+  )
+  const statusCandidate = toTrimmedString(record.status ?? record.state ?? record.phase)
+  const progressCandidate = parseProgressValue(
+    record.progress ?? record.percent ?? record.percentage ?? record.completion
+  )
+  const isDone =
+    typeof record.done === "boolean"
+      ? record.done
+      : typeof record.completed === "boolean"
+        ? record.completed
+        : typeof record.isDone === "boolean"
+          ? record.isDone
+          : undefined
+  let title = titleCandidate
+  let description = descriptionCandidate
+  if (!title && description) {
+    title = description
+    description = undefined
+  }
+  if (!title) {
+    return null
+  }
+  const status = statusCandidate ?? (isDone ? "Done" : undefined)
+  return {
+    id: typeof record.id === "string" ? record.id : `${fallbackId}-item-${index}`,
+    title,
+    description,
+    status,
+    progress: progressCandidate?.value,
+    progressLabel: progressCandidate?.label,
+  }
+}
+
+const parseTaskItems = (value: unknown, fallbackId: string): TaskItem[] => {
+  if (Array.isArray(value)) {
+    return value
+      .map((item, index) => parseTaskItem(item, fallbackId, index))
+      .filter((item): item is TaskItem => Boolean(item))
+  }
+  const single = parseTaskItem(value, fallbackId, 0)
+  return single ? [single] : []
+}
+
+const parseUsageNumber = (value: unknown): number | undefined => {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value
+  }
+  if (typeof value === "string") {
+    const parsed = Number.parseFloat(value)
+    if (Number.isFinite(parsed)) {
+      return parsed
+    }
+  }
+  return undefined
+}
+
+const extractUsageFromMetadata = (
+  metadata?: Record<string, unknown>
+): ContextUsage | null => {
+  if (!metadata) {
+    return null
+  }
+  const usageCandidate =
+    (metadata.usage ??
+      metadata.usageSummary ??
+      metadata.usage_summary ??
+      metadata.tokenUsage ??
+      metadata.tokens) as Record<string, unknown> | undefined
+  if (!usageCandidate || typeof usageCandidate !== "object" || Array.isArray(usageCandidate)) {
+    return null
+  }
+  const record = usageCandidate as Record<string, unknown>
+  const inputTokens = parseUsageNumber(
+    record.inputTokens ?? record.promptTokens ?? record.input_tokens ?? record.prompt_tokens
+  )
+  const outputTokens = parseUsageNumber(
+    record.outputTokens ??
+      record.completionTokens ??
+      record.output_tokens ??
+      record.completion_tokens
+  )
+  const totalTokens = parseUsageNumber(
+    record.totalTokens ?? record.total_tokens ?? record.total
+  )
+  const costUsd = parseUsageNumber(
+    record.costUsd ?? record.cost_usd ?? record.cost ?? record.totalCostUsd ?? record.total_cost_usd
+  )
+  const model = typeof record.model === "string" ? record.model : undefined
+  if (
+    typeof inputTokens !== "number" &&
+    typeof outputTokens !== "number" &&
+    typeof totalTokens !== "number" &&
+    typeof costUsd !== "number"
+  ) {
+    return null
+  }
+  return {
+    inputTokens,
+    outputTokens,
+    totalTokens,
+    costUsd,
+    model,
+    source: "metadata",
+  }
 }
 
 const App = () => {
@@ -215,18 +625,23 @@ const App = () => {
   const [isDeletingWorkspace, setIsDeletingWorkspace] = React.useState(false)
   const [deleteWorkspaceError, setDeleteWorkspaceError] = React.useState<string | null>(null)
   const [messages, setMessages] = React.useState<ChatMessage[]>([])
+  const [copiedMessageId, setCopiedMessageId] = React.useState<string | null>(null)
   const [chatStatus, setChatStatus] = React.useState<"idle" | "streaming" | "error">(
     "idle"
   )
   const [chatError, setChatError] = React.useState<string | null>(null)
+  const [restoreCheckpointError, setRestoreCheckpointError] = React.useState<
+    string | null
+  >(null)
+  const [restoringCheckpoints, setRestoringCheckpoints] = React.useState<
+    Record<string, boolean>
+  >({})
   const [promptValue, setPromptValue] = React.useState("")
   const [isTranscriptLoading, setIsTranscriptLoading] = React.useState(false)
   const [isAwaitingFirstToken, setIsAwaitingFirstToken] = React.useState(false)
-  const [showScrollButton, setShowScrollButton] = React.useState(false)
-  const scrollContainerRef = React.useRef<HTMLDivElement | null>(null)
   const streamAbortRef = React.useRef<AbortController | null>(null)
   const transcriptAbortRef = React.useRef<AbortController | null>(null)
-  const autoScrollRef = React.useRef(true)
+  const copyTimeoutRef = React.useRef<number | null>(null)
   const [openPullRequests, setOpenPullRequests] = React.useState<OpenPullRequest[]>([])
   const [isLoadingPullRequests, setIsLoadingPullRequests] = React.useState(false)
   const [pullRequestsError, setPullRequestsError] = React.useState<string | null>(null)
@@ -242,6 +657,10 @@ const App = () => {
     null
   )
   const [isSavingSettings, setIsSavingSettings] = React.useState(false)
+  const [defaultModel, setDefaultModel] = React.useState<string | null>(null)
+  const [availableModels, setAvailableModels] = React.useState<string[]>([])
+  const [isUpdatingModel, setIsUpdatingModel] = React.useState(false)
+  const [updateModelError, setUpdateModelError] = React.useState<string | null>(null)
   const [mergingPullRequests, setMergingPullRequests] = React.useState<
     Record<string, boolean>
   >({})
@@ -258,6 +677,12 @@ const App = () => {
     Record<string, string>
   >({})
   const recentSessionsLimit = 6
+  const emptyStateSuggestions = [
+    "Summarize the repo focus",
+    "List key files to review",
+    "Draft next steps for this task",
+    "Explain the current workspace",
+  ]
 
   const loadProjects = React.useCallback(async () => {
     setIsLoading(true)
@@ -315,6 +740,7 @@ const App = () => {
             chats: sessions.map((session) => ({
               id: session.id,
               name: session.title?.trim() || session.model || session.id,
+              model: session.model,
               createdAt: session.createdAt,
               updatedAt: session.updatedAt,
             })),
@@ -371,6 +797,23 @@ const App = () => {
       setSettingsError(
         err instanceof Error ? err.message : "Failed to load settings."
       )
+    }
+  }, [])
+
+  const loadModels = React.useCallback(async () => {
+    try {
+      const response = await fetch("/api/models")
+      if (!response.ok) {
+        return
+      }
+      const payload = (await response.json()) as ApiModelsResponse
+      const modelValues = Array.isArray(payload.models)
+        ? payload.models.map((model) => model.trim()).filter(Boolean)
+        : []
+      setDefaultModel(payload.defaultModel?.trim() || null)
+      setAvailableModels(Array.from(new Set(modelValues)))
+    } catch {
+      // Ignore model load errors and fall back to defaults
     }
   }, [])
 
@@ -451,6 +894,10 @@ const App = () => {
   }, [settingsForm.modelProviders])
 
   React.useEffect(() => {
+    void loadModels()
+  }, [loadModels])
+
+  React.useEffect(() => {
     if (!projects.length) {
       setSelectedProjectId(null)
       setSelectedWorkspaceId(null)
@@ -500,6 +947,62 @@ const App = () => {
       selectedWorkspace?.chats.find((chat) => chat.id === selectedChatId) ?? null,
     [selectedWorkspace, selectedChatId]
   )
+
+  const fallbackModel = defaultModel?.trim() || "openai/gpt-5.2-codex"
+  const selectedModel = selectedChat?.model ?? fallbackModel
+  const activeProvider = React.useMemo(() => {
+    const normalized = selectedModel?.trim()
+    if (!normalized) {
+      return null
+    }
+    const [provider, modelId] = normalized.split("/")
+    return modelId ? provider : null
+  }, [selectedModel])
+  const settingsModels = React.useMemo(
+    () =>
+      settingsForm.modelProviders.flatMap((provider) =>
+        provider.models
+          .map((model) => model.id?.trim())
+          .filter(Boolean)
+          .map((modelId) => (modelId.includes("/") ? modelId : `${provider.id}/${modelId}`))
+      ),
+    [settingsForm.modelProviders]
+  )
+  const modelOptions = React.useMemo(() => {
+    const candidates = [
+      fallbackModel,
+      ...availableModels,
+      ...settingsModels,
+      selectedChat?.model,
+    ].filter((value): value is string => Boolean(value))
+    const seen = new Set<string>()
+    const options: ModelOption[] = []
+    for (const model of candidates) {
+      const normalized = model.trim()
+      if (!normalized || seen.has(normalized)) {
+        continue
+      }
+      const [provider, modelId] = normalized.split("/")
+      if (activeProvider && modelId && provider && provider !== activeProvider) {
+        continue
+      }
+      seen.add(normalized)
+      const label = modelId ? modelId : normalized
+      const description = modelId && provider ? provider : undefined
+      options.push({ id: normalized, label, description })
+    }
+    return options
+  }, [activeProvider, availableModels, fallbackModel, selectedChat?.model, settingsModels])
+  const usageFromMessages = React.useMemo(() => {
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      const usage = extractUsageFromMetadata(messages[index]?.metadata)
+      if (usage) {
+        return usage
+      }
+    }
+    return null
+  }, [messages])
+  const contextUsage = usageFromMessages ?? undefined
 
   const recentSessions = React.useMemo(() => {
     const sessions: RecentSession[] = []
@@ -614,81 +1117,473 @@ const App = () => {
   const createLocalMessageId = React.useCallback(() => {
     return `m_${Math.random().toString(36).slice(2, 10)}`
   }, [])
-
-  const scrollToBottom = React.useCallback(() => {
-    const container = scrollContainerRef.current
-    if (!container) {
-      return
-    }
-    container.scrollTop = container.scrollHeight
-  }, [])
-
-  const handleScroll = React.useCallback(() => {
-    const container = scrollContainerRef.current
-    if (!container) {
-      return
-    }
-    const distanceFromBottom =
-      container.scrollHeight - container.scrollTop - container.clientHeight
-    const shouldAutoScroll = distanceFromBottom < 32
-    autoScrollRef.current = shouldAutoScroll
-    setShowScrollButton(!shouldAutoScroll)
+  const createLocalFileId = React.useCallback(() => {
+    return `f_${Math.random().toString(36).slice(2, 10)}`
   }, [])
 
   React.useEffect(() => {
-    streamAbortRef.current?.abort()
-    transcriptAbortRef.current?.abort()
-    setMessages([])
-    setPromptValue("")
-    setChatStatus("idle")
-    setChatError(null)
-    setIsAwaitingFirstToken(false)
-    setShowScrollButton(false)
-    autoScrollRef.current = true
-    const conversationId = selectedWorkspace?.id
-    const sessionId = selectedChat?.id
-    if (!conversationId || !sessionId) {
-      setIsTranscriptLoading(false)
-      return
+    return () => {
+      if (copyTimeoutRef.current !== null) {
+        window.clearTimeout(copyTimeoutRef.current)
+      }
     }
-    const controller = new AbortController()
-    transcriptAbortRef.current = controller
-    setIsTranscriptLoading(true)
-    fetch(`/api/conversations/${conversationId}/sessions/${sessionId}/transcript`, {
-      signal: controller.signal,
-    })
-      .then(async (response) => {
-        if (!response.ok) {
-          throw new Error("Failed to load transcript.")
+  }, [])
+
+  const getSourcesFromParts = (parts: StructuredMessagePart[]): SourceCitation[] => {
+    return parts
+      .filter(
+        (
+          part
+        ): part is StructuredMessagePart & {
+          type: "sources"
+          sources: SourceCitation[]
+        } => part.type === "sources"
+      )
+      .flatMap((part) => part.sources)
+      .filter((source): source is SourceCitation => Boolean(source))
+  }
+
+  const getCheckpointMarkers = (
+    parts: StructuredMessagePart[],
+    messageId: string
+  ): CheckpointMarker[] => {
+    return parts
+      .filter(
+        (
+          part
+        ): part is StructuredMessagePart & { type: "data-checkpoint"; data?: unknown } =>
+          part.type === "data-checkpoint"
+      )
+      .map((part, index) => {
+        const data = toRecord(part.data) ?? {}
+        const labelCandidate =
+          typeof part.label === "string"
+            ? part.label
+            : typeof data.label === "string"
+              ? data.label
+              : typeof data.name === "string"
+                ? data.name
+                : undefined
+        const label = labelCandidate?.trim() || `Checkpoint ${index + 1}`
+        const description =
+          typeof data.description === "string"
+            ? data.description
+            : typeof data.detail === "string"
+              ? data.detail
+              : undefined
+        const status = typeof data.status === "string" ? data.status : undefined
+        const timestamp =
+          typeof data.timestamp === "string"
+            ? data.timestamp
+            : typeof data.ts === "string"
+              ? data.ts
+              : undefined
+        const restoreSource = toRecord(data.restore) ?? toRecord(data)
+        const restoreAvailable =
+          typeof restoreSource?.available === "boolean"
+            ? restoreSource.available
+            : typeof restoreSource?.enabled === "boolean"
+              ? restoreSource.enabled
+              : true
+        const messageIdCandidate = toTrimmedString(
+          restoreSource?.messageId ??
+            restoreSource?.messageID ??
+            restoreSource?.message_id ??
+            restoreSource?.message
+        )
+        const partIdCandidate = toTrimmedString(
+          restoreSource?.partId ??
+            restoreSource?.partID ??
+            restoreSource?.part_id ??
+            restoreSource?.part
+        )
+        const urlCandidate = toTrimmedString(
+          restoreSource?.url ??
+            restoreSource?.href ??
+            restoreSource?.restoreUrl ??
+            restoreSource?.restore_url
+        )
+        const methodCandidate = toTrimmedString(
+          restoreSource?.method ?? restoreSource?.httpMethod ?? restoreSource?.http_method
+        )
+        const restoreLabel = toTrimmedString(
+          restoreSource?.label ??
+            restoreSource?.actionLabel ??
+            restoreSource?.action_label ??
+            restoreSource?.title
+        )
+        const restorePayload = restoreSource?.payload ?? restoreSource?.body
+        const fallbackPartId = typeof part.id === "string" ? part.id : undefined
+        const restore =
+          restoreAvailable && (messageIdCandidate || urlCandidate)
+            ? {
+                messageId: messageIdCandidate,
+                partId: partIdCandidate ?? fallbackPartId,
+                url: urlCandidate,
+                method: methodCandidate,
+                payload: restorePayload,
+                label: restoreLabel,
+              }
+            : undefined
+        return {
+          id: part.id ?? `${messageId}-checkpoint-${index}`,
+          label,
+          description,
+          status,
+          timestamp,
+          restore,
         }
-        const transcript = (await response.json()) as ApiTranscriptEntry[]
-        setMessages(
-          transcript.map((entry) => ({
+      })
+  }
+
+  const getPlanEntries = (
+    parts: StructuredMessagePart[],
+    messageId: string
+  ): PlanEntry[] => {
+    const planParts = parts.filter(
+      (
+        part
+      ): part is StructuredMessagePart & { type: "data-plan" | "data-plans"; data?: unknown } =>
+        part.type === "data-plan" || part.type === "data-plans"
+    )
+
+    return planParts
+      .map((part, index) => {
+        const planId = part.id ?? `${messageId}-plan-${index}`
+        const data = part.data
+        const record =
+          data && typeof data === "object" && !Array.isArray(data)
+            ? (data as Record<string, unknown>)
+            : undefined
+        const title =
+          toTrimmedString(part.label) ??
+          toTrimmedString(record?.title ?? record?.label ?? record?.name)
+        const summary = toTrimmedString(
+          record?.summary ?? record?.description ?? record?.detail ?? record?.overview
+        )
+        const stepsSource =
+          record?.steps ??
+          record?.items ??
+          record?.plan ??
+          record?.tasks ??
+          record?.phases ??
+          record?.checklist
+        const steps =
+          stepsSource !== undefined ? parsePlanSteps(stepsSource, planId) : parsePlanSteps(data, planId)
+        const statusValue = toTrimmedString(record?.status ?? record?.state)
+        const statusStreaming =
+          typeof statusValue === "string" &&
+          ["streaming", "in_progress", "running", "pending"].includes(statusValue.toLowerCase())
+        const streamingFlag =
+          typeof record?.isStreaming === "boolean"
+            ? record.isStreaming
+            : typeof record?.streaming === "boolean"
+              ? record.streaming
+              : undefined
+
+        return {
+          id: planId,
+          title,
+          summary,
+          steps,
+          isStreaming: streamingFlag ?? statusStreaming,
+        }
+      })
+      .filter((entry) => entry.steps.length > 0 || entry.title || entry.summary || entry.isStreaming)
+  }
+
+  const getTaskEntries = (
+    parts: StructuredMessagePart[],
+    messageId: string
+  ): TaskEntry[] => {
+    const taskParts = parts.filter(
+      (
+        part
+      ): part is StructuredMessagePart & { type: "data-task" | "data-tasks"; data?: unknown } =>
+        part.type === "data-task" || part.type === "data-tasks"
+    )
+
+    return taskParts
+      .map((part, index) => {
+        const taskId = part.id ?? `${messageId}-task-${index}`
+        const data = part.data
+        const record =
+          data && typeof data === "object" && !Array.isArray(data)
+            ? (data as Record<string, unknown>)
+            : undefined
+        const title =
+          toTrimmedString(part.label) ??
+          toTrimmedString(record?.title ?? record?.label ?? record?.name ?? record?.task)
+        const summary = toTrimmedString(
+          record?.summary ?? record?.description ?? record?.detail ?? record?.overview
+        )
+        const itemsSource =
+          record?.items ?? record?.tasks ?? record?.steps ?? record?.list ?? record?.queue
+        const items =
+          itemsSource !== undefined
+            ? parseTaskItems(itemsSource, taskId)
+            : parseTaskItems(data, taskId)
+        const statusValue = toTrimmedString(record?.status ?? record?.state)
+        const isStreaming =
+          typeof record?.isStreaming === "boolean"
+            ? record.isStreaming
+            : typeof record?.streaming === "boolean"
+              ? record.streaming
+              : typeof statusValue === "string" &&
+                  ["streaming", "running", "in_progress", "pending"].includes(
+                    statusValue.toLowerCase()
+                  )
+
+        return {
+          id: taskId,
+          title,
+          summary,
+          items,
+          isStreaming,
+        }
+      })
+      .filter((entry) => entry.items.length > 0 || entry.title || entry.summary || entry.isStreaming)
+  }
+
+  const getQueueEntries = (
+    parts: StructuredMessagePart[],
+    messageId: string
+  ): QueueEntry[] => {
+    const queueParts = parts.filter(
+      (
+        part
+      ): part is StructuredMessagePart & { type: "data-queue" | "data-queues"; data?: unknown } =>
+        part.type === "data-queue" || part.type === "data-queues"
+    )
+
+    return queueParts
+      .map((part, index) => {
+        const queueId = part.id ?? `${messageId}-queue-${index}`
+        const data = part.data
+        const record =
+          data && typeof data === "object" && !Array.isArray(data)
+            ? (data as Record<string, unknown>)
+            : undefined
+        const title =
+          toTrimmedString(part.label) ??
+          toTrimmedString(record?.title ?? record?.label ?? record?.name ?? record?.queue)
+        const summary = toTrimmedString(
+          record?.summary ?? record?.description ?? record?.detail ?? record?.overview
+        )
+        const itemsSource =
+          record?.items ?? record?.queue ?? record?.tasks ?? record?.entries ?? record?.list
+        const items =
+          itemsSource !== undefined
+            ? parseTaskItems(itemsSource, queueId)
+            : parseTaskItems(data, queueId)
+        const totalCount = parseProgressNumber(
+          record?.total ?? record?.count ?? record?.size ?? record?.length
+        )
+        const statusValue = toTrimmedString(record?.status ?? record?.state)
+        const isStreaming =
+          typeof record?.isStreaming === "boolean"
+            ? record.isStreaming
+            : typeof record?.streaming === "boolean"
+              ? record.streaming
+              : typeof statusValue === "string" &&
+                  ["streaming", "running", "in_progress", "pending"].includes(
+                    statusValue.toLowerCase()
+                  )
+
+        return {
+          id: queueId,
+          title,
+          summary,
+          items,
+          totalCount,
+          isStreaming,
+        }
+      })
+      .filter((entry) => entry.items.length > 0 || entry.title || entry.summary || entry.isStreaming)
+  }
+
+  const parseBranchEntries = (
+    value: unknown,
+    messageId: string
+  ): MessageBranchEntry[] => {
+    if (!Array.isArray(value)) {
+      return []
+    }
+
+    return value
+      .map((branch, index) => {
+        if (typeof branch === "string") {
+          const content = branch.trim()
+          if (!content) {
+            return null
+          }
+          const parts = normalizeMessageParts(content)
+          return {
+            id: `${messageId}-branch-${index}`,
+            content,
+            parts,
+            sources: getSourcesFromParts(parts),
+          }
+        }
+
+        if (branch && typeof branch === "object") {
+          const record = branch as Record<string, unknown>
+          const contentValue =
+            typeof record.content === "string"
+              ? record.content
+              : typeof record.text === "string"
+                ? record.text
+                : ""
+          const partsValue = Array.isArray(record.parts)
+            ? (record.parts as StructuredMessagePart[])
+            : normalizeMessageParts(contentValue)
+          const sourcesValue = Array.isArray(record.sources)
+            ? (record.sources as SourceCitation[]).filter(Boolean)
+            : getSourcesFromParts(partsValue)
+          const content = contentValue || getTextFromParts(partsValue)
+          if (!content.trim()) {
+            return null
+          }
+          const label = typeof record.label === "string" ? record.label : undefined
+          return {
+            id:
+              typeof record.id === "string"
+                ? record.id
+                : `${messageId}-branch-${index}`,
+            content,
+            parts: partsValue,
+            sources: sourcesValue,
+            label,
+          }
+        }
+
+        return null
+      })
+      .filter((branch): branch is MessageBranchEntry => Boolean(branch))
+  }
+
+  const getMessageBranches = (
+    message: ChatMessage,
+    baseText: string,
+    baseSources: SourceCitation[]
+  ) => {
+    const metadata =
+      message.metadata && typeof message.metadata === "object"
+        ? (message.metadata as Record<string, unknown>)
+        : undefined
+    const metadataBranches = metadata?.branches
+    const dataBranchParts = message.parts.filter(
+      (part) => part.type === "data-branch" || part.type === "data-branches"
+    ) as Array<StructuredMessagePart & { data?: unknown }>
+    const parsedBranches = [
+      ...parseBranchEntries(metadataBranches, message.id),
+      ...dataBranchParts.flatMap((part) => {
+        if (Array.isArray(part.data)) {
+          return parseBranchEntries(part.data, message.id)
+        }
+        if (part.data && typeof part.data === "object") {
+          const record = part.data as Record<string, unknown>
+          if (Array.isArray(record.branches)) {
+            return parseBranchEntries(record.branches, message.id)
+          }
+        }
+        return []
+      }),
+    ]
+
+    const normalizedBase = baseText.trim()
+    const uniqueBranches = parsedBranches.filter(
+      (branch) => branch.content.trim() && branch.content.trim() !== normalizedBase
+    )
+    const baseBranch = normalizedBase
+      ? [
+          {
+            id: `${message.id}-branch-base`,
+            content: baseText,
+            parts: message.parts,
+            sources: baseSources,
+          },
+        ]
+      : []
+    const branches = [...baseBranch, ...uniqueBranches]
+    const metadataBranchIndex =
+      typeof metadata?.branchIndex === "number" ? metadata.branchIndex : undefined
+    const defaultBranch =
+      typeof metadataBranchIndex === "number" &&
+      metadataBranchIndex >= 0 &&
+      metadataBranchIndex < branches.length
+        ? metadataBranchIndex
+        : 0
+
+    return { branches, defaultBranch }
+  }
+
+  const fetchTranscript = React.useCallback(
+    async (conversationId: string, sessionId: string, signal: AbortSignal) => {
+      const response = await fetch(
+        `/api/conversations/${conversationId}/sessions/${sessionId}/transcript`,
+        { signal }
+      )
+      if (!response.ok) {
+        throw new Error("Failed to load transcript.")
+      }
+      const transcript = (await response.json()) as ApiTranscriptEntry[]
+      setMessages(
+        transcript.map((entry) =>
+          createClientMessage({
             id: createLocalMessageId(),
             role: entry.role,
             content: entry.content,
-          }))
+            parts: entry.parts,
+            metadata: entry.metadata,
+          })
         )
-      })
-      .catch((err) => {
+      )
+    },
+    [createLocalMessageId]
+  )
+
+  const loadTranscript = React.useCallback(
+    async (resetPrompt: boolean) => {
+      streamAbortRef.current?.abort()
+      transcriptAbortRef.current?.abort()
+      if (resetPrompt) {
+        setMessages([])
+        setPromptValue("")
+        setChatStatus("idle")
+        setChatError(null)
+        setRestoreCheckpointError(null)
+        setIsAwaitingFirstToken(false)
+      }
+      const conversationId = selectedWorkspace?.id
+      const sessionId = selectedChat?.id
+      if (!conversationId || !sessionId) {
+        setIsTranscriptLoading(false)
+        return
+      }
+      const controller = new AbortController()
+      transcriptAbortRef.current = controller
+      setIsTranscriptLoading(true)
+      try {
+        await fetchTranscript(conversationId, sessionId, controller.signal)
+      } catch (err) {
         if (controller.signal.aborted) {
           return
         }
         setChatError(err instanceof Error ? err.message : "Failed to load transcript.")
         setMessages([])
-      })
-      .finally(() => {
+      } finally {
         if (!controller.signal.aborted) {
           setIsTranscriptLoading(false)
         }
-      })
-  }, [selectedWorkspace?.id, selectedChat?.id, createLocalMessageId])
+      }
+    },
+    [selectedWorkspace?.id, selectedChat?.id, fetchTranscript]
+  )
 
   React.useEffect(() => {
-    if (autoScrollRef.current) {
-      scrollToBottom()
-    }
-  }, [messages, isTranscriptLoading, scrollToBottom])
+    void loadTranscript(true)
+  }, [selectedWorkspace?.id, selectedChat?.id, loadTranscript])
 
   React.useEffect(() => {
     setDeleteWorkspaceError(null)
@@ -697,6 +1592,10 @@ const App = () => {
   React.useEffect(() => {
     setDeleteSessionError(null)
   }, [selectedWorkspaceId])
+
+  React.useEffect(() => {
+    setUpdateModelError(null)
+  }, [selectedChatId])
 
   React.useEffect(() => {
     if (!projects.length) {
@@ -1311,10 +2210,40 @@ const App = () => {
       }
       const session = (await response.json()) as ApiSession
       setSessionForm((prev) => ({ ...prev, title: "" }))
+      const nextChat: ChatSession = {
+        id: session.id,
+        name: session.title?.trim() || session.model || session.id,
+        model: session.model,
+        createdAt: session.createdAt,
+        updatedAt: session.updatedAt,
+      }
       setIsProjectsView(false)
       setSelectedProjectId(selectedProject.id)
       setSelectedWorkspaceId(selectedWorkspace.id)
       setSelectedChatId(session.id)
+      setProjects((current) =>
+        current.map((project) => {
+          if (project.id !== selectedProject.id) {
+            return project
+          }
+          return {
+            ...project,
+            workspaces: project.workspaces.map((workspace) => {
+              if (workspace.id !== selectedWorkspace.id) {
+                return workspace
+              }
+              const existing = workspace.chats.some((chat) => chat.id === session.id)
+              if (existing) {
+                return workspace
+              }
+              return {
+                ...workspace,
+                chats: [nextChat, ...workspace.chats],
+              }
+            }),
+          }
+        })
+      )
       await loadProjects()
     } catch (err) {
       setCreateSessionError(
@@ -1369,28 +2298,107 @@ const App = () => {
     }
   }
 
+  const handleUpdateSessionModel = async (modelId: string) => {
+    if (!selectedWorkspace || !selectedChat) {
+      return
+    }
+    if (selectedChat.model === modelId) {
+      return
+    }
+    setIsUpdatingModel(true)
+    setUpdateModelError(null)
+    try {
+      const response = await fetch(
+        `/api/conversations/${selectedWorkspace.id}/sessions/${selectedChat.id}`,
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ model: modelId }),
+        }
+      )
+      if (!response.ok) {
+        let message = "Failed to update session model."
+        try {
+          const payload = (await response.json()) as { error?: string }
+          if (payload.error) {
+            message = payload.error
+          }
+        } catch {
+          // Ignore parsing errors
+        }
+        throw new Error(message)
+      }
+      const updatedSession = (await response.json()) as ApiSession
+      setProjects((prev) =>
+        prev.map((project) => ({
+          ...project,
+          workspaces: project.workspaces.map((workspace) => {
+            if (workspace.id !== updatedSession.conversationId) {
+              return workspace
+            }
+            return {
+              ...workspace,
+              chats: workspace.chats.map((chat) =>
+                chat.id === updatedSession.id
+                  ? {
+                      ...chat,
+                      name:
+                        updatedSession.title?.trim() ||
+                        updatedSession.model ||
+                        updatedSession.id,
+                      model: updatedSession.model,
+                      updatedAt: updatedSession.updatedAt,
+                    }
+                  : chat
+              ),
+            }
+          }),
+        }))
+      )
+      const updatedModel = updatedSession.model?.trim()
+      if (updatedModel) {
+        setAvailableModels((prev) =>
+          prev.includes(updatedModel) ? prev : [...prev, updatedModel]
+        )
+      }
+    } catch (err) {
+      setUpdateModelError(
+        err instanceof Error ? err.message : "Failed to update session model."
+      )
+    } finally {
+      setIsUpdatingModel(false)
+    }
+  }
+
   const handlePromptChange = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
     setPromptValue(event.target.value)
   }
 
-  const handlePromptKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.key === "Enter" && !event.shiftKey) {
-      event.preventDefault()
-      void handlePromptSubmit(event)
+  const handleSuggestionClick = React.useCallback((suggestion: string) => {
+    setPromptValue(suggestion)
+    if (typeof document === "undefined") {
+      return
     }
-  }
+    window.requestAnimationFrame(() => {
+      const textarea = document.querySelector(
+        'textarea[name="message"]'
+      ) as HTMLTextAreaElement | null
+      if (!textarea) {
+        return
+      }
+      textarea.focus()
+      textarea.setSelectionRange(suggestion.length, suggestion.length)
+    })
+  }, [])
 
-  const handlePromptSubmit = async (
-    event: React.FormEvent<HTMLFormElement> | React.KeyboardEvent<HTMLTextAreaElement>
-  ) => {
-    event.preventDefault()
+  const handlePromptSubmit = async (message: PromptInputMessage) => {
     if (!selectedWorkspace || !selectedChat) {
       return
     }
     if (chatStatus === "streaming") {
       return
     }
-    const content = promptValue.trim()
+    const content = message.text.trim()
     if (!content) {
       return
     }
@@ -1399,16 +2407,40 @@ const App = () => {
     const sessionId = selectedChat.id
     const userMessageId = createLocalMessageId()
     const assistantMessageId = createLocalMessageId()
+    const attachmentParts: StructuredMessagePart[] = message.files.map((file) => {
+      const attachmentId = createLocalFileId()
+      return {
+        type: "file",
+        id: attachmentId,
+        file: {
+          id: attachmentId,
+          name: file.filename,
+          path: file.url,
+          mimeType: file.mediaType,
+          size: file.size,
+          source: "upload",
+        },
+      }
+    })
+    const userParts = normalizeMessageParts(content, [
+      { type: "text", text: content },
+      ...attachmentParts,
+    ])
 
     setPromptValue("")
     setChatError(null)
     setIsAwaitingFirstToken(true)
-    autoScrollRef.current = true
     setChatStatus("streaming")
     setMessages((prev) => [
       ...prev,
-      { id: userMessageId, role: "user", content },
-      { id: assistantMessageId, role: "assistant", content: "", isStreaming: true },
+      createClientMessage({ id: userMessageId, role: "user", content, parts: userParts }),
+      createClientMessage({
+        id: assistantMessageId,
+        role: "assistant",
+        content: "",
+        parts: [],
+        isStreaming: true,
+      }),
     ])
 
     const controller = new AbortController()
@@ -1420,7 +2452,7 @@ const App = () => {
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ message: content }),
+          body: JSON.stringify({ content, parts: userParts }),
           signal: controller.signal,
         }
       )
@@ -1470,14 +2502,30 @@ const App = () => {
             setMessages((prev) =>
               prev.map((message) =>
                 message.id === assistantMessageId
-                  ? {
-                      ...message,
-                      content: message.content + data.delta,
-                      isStreaming: true,
-                    }
+                  ? applyMessageDelta(message, data.delta)
                   : message
               )
             )
+            continue
+          }
+
+          if (eventName === "message_part_updated" || eventName === "message.part.updated") {
+            const incomingPart = data?.part
+            if (incomingPart && typeof incomingPart.type === "string") {
+              setIsAwaitingFirstToken(false)
+              setMessages((prev) =>
+                prev.map((message) => {
+                  if (message.id !== assistantMessageId) {
+                    return message
+                  }
+                  return applyMessagePartUpdate(
+                    message,
+                    incomingPart as StructuredMessagePart,
+                    data?.delta
+                  )
+                })
+              )
+            }
             continue
           }
 
@@ -1487,12 +2535,10 @@ const App = () => {
             setMessages((prev) =>
               prev.map((message) =>
                 message.id === assistantMessageId
-                  ? {
-                      ...message,
-                      content:
-                        typeof data?.content === "string" ? data.content : message.content,
-                      isStreaming: false,
-                    }
+                  ? applyMessageEnd(message, {
+                      content: typeof data?.content === "string" ? data.content : undefined,
+                      parts: Array.isArray(data?.parts) ? data.parts : undefined,
+                    })
                   : message
               )
             )
@@ -1546,6 +2592,136 @@ const App = () => {
       streamAbortRef.current = null
     }
   }
+
+  const handleCopyMessage = React.useCallback(
+    async (messageId: string, text: string) => {
+      const trimmed = text.trim()
+      if (!trimmed) {
+        return
+      }
+
+      try {
+        if (navigator.clipboard?.writeText) {
+          await navigator.clipboard.writeText(trimmed)
+        } else {
+          const textarea = document.createElement("textarea")
+          textarea.value = trimmed
+          textarea.style.position = "fixed"
+          textarea.style.opacity = "0"
+          document.body.appendChild(textarea)
+          textarea.select()
+          document.execCommand("copy")
+          document.body.removeChild(textarea)
+        }
+      } catch {
+        return
+      }
+
+      setCopiedMessageId(messageId)
+      if (copyTimeoutRef.current !== null) {
+        window.clearTimeout(copyTimeoutRef.current)
+      }
+      copyTimeoutRef.current = window.setTimeout(() => {
+        setCopiedMessageId((current) => (current === messageId ? null : current))
+      }, 2000)
+    },
+    [setCopiedMessageId]
+  )
+
+  const handleRetryMessage = React.useCallback(
+    (messageIndex: number) => {
+      if (chatStatus === "streaming") {
+        return
+      }
+
+      for (let index = messageIndex; index >= 0; index -= 1) {
+        const candidate = messages[index]
+        if (candidate?.role !== "user") {
+          continue
+        }
+        const candidateText =
+          getTextFromParts(candidate.parts) || candidate.content || ""
+        if (candidateText.trim()) {
+          void handlePromptSubmit({ text: candidateText, files: [] })
+          return
+        }
+      }
+    },
+    [chatStatus, messages, handlePromptSubmit]
+  )
+
+  const handleRestoreCheckpoint = React.useCallback(
+    async (checkpoint: CheckpointMarker) => {
+      if (!selectedWorkspace || !selectedChat) {
+        return
+      }
+      if (!checkpoint.restore) {
+        return
+      }
+      if (restoringCheckpoints[checkpoint.id]) {
+        return
+      }
+      setRestoreCheckpointError(null)
+      setRestoringCheckpoints((prev) => ({ ...prev, [checkpoint.id]: true }))
+      try {
+        let response: Response
+        if (checkpoint.restore.url) {
+          const method = (checkpoint.restore.method ?? "POST").toUpperCase()
+          const hasBody = checkpoint.restore.payload !== undefined && method !== "GET"
+          response = await fetch(checkpoint.restore.url, {
+            method,
+            headers: hasBody ? { "Content-Type": "application/json" } : undefined,
+            body: hasBody ? JSON.stringify(checkpoint.restore.payload) : undefined,
+          })
+        } else {
+          if (!checkpoint.restore.messageId) {
+            throw new Error("Checkpoint restore is missing a message id.")
+          }
+          response = await fetch(
+            `/api/conversations/${selectedWorkspace.id}/sessions/${selectedChat.id}/checkpoints/restore`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                messageId: checkpoint.restore.messageId,
+                partId: checkpoint.restore.partId,
+              }),
+            }
+          )
+        }
+        if (!response.ok) {
+          let message = "Failed to restore checkpoint."
+          try {
+            const payload = (await response.json()) as { error?: string }
+            if (payload.error) {
+              message = payload.error
+            }
+          } catch {
+            // Ignore parsing errors
+          }
+          throw new Error(message)
+        }
+        await loadTranscript(false)
+      } catch (err) {
+        setRestoreCheckpointError(
+          err instanceof Error ? err.message : "Failed to restore checkpoint."
+        )
+      } finally {
+        setRestoringCheckpoints((prev) => {
+          const next = { ...prev }
+          delete next[checkpoint.id]
+          return next
+        })
+      }
+    },
+    [
+      selectedWorkspace,
+      selectedChat,
+      restoringCheckpoints,
+      loadTranscript,
+      setRestoreCheckpointError,
+    ]
+  )
 
   const formatDate = (value?: string) => {
     if (!value) {
@@ -2556,62 +3732,340 @@ const App = () => {
               </Card>
             </div>
           ) : isChatView ? (
-            <Conversation className="min-h-[520px]">
-              <ConversationContent
-                ref={scrollContainerRef}
-                onScroll={handleScroll}
-                className="space-y-4"
-              >
+            <Conversation className="min-h-[520px] rounded-xl border bg-card shadow-sm">
+              <ConversationContent className="gap-4">
                 {isTranscriptLoading ? (
-                  <div className="flex h-full min-h-[320px] items-center justify-center text-sm text-muted-foreground">
-                    <Loader className="mr-2" /> Loading transcript...
+                  <div className="flex h-full min-h-[320px] items-center justify-center">
+                    <div className="grid w-full max-w-lg gap-3 px-4 text-sm text-muted-foreground">
+                      <div className="inline-flex items-center gap-2">
+                        <Loader className="mr-1" /> Loading transcript...
+                      </div>
+                      <div className="grid gap-2">
+                        <Shimmer className="h-4 w-32" />
+                        <Shimmer className="h-3 w-full" />
+                        <Shimmer className="h-3 w-5/6" />
+                      </div>
+                    </div>
                   </div>
                 ) : messages.length ? (
-                  messages.map((message) => (
-                    <Message key={message.id} role={message.role}>
-                      <MessageContent>
-                        {message.role === "assistant" ? (
-                          <>
-                            <MessageResponse isAnimating={message.isStreaming}>
-                              {message.content}
-                            </MessageResponse>
-                            {message.isStreaming && !message.content && isAwaitingFirstToken ? (
-                              <span className="inline-flex items-center gap-2 text-muted-foreground">
-                                <Loader /> Waiting for response...
-                              </span>
-                            ) : null}
-                          </>
-                        ) : (
-                          <MessageResponse isAnimating={false}>
-                            {message.content}
-                          </MessageResponse>
-                        )}
-                      </MessageContent>
-                    </Message>
-                  ))
+                  messages.map((message, messageIndex) => {
+                    const attachmentParts = message.parts.filter(
+                      (part): part is StructuredMessagePart & {
+                        type: "file"
+                        file: FileReference
+                      } => part.type === "file"
+                    )
+                    const attachments = attachmentParts.map((part, index) => {
+                      const file = part.file
+                      return {
+                        id: file.id || part.id || `attachment-${message.id}-${index}`,
+                        name: file.name,
+                        path: file.path,
+                        mimeType: file.mimeType,
+                        size: file.size,
+                        source: file.source,
+                      }
+                    })
+                    const reasoningParts = message.parts.filter(
+                      (part): part is StructuredMessagePart & { type: "reasoning" } =>
+                        part.type === "reasoning"
+                    )
+                    const reasoningText = reasoningParts
+                      .map((part) => part.text)
+                      .filter(
+                        (text): text is string =>
+                          typeof text === "string" && text.trim().length > 0
+                      )
+                      .join("\n\n")
+                    const sources = getSourcesFromParts(message.parts)
+                    const messageText = getTextFromParts(message.parts) || message.content || ""
+                    const hasMessageText = Boolean(messageText)
+                    const messageMarkdown = prepareCitationMarkdown(messageText, sources)
+                    const showReasoning = message.role === "assistant" && Boolean(reasoningText)
+                    const checkpointMarkers = getCheckpointMarkers(message.parts, message.id)
+                    const planEntries = getPlanEntries(message.parts, message.id)
+                    const taskEntries = getTaskEntries(message.parts, message.id)
+                    const queueEntries = getQueueEntries(message.parts, message.id)
+                    const { branches: messageBranches, defaultBranch } = getMessageBranches(
+                      message,
+                      messageText,
+                      sources
+                    )
+                    const hasBranches = messageBranches.length > 1
+                    const isCopied = copiedMessageId === message.id
+                    const lastUserMessageText =
+                      message.role === "assistant"
+                        ? (() => {
+                            for (let index = messageIndex; index >= 0; index -= 1) {
+                              const candidate = messages[index]
+                              if (candidate?.role !== "user") {
+                                continue
+                              }
+                              const candidateText =
+                                getTextFromParts(candidate.parts) ||
+                                candidate.content ||
+                                ""
+                              if (candidateText.trim()) {
+                                return candidateText
+                              }
+                            }
+                            return ""
+                          })()
+                        : ""
+                    const canRetry =
+                      message.role === "assistant" &&
+                      !message.isStreaming &&
+                      !isChatStreaming &&
+                      Boolean(lastUserMessageText.trim())
+                    const canCopy = Boolean(messageText.trim())
+                    const showActions = canCopy || canRetry
+                    const showToolbar = showActions || hasBranches
+                    const toolbarClassName = hasBranches ? undefined : "justify-end"
+                    const canRestoreCheckpoint = !isChatStreaming && !isTranscriptLoading
+                    const actionButtons = showActions ? (
+                      <MessageActions>
+                        {canCopy ? (
+                          <MessageAction
+                            aria-label={isCopied ? "Copied" : "Copy message"}
+                            label={isCopied ? "Copied" : "Copy message"}
+                            onClick={() => void handleCopyMessage(message.id, messageText)}
+                            tooltip={isCopied ? "Copied" : "Copy"}
+                          >
+                            {isCopied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
+                          </MessageAction>
+                        ) : null}
+                        {canRetry ? (
+                          <MessageAction
+                            aria-label="Retry"
+                            label="Retry"
+                            onClick={() => handleRetryMessage(messageIndex)}
+                            tooltip="Retry"
+                          >
+                            <RotateCcw className="size-3.5" />
+                          </MessageAction>
+                        ) : null}
+                      </MessageActions>
+                    ) : null
+
+                    return (
+                      <Message key={message.id} from={message.role}>
+                        <MessageContent>
+                          {attachments.length ? (
+                            <MessageAttachments attachments={attachments} />
+                          ) : null}
+                          {checkpointMarkers.length ? (
+                            <div className="flex flex-wrap gap-2">
+                              {checkpointMarkers.map((checkpoint) => (
+                                <MessageCheckpoint
+                                  key={checkpoint.id}
+                                  label={checkpoint.label}
+                                  description={checkpoint.description}
+                                  status={checkpoint.status}
+                                  timestamp={checkpoint.timestamp}
+                                  onRestore={
+                                    checkpoint.restore
+                                      ? () => void handleRestoreCheckpoint(checkpoint)
+                                      : undefined
+                                  }
+                                  restoreLabel={checkpoint.restore?.label}
+                                  isRestoring={Boolean(restoringCheckpoints[checkpoint.id])}
+                                  restoreDisabled={!canRestoreCheckpoint}
+                                />
+                              ))}
+                            </div>
+                          ) : null}
+                          {message.role === "assistant" ? (
+                            <>
+                              {showReasoning ? (
+                                <ReasoningSection
+                                  text={reasoningText}
+                                  isStreaming={message.isStreaming}
+                                />
+                              ) : null}
+                              {planEntries.length ? (
+                                <div className="grid gap-2">
+                                  {planEntries.map((plan) => (
+                                    <PlanSection
+                                      key={plan.id}
+                                      title={plan.title}
+                                      summary={plan.summary}
+                                      steps={plan.steps}
+                                      isStreaming={plan.isStreaming ?? message.isStreaming}
+                                    />
+                                  ))}
+                                </div>
+                              ) : null}
+                              {taskEntries.length ? (
+                                <div className="grid gap-2">
+                                  {taskEntries.map((task) => (
+                                    <TaskListSection
+                                      key={task.id}
+                                      title={task.title}
+                                      summary={task.summary}
+                                      items={task.items}
+                                      isStreaming={task.isStreaming ?? message.isStreaming}
+                                    />
+                                  ))}
+                                </div>
+                              ) : null}
+                              {queueEntries.length ? (
+                                <div className="grid gap-2">
+                                  {queueEntries.map((queue) => (
+                                    <QueueSection
+                                      key={queue.id}
+                                      title={queue.title}
+                                      summary={queue.summary}
+                                      items={queue.items}
+                                      totalCount={queue.totalCount}
+                                      isStreaming={queue.isStreaming ?? message.isStreaming}
+                                    />
+                                  ))}
+                                </div>
+                              ) : null}
+                              {hasBranches ? (
+                                <MessageBranch defaultBranch={defaultBranch}>
+                                  <MessageBranchContent>
+                                    {messageBranches.map((branch) => {
+                                      const branchMarkdown = prepareCitationMarkdown(
+                                        branch.content,
+                                        branch.sources
+                                      )
+
+                                      return (
+                                        <div className="grid gap-2" key={branch.id}>
+                                          <CitationProvider sources={branch.sources}>
+                                            <MessageResponse components={{ a: CitationAnchor }}>
+                                              {branchMarkdown}
+                                            </MessageResponse>
+                                          </CitationProvider>
+                                          {branch.sources.length ? (
+                                            <SourcesList sources={branch.sources} />
+                                          ) : null}
+                                        </div>
+                                      )
+                                    })}
+                                  </MessageBranchContent>
+                                  {showToolbar ? (
+                                    <MessageToolbar className={toolbarClassName}>
+                                      {actionButtons}
+                                      <MessageBranchSelector from={message.role}>
+                                        <MessageBranchPrevious />
+                                        <MessageBranchPage />
+                                        <MessageBranchNext />
+                                      </MessageBranchSelector>
+                                    </MessageToolbar>
+                                  ) : null}
+                                </MessageBranch>
+                              ) : hasMessageText ? (
+                                <>
+                                  <CitationProvider sources={sources}>
+                                    <MessageResponse components={{ a: CitationAnchor }}>
+                                      {messageMarkdown}
+                                    </MessageResponse>
+                                  </CitationProvider>
+                                  {sources.length ? <SourcesList sources={sources} /> : null}
+                                  {showToolbar ? (
+                                    <MessageToolbar className={toolbarClassName}>
+                                      {actionButtons}
+                                    </MessageToolbar>
+                                  ) : null}
+                                </>
+                              ) : showToolbar ? (
+                                <MessageToolbar className={toolbarClassName}>
+                                  {actionButtons}
+                                </MessageToolbar>
+                              ) : null}
+                              {message.isStreaming && !hasMessageText && isAwaitingFirstToken ? (
+                                <div className="grid gap-2">
+                                  <span className="inline-flex items-center gap-2 text-muted-foreground">
+                                    <Loader /> Waiting for response...
+                                  </span>
+                                  <div className="grid gap-1">
+                                    <Shimmer className="h-3 w-4/5" />
+                                    <Shimmer className="h-3 w-2/3" />
+                                  </div>
+                                </div>
+                              ) : null}
+                            </>
+                          ) : (
+                            <CitationProvider sources={sources}>
+                              <MessageResponse components={{ a: CitationAnchor }}>
+                                {messageMarkdown}
+                              </MessageResponse>
+                            </CitationProvider>
+                          )}
+                        </MessageContent>
+                        {message.role === "user" && showToolbar ? (
+                          <MessageToolbar className={cn("self-end", toolbarClassName)}>
+                            {actionButtons}
+                          </MessageToolbar>
+                        ) : null}
+                      </Message>
+                    )
+                  })
                 ) : (
-                  <div className="flex h-full min-h-[320px] items-center justify-center text-sm text-muted-foreground">
-                    Ask a question to start the session.
-                  </div>
+                  <ConversationEmptyState
+                    className="min-h-[320px]"
+                  >
+                    <div className="flex flex-col items-center gap-4 text-center">
+                      <div className="space-y-1">
+                        <h3 className="text-sm font-medium">No messages yet</h3>
+                        <p className="text-sm text-muted-foreground">
+                          Ask a question to start the session.
+                        </p>
+                      </div>
+                      <div className="flex w-full max-w-xl flex-wrap justify-center gap-2">
+                        {emptyStateSuggestions.map((suggestion) => (
+                          <Button
+                            key={suggestion}
+                            className="rounded-full text-xs"
+                            disabled={promptDisabled}
+                            onClick={() => handleSuggestionClick(suggestion)}
+                            size="xs"
+                            type="button"
+                            variant="outline"
+                          >
+                            {suggestion}
+                          </Button>
+                        ))}
+                      </div>
+                    </div>
+                  </ConversationEmptyState>
                 )}
               </ConversationContent>
-              {showScrollButton ? (
-                <ConversationScrollButton onClick={scrollToBottom}>
-                  Jump to latest
-                </ConversationScrollButton>
-              ) : null}
+              <ConversationScrollButton />
               <div className="border-t bg-background/80 p-4">
-                <PromptInput onSubmit={handlePromptSubmit}>
+                <PromptInput multiple onSubmit={handlePromptSubmit}>
+                  <PromptInputAttachmentsPreview />
                   <PromptInputTextarea
                     value={promptValue}
                     onChange={handlePromptChange}
-                    onKeyDown={handlePromptKeyDown}
                     placeholder="Ask for a review, summary, or next steps..."
                     disabled={promptDisabled}
                   />
                   <PromptInputFooter>
-                    <div className="text-xs text-muted-foreground">
-                      Shift + Enter for a new line
+                    <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                      <PromptInputTools>
+                        <ModelSelector
+                          models={modelOptions}
+                          value={selectedModel}
+                          disabled={promptDisabled || isUpdatingModel}
+                          onSelect={handleUpdateSessionModel}
+                        />
+                        <PromptInputActionMenu>
+                          <PromptInputActionMenuTrigger
+                            aria-label="Prompt actions"
+                            disabled={promptDisabled}
+                          />
+                          <PromptInputActionMenuContent>
+                            <PromptInputActionAddAttachments disabled={promptDisabled} />
+                          </PromptInputActionMenuContent>
+                        </PromptInputActionMenu>
+                      </PromptInputTools>
+                      {contextUsage ? (
+                        <ContextUsageIndicator usage={contextUsage} />
+                      ) : null}
+                      <span>Shift + Enter for a new line</span>
                     </div>
                     <PromptInputSubmit
                       type="submit"
@@ -2621,9 +4075,19 @@ const App = () => {
                     </PromptInputSubmit>
                   </PromptInputFooter>
                 </PromptInput>
+                {updateModelError ? (
+                  <div className="mt-3 rounded-md border border-destructive/50 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+                    {updateModelError}
+                  </div>
+                ) : null}
                 {chatError ? (
                   <div className="mt-3 rounded-md border border-destructive/50 bg-destructive/5 px-3 py-2 text-xs text-destructive">
                     {chatError}
+                  </div>
+                ) : null}
+                {restoreCheckpointError ? (
+                  <div className="mt-3 rounded-md border border-destructive/50 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+                    {restoreCheckpointError}
                   </div>
                 ) : null}
               </div>

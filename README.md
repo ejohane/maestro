@@ -70,6 +70,10 @@ Data is stored in `~/.maestro`:
 - `transcript.ndjson` stores user/assistant/system messages.
 - `events.ndjson` stores SDK and tool call events as they stream.
 
+### Message schema
+
+See `MESSAGE_SCHEMA.md` for the canonical structured message schema (parts, tool approvals, citations, attachments) and legacy mapping rules.
+
 ### Git workspace behavior
 
 When starting a conversation, the CLI:
@@ -174,6 +178,7 @@ bun run dev
 ## Environment variables
 
 - `MAESTRO_MODEL` - Default model ID used by the session.
+- `MAESTRO_MODELS` - Comma-separated list of additional model IDs for the model switcher.
 - `MAESTRO_OPENCODE_URL` - OpenCode server URL (defaults to `http://localhost:4096`).
 - `OPENCODE_SERVER_USERNAME` - Basic auth username (defaults to `opencode`).
 - `OPENCODE_SERVER_PASSWORD` - Basic auth password (enables auth when set).

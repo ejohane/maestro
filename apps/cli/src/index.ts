@@ -4,9 +4,11 @@ import path from "node:path";
 import readline from "node:readline";
 import {
   Conversation,
+  MessagePart,
   Project,
   Session,
   generateId,
+  getTextFromParts,
   nowIso
 } from "@maestro/core";
 import {
@@ -310,6 +312,7 @@ program
           ts,
           role: "user",
           content: trimmed,
+          parts: [{ type: "text", text: trimmed }],
           sessionId: session.id,
           conversationId: conversation.id
         });
@@ -343,6 +346,7 @@ program
             ts: nowIso(),
             role: "assistant",
             content: assistantContent,
+            parts: [{ type: "text", text: assistantContent }],
             sessionId: session.id,
             conversationId: conversation.id
           });
@@ -512,6 +516,15 @@ const mapEventType = (type: string): string => {
   return "sdk_event";
 };
 
+const isMessagePart = (part: unknown): part is MessagePart => {
+  return (
+    typeof part === "object" &&
+    part !== null &&
+    "type" in part &&
+    typeof (part as { type?: unknown }).type === "string"
+  );
+};
+
 const extractAssistantChunk = (event: { type: string; data: any }): string => {
   if (event.type !== "assistant_message") {
     return "";
@@ -521,6 +534,10 @@ const extractAssistantChunk = (event: { type: string; data: any }): string => {
   }
   if (typeof event.data?.content === "string") {
     return event.data.content;
+  }
+  const parts = Array.isArray(event.data?.parts) ? event.data.parts.filter(isMessagePart) : [];
+  if (parts.length > 0) {
+    return getTextFromParts(parts);
   }
   if (typeof event.data?.message === "string") {
     return event.data.message;

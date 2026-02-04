@@ -4,7 +4,7 @@ export default {
   darkMode: ["class"],
   content: ["./index.html", "./src/**/*.{ts,tsx}", "./node_modules/streamdown/dist/*.js"],
   theme: {
-  	extend: {
+		extend: {
   		fontFamily: {
   			sans: [
   				'Inter',
@@ -46,12 +46,22 @@ export default {
   				ring: 'hsl(var(--sidebar-ring))'
   			}
   		},
-  		borderRadius: {
-  			lg: 'var(--radius)',
-  			md: 'calc(var(--radius) - 2px)',
-  			sm: 'calc(var(--radius) - 4px)'
-  		}
-  	}
+			borderRadius: {
+				lg: 'var(--radius)',
+				md: 'calc(var(--radius) - 2px)',
+				sm: 'calc(var(--radius) - 4px)'
+			},
+			keyframes: {
+				shimmer: {
+					'100%': {
+						transform: 'translateX(100%)'
+					}
+				}
+			},
+			animation: {
+				shimmer: 'shimmer 1.6s ease-in-out infinite'
+			}
+		}
   },
   plugins: []
 } satisfies Config;

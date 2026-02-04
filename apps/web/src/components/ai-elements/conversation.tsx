@@ -1,47 +1,95 @@
-import * as React from "react"
+import { ArrowDownIcon } from "lucide-react"
+import type { ComponentProps, ReactNode } from "react"
+import { useCallback } from "react"
+import { StickToBottom, useStickToBottomContext } from "use-stick-to-bottom"
 
 import { cn } from "../../lib/utils"
+import { Button } from "../ui/button"
 
-const Conversation = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
-  ({ className, ...props }, ref) => (
-    <div
-      ref={ref}
-      className={cn(
-        "relative flex min-h-[420px] flex-1 flex-col overflow-hidden rounded-xl border bg-card shadow-sm",
-        className
-      )}
-      {...props}
-    />
-  )
-)
-Conversation.displayName = "Conversation"
+export type ConversationProps = ComponentProps<typeof StickToBottom>
 
-const ConversationContent = React.forwardRef<
-  HTMLDivElement,
-  React.HTMLAttributes<HTMLDivElement>
->(({ className, ...props }, ref) => (
-  <div
-    ref={ref}
-    className={cn("flex-1 overflow-y-auto px-4 py-6", className)}
+export const Conversation = ({ className, ...props }: ConversationProps) => (
+  <StickToBottom
+    className={cn("relative flex flex-1 flex-col overflow-hidden", className)}
+    initial="smooth"
+    resize="smooth"
+    role="log"
     {...props}
   />
-))
-ConversationContent.displayName = "ConversationContent"
+)
 
-const ConversationScrollButton = React.forwardRef<
-  HTMLButtonElement,
-  React.ButtonHTMLAttributes<HTMLButtonElement>
->(({ className, ...props }, ref) => (
-  <button
-    ref={ref}
-    type="button"
+export type ConversationContentProps = ComponentProps<typeof StickToBottom.Content>
+
+export const ConversationContent = ({
+  className,
+  ...props
+}: ConversationContentProps) => (
+  <StickToBottom.Content
+    className={cn("flex min-h-0 flex-1 flex-col gap-8 overflow-y-auto p-4", className)}
+    {...props}
+  />
+)
+
+export type ConversationEmptyStateProps = ComponentProps<"div"> & {
+  title?: string
+  description?: string
+  icon?: ReactNode
+}
+
+export const ConversationEmptyState = ({
+  className,
+  title = "No messages yet",
+  description = "Start a conversation to see messages here",
+  icon,
+  children,
+  ...props
+}: ConversationEmptyStateProps) => (
+  <div
     className={cn(
-      "absolute bottom-24 right-6 rounded-full border bg-background px-4 py-2 text-xs font-semibold text-foreground shadow-sm transition hover:border-primary/60",
+      "flex size-full flex-col items-center justify-center gap-3 p-8 text-center",
       className
     )}
     {...props}
-  />
-))
-ConversationScrollButton.displayName = "ConversationScrollButton"
+  >
+    {children ?? (
+      <>
+        {icon ? <div className="text-muted-foreground">{icon}</div> : null}
+        <div className="space-y-1">
+          <h3 className="text-sm font-medium">{title}</h3>
+          {description ? (
+            <p className="text-sm text-muted-foreground">{description}</p>
+          ) : null}
+        </div>
+      </>
+    )}
+  </div>
+)
 
-export { Conversation, ConversationContent, ConversationScrollButton }
+export type ConversationScrollButtonProps = ComponentProps<typeof Button>
+
+export const ConversationScrollButton = ({
+  className,
+  ...props
+}: ConversationScrollButtonProps) => {
+  const { isAtBottom, scrollToBottom } = useStickToBottomContext()
+
+  const handleScrollToBottom = useCallback(() => {
+    scrollToBottom()
+  }, [scrollToBottom])
+
+  return !isAtBottom ? (
+    <Button
+      className={cn(
+        "absolute bottom-4 left-[50%] translate-x-[-50%] rounded-full",
+        className
+      )}
+      onClick={handleScrollToBottom}
+      size="icon"
+      type="button"
+      variant="outline"
+      {...props}
+    >
+      <ArrowDownIcon className="size-4" />
+    </Button>
+  ) : null
+}

@@ -1,65 +1,29 @@
 @import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap");
 
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
-
-:root {
-  --background: 0 0% 100%;
-  --foreground: 224 30% 12%;
-  --card: 0 0% 100%;
-  --card-foreground: 224 30% 12%;
-  --popover: 0 0% 100%;
-  --popover-foreground: 224 30% 12%;
-  --primary: 224 30% 12%;
-  --primary-foreground: 0 0% 100%;
-  --secondary: 210 20% 96%;
-  --secondary-foreground: 224 30% 12%;
-  --muted: 210 20% 96%;
-  --muted-foreground: 215 16% 42%;
-  --accent: 210 20% 96%;
-  --accent-foreground: 224 30% 12%;
-  --border: 214 20% 90%;
-  --input: 214 20% 90%;
-  --ring: 224 30% 12%;
-  --radius: 8px;
-  color-scheme: light;
-}
-
-.dark {
-  --background: 224 35% 6%;
-  --foreground: 210 40% 98%;
-  --card: 224 35% 8%;
-  --card-foreground: 210 40% 98%;
-  --popover: 224 35% 8%;
-  --popover-foreground: 210 40% 98%;
-  --primary: 210 40% 98%;
-  --primary-foreground: 224 35% 6%;
-  --secondary: 220 26% 12%;
-  --secondary-foreground: 210 40% 98%;
-  --muted: 220 26% 12%;
-  --muted-foreground: 215 12% 72%;
-  --accent: 220 26% 12%;
-  --accent-foreground: 210 40% 98%;
-  --border: 220 26% 14%;
-  --input: 220 26% 14%;
-  --ring: 212 95% 70%;
-  color-scheme: dark;
-}
-
-* {
-  @apply border-border;
-}
-
-body {
-  @apply bg-background text-foreground font-sans;
-  min-height: 100vh;
-}
-
-
+@config "../tailwind.config.ts";
+@import "tailwindcss";
+@source "../node_modules/streamdown/dist/*.js";
 
 @layer base {
   :root {
+    --background: 0 0% 100%;
+    --foreground: 224 30% 12%;
+    --card: 0 0% 100%;
+    --card-foreground: 224 30% 12%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 224 30% 12%;
+    --primary: 224 30% 12%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 210 20% 96%;
+    --secondary-foreground: 224 30% 12%;
+    --muted: 210 20% 96%;
+    --muted-foreground: 215 16% 42%;
+    --accent: 210 20% 96%;
+    --accent-foreground: 224 30% 12%;
+    --border: 214 20% 90%;
+    --input: 214 20% 90%;
+    --ring: 224 30% 12%;
+    --radius: 8px;
     --sidebar-background: 0 0% 98%;
     --sidebar-foreground: 240 5.3% 26.1%;
     --sidebar-primary: 240 5.9% 10%;
@@ -68,8 +32,27 @@ body {
     --sidebar-accent-foreground: 240 5.9% 10%;
     --sidebar-border: 220 13% 91%;
     --sidebar-ring: 217.2 91.2% 59.8%;
+    color-scheme: light;
   }
+
   .dark {
+    --background: 224 35% 6%;
+    --foreground: 210 40% 98%;
+    --card: 224 35% 8%;
+    --card-foreground: 210 40% 98%;
+    --popover: 224 35% 8%;
+    --popover-foreground: 210 40% 98%;
+    --primary: 210 40% 98%;
+    --primary-foreground: 224 35% 6%;
+    --secondary: 220 26% 12%;
+    --secondary-foreground: 210 40% 98%;
+    --muted: 220 26% 12%;
+    --muted-foreground: 215 12% 72%;
+    --accent: 220 26% 12%;
+    --accent-foreground: 210 40% 98%;
+    --border: 220 26% 14%;
+    --input: 220 26% 14%;
+    --ring: 212 95% 70%;
     --sidebar-background: 240 5.9% 10%;
     --sidebar-foreground: 240 4.8% 95.9%;
     --sidebar-primary: 224.3 76.3% 48%;
@@ -78,16 +61,15 @@ body {
     --sidebar-accent-foreground: 240 4.8% 95.9%;
     --sidebar-border: 240 3.7% 15.9%;
     --sidebar-ring: 217.2 91.2% 59.8%;
+    color-scheme: dark;
   }
-}
 
-
-
-@layer base {
   * {
     @apply border-border;
   }
+
   body {
-    @apply bg-background text-foreground;
+    @apply bg-background text-foreground font-sans;
+    min-height: 100vh;
   }
 }

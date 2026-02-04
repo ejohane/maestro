@@ -7,9 +7,12 @@ import { promisify } from "node:util";
 import {
   Conversation,
   GitProvider,
+  MessagePart,
   Project,
   Session,
+  TranscriptEntry,
   createProject,
+  getTextFromParts,
   generateId,
   nowIso
 } from "@maestro/core";
@@ -28,6 +31,7 @@ import {
   readSettings,
   readProjectById,
   readSession,
+  readTranscriptEntries,
   readTranscriptHistory,
   setCurrentContext,
   updateConversationTimestamp,
@@ -108,6 +112,96 @@ const sendNotFound = (res: ServerResponse): void => {
 const sendError = (res: ServerResponse, error: unknown): void => {
   const message = error instanceof Error ? error.message : String(error);
   sendJson(res, 500, { error: message });
+};
+
+const isMessagePart = (part: unknown): part is MessagePart => {
+  return (
+    typeof part === "object" &&
+    part !== null &&
+    "type" in part &&
+    typeof (part as { type?: unknown }).type === "string"
+  );
+};
+
+const normalizeMessageParts = (
+  content: string,
+  parts: MessagePart[]
+): MessagePart[] | undefined => {
+  if (parts.length > 0) {
+    return parts;
+  }
+  if (content) {
+    return [{ type: "text", text: content }];
+  }
+  return undefined;
+};
+
+const logLegacyMigrationWarning = (context: {
+  conversationId: string;
+  sessionId: string;
+  reason: string;
+  entry?: Pick<TranscriptEntry, "ts" | "role">;
+}): void => {
+  const prefix = "[legacy-migration]";
+  const details = {
+    conversationId: context.conversationId,
+    sessionId: context.sessionId,
+    ts: context.entry?.ts,
+    role: context.entry?.role
+  };
+  console.warn(`${prefix} ${context.reason}`, details);
+};
+
+const getPartIndex = (parts: MessagePart[], part: MessagePart): number => {
+  const partIndex = (part as { index?: unknown }).index;
+  if (typeof partIndex === "number" && partIndex >= 0) {
+    return partIndex;
+  }
+  const partId = (part as { id?: unknown }).id;
+  if (typeof partId === "string") {
+    return parts.findIndex((existing) => (existing as { id?: unknown }).id === partId);
+  }
+  return -1;
+};
+
+const mergeMessagePart = (
+  existing: MessagePart | undefined,
+  incoming: MessagePart,
+  delta: unknown
+): MessagePart => {
+  const merged = { ...(existing ?? {}), ...incoming } as MessagePart & { text?: string };
+  const existingText = typeof (existing as { text?: unknown } | undefined)?.text === "string"
+    ? ((existing as { text?: unknown }).text as string)
+    : "";
+  const incomingText = typeof (incoming as { text?: unknown }).text === "string"
+    ? ((incoming as { text?: unknown }).text as string)
+    : "";
+  if (incoming.type === "text" || incoming.type === "reasoning") {
+    let nextText = existingText;
+    if (incomingText && incomingText.startsWith(existingText)) {
+      nextText = incomingText;
+    } else if (typeof delta === "string") {
+      nextText = existingText + delta;
+    } else if (incomingText) {
+      nextText = incomingText;
+    }
+    merged.text = nextText;
+  }
+  return merged;
+};
+
+const upsertMessagePart = (
+  parts: MessagePart[],
+  incoming: MessagePart,
+  delta: unknown
+): MessagePart[] => {
+  const index = getPartIndex(parts, incoming);
+  if (index >= 0) {
+    const nextParts = parts.slice();
+    nextParts[index] = mergeMessagePart(parts[index], incoming, delta);
+    return nextParts;
+  }
+  return [...parts, mergeMessagePart(undefined, incoming, delta)];
 };
 
 const isWorktreeDirty = async (worktreePath: string): Promise<boolean> => {
@@ -801,6 +895,39 @@ const handleApi = async (req: IncomingMessage, res: ServerResponse, repoRoot: st
     return;
   }
 
+  if (req.method === "GET" && segments.length === 2 && segments[1] === "models") {
+    try {
+      const defaultModel = getDefaultModel();
+      const conversations = await listConversations(requestRepoRoot);
+      const sessionLists = await Promise.all(
+        conversations.map((conversation) =>
+          listSessions(requestRepoRoot, conversation.id).catch(() => [])
+        )
+      );
+      const models = new Set<string>();
+      const envModels = (process.env.MAESTRO_MODELS ?? process.env.MAESTRO_MODEL_LIST ?? "")
+        .split(",")
+        .map((model) => model.trim())
+        .filter(Boolean);
+      models.add(defaultModel);
+      for (const model of envModels) {
+        models.add(model);
+      }
+      for (const sessions of sessionLists) {
+        for (const session of sessions) {
+          if (session.model?.trim()) {
+            models.add(session.model.trim());
+          }
+        }
+      }
+      sendJson(res, 200, { defaultModel, models: Array.from(models) });
+      return;
+    } catch (error) {
+      sendError(res, error);
+      return;
+    }
+  }
+
   if (req.method === "POST" && segments.length === 2 && segments[1] === "projects") {
     try {
       const body = await readJsonBody<{
@@ -1334,6 +1461,42 @@ const handleApi = async (req: IncomingMessage, res: ServerResponse, repoRoot: st
   }
 
   if (
+    req.method === "PUT" &&
+    segments.length === 5 &&
+    segments[1] === "conversations" &&
+    segments[3] === "sessions"
+  ) {
+    try {
+      const body = await readJsonBody<{ model?: string }>(req);
+      let conversation: Conversation;
+      let session: Session;
+      try {
+        conversation = await readConversation(requestRepoRoot, segments[2]);
+        session = await readSession(requestRepoRoot, segments[2], segments[4]);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+          sendNotFound(res);
+          return;
+        }
+        throw error;
+      }
+      const nextModel = body.model?.trim() || getDefaultModel();
+      session.model = nextModel;
+      await updateSessionTimestamp(requestRepoRoot, conversation.id, session);
+      await updateConversationTimestamp(requestRepoRoot, conversation);
+      sendJson(res, 200, session);
+      return;
+    } catch (error) {
+      if (error instanceof SyntaxError) {
+        sendBadRequest(res, "Invalid JSON body.");
+        return;
+      }
+      sendError(res, error);
+      return;
+    }
+  }
+
+  if (
     req.method === "DELETE" &&
     segments.length === 5 &&
     segments[1] === "conversations" &&
@@ -1386,9 +1549,21 @@ const handleApi = async (req: IncomingMessage, res: ServerResponse, repoRoot: st
     segments[6] === "stream"
   ) {
     try {
-      const body = await readJsonBody<{ message?: string }>(req);
-      const message = body.message?.trim();
-      if (!message) {
+      const body = await readJsonBody<{
+        message?: string;
+        content?: string;
+        parts?: MessagePart[];
+        metadata?: Record<string, unknown>;
+      }>(req);
+      const contentInput = body.message?.trim() ?? body.content?.trim() ?? "";
+      const incomingParts = Array.isArray(body.parts) ? body.parts.filter(isMessagePart) : [];
+      const derivedContent =
+        contentInput || (incomingParts.length > 0 ? getTextFromParts(incomingParts) : "");
+      const metadata =
+        body.metadata && typeof body.metadata === "object" && !Array.isArray(body.metadata)
+          ? body.metadata
+          : undefined;
+      if (!derivedContent && incomingParts.length === 0) {
         sendBadRequest(res, "Message is required.");
         return;
       }
@@ -1423,13 +1598,16 @@ const handleApi = async (req: IncomingMessage, res: ServerResponse, repoRoot: st
       }
 
       const ts = nowIso();
-      await appendTranscriptEntry(requestRepoRoot, conversation.id, session.id, {
+      const userEntry: TranscriptEntry = {
         ts,
         role: "user",
-        content: message,
+        content: derivedContent,
+        parts: normalizeMessageParts(derivedContent, incomingParts),
+        metadata,
         sessionId: session.id,
         conversationId: conversation.id
-      });
+      };
+      await appendTranscriptEntry(requestRepoRoot, conversation.id, session.id, userEntry);
 
       const history = await readTranscriptHistory(requestRepoRoot, conversation.id, session.id);
       const system = buildSystemMessage(conversation.workspacePath, history);
@@ -1454,6 +1632,7 @@ const handleApi = async (req: IncomingMessage, res: ServerResponse, repoRoot: st
       });
 
       let assistantContent = "";
+      let assistantParts: MessagePart[] = [];
       const eventTask = (async () => {
         for await (const event of eventResponse.stream) {
           await appendEventEntry(requestRepoRoot, conversation.id, session.id, {
@@ -1468,10 +1647,29 @@ const handleApi = async (req: IncomingMessage, res: ServerResponse, repoRoot: st
           }
           const part = (event as any).properties?.part;
           const delta = (event as any).properties?.delta;
-          if (!part || part.type !== "text" || part.sessionID !== opencodeSessionId) {
+          const partSessionId = (part as { sessionID?: unknown })?.sessionID;
+          const partRole = (part as { role?: unknown })?.role;
+          const messageRole = (event as any).properties?.message?.role;
+          const resolvedRole =
+            typeof partRole === "string"
+              ? partRole
+              : typeof messageRole === "string"
+                ? messageRole
+                : undefined;
+          if (!part || !isMessagePart(part) || partSessionId !== opencodeSessionId) {
             continue;
           }
-          if (typeof delta === "string" && delta.length > 0) {
+          if (resolvedRole && resolvedRole !== "assistant") {
+            continue;
+          }
+          assistantParts = upsertMessagePart(assistantParts, part, delta);
+          sendSseEvent(res, "message_part_updated", {
+            id: assistantMessageId,
+            partType: part.type,
+            delta,
+            part: assistantParts[getPartIndex(assistantParts, part)] ?? part
+          });
+          if (part.type === "text" && typeof delta === "string" && delta.length > 0) {
             assistantContent += delta;
             sendSseEvent(res, "message_delta", { delta });
           }
@@ -1488,10 +1686,18 @@ const handleApi = async (req: IncomingMessage, res: ServerResponse, repoRoot: st
           body: {
             model: resolvedModel ?? undefined,
             system: system ?? undefined,
-            parts: [{ type: "text", text: message }]
+            parts: [{ type: "text", text: derivedContent }]
           },
           query: { directory: conversation.workspacePath }
         });
+        const responseData =
+          ((response as { data?: unknown })?.data ?? response ?? {}) as { parts?: unknown[] };
+        const responseParts = Array.isArray(responseData.parts)
+          ? responseData.parts.filter(isMessagePart)
+          : [];
+        if (responseParts.length > 0 && assistantParts.length === 0) {
+          assistantParts = responseParts;
+        }
         if (!assistantContent) {
           const extracted = extractAssistantResponse(response);
           assistantContent = extracted.content;
@@ -1506,20 +1712,31 @@ const handleApi = async (req: IncomingMessage, res: ServerResponse, repoRoot: st
         }
       }
 
-      if (assistantContent.length > 0) {
-        await appendTranscriptEntry(requestRepoRoot, conversation.id, session.id, {
+      if (!assistantContent && assistantParts.length > 0) {
+        assistantContent = getTextFromParts(assistantParts);
+      }
+
+      const normalizedAssistantParts = normalizeMessageParts(assistantContent, assistantParts);
+      if (assistantContent.length > 0 || assistantParts.length > 0) {
+        const assistantEntry: TranscriptEntry = {
           ts: nowIso(),
           role: "assistant",
           content: assistantContent,
+          parts: normalizedAssistantParts,
           sessionId: session.id,
           conversationId: conversation.id
-        });
+        };
+        await appendTranscriptEntry(requestRepoRoot, conversation.id, session.id, assistantEntry);
       }
 
       await updateSessionTimestamp(requestRepoRoot, conversation.id, session);
       await updateConversationTimestamp(requestRepoRoot, conversation);
 
-      sendSseEvent(res, "message_end", { id: assistantMessageId, content: assistantContent });
+      sendSseEvent(res, "message_end", {
+        id: assistantMessageId,
+        content: assistantContent,
+        parts: normalizedAssistantParts
+      });
       res.end();
       return;
     } catch (error) {
@@ -1540,13 +1757,117 @@ const handleApi = async (req: IncomingMessage, res: ServerResponse, repoRoot: st
   }
 
   if (
+    req.method === "POST" &&
+    segments.length === 7 &&
+    segments[1] === "conversations" &&
+    segments[3] === "sessions" &&
+    segments[5] === "checkpoints" &&
+    segments[6] === "restore"
+  ) {
+    try {
+      const body = await readJsonBody<{
+        messageId?: string;
+        messageID?: string;
+        partId?: string;
+        partID?: string;
+      }>(req);
+      const messageId = (body.messageId ?? body.messageID)?.trim();
+      const partId = (body.partId ?? body.partID)?.trim();
+      if (!messageId) {
+        sendBadRequest(res, "Message id is required to restore a checkpoint.");
+        return;
+      }
+      let conversation: Conversation;
+      let session: Session;
+      try {
+        conversation = await readConversation(requestRepoRoot, segments[2]);
+        session = await readSession(requestRepoRoot, segments[2], segments[4]);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+          sendNotFound(res);
+          return;
+        }
+        throw error;
+      }
+
+      const directClient = new DirectSDKClient();
+      const opencodeSessionId = await directClient.ensureSession({
+        sessionId: session.opencodeSessionId,
+        title: session.title?.trim() || undefined,
+        workspacePath: conversation.workspacePath
+      } as any);
+      if (opencodeSessionId !== session.opencodeSessionId) {
+        session.opencodeSessionId = opencodeSessionId;
+        await writeSession(requestRepoRoot, conversation.id, session);
+      }
+
+      const client = createAuthedOpencodeClient();
+      await client.session.revert({
+        path: { id: opencodeSessionId },
+        body: {
+          messageID: messageId,
+          partID: partId
+        },
+        query: { directory: conversation.workspacePath }
+      });
+
+      await updateSessionTimestamp(requestRepoRoot, conversation.id, session);
+      await updateConversationTimestamp(requestRepoRoot, conversation);
+
+      sendJson(res, 200, { ok: true });
+      return;
+    } catch (error) {
+      if (error instanceof SyntaxError) {
+        sendBadRequest(res, "Invalid JSON body.");
+        return;
+      }
+      sendError(res, error);
+      return;
+    }
+  }
+
+  if (
     req.method === "GET" &&
     segments.length === 6 &&
     segments[1] === "conversations" &&
     segments[3] === "sessions" &&
     segments[5] === "transcript"
   ) {
-    const transcript = await readTranscriptHistory(requestRepoRoot, segments[2], segments[4]);
+    const entries = await readTranscriptEntries(requestRepoRoot, segments[2], segments[4]);
+      const transcript = entries.map((entry) => {
+        const role: "user" | "assistant" | "system" =
+          entry.role === "user" || entry.role === "assistant" || entry.role === "system"
+            ? entry.role
+            : entry.role === "tool"
+              ? "assistant"
+              : "user";
+        const content = typeof entry.content === "string" ? entry.content : "";
+        const parts = Array.isArray(entry.parts) ? entry.parts.filter(isMessagePart) : [];
+        const partsText = parts.length > 0 ? getTextFromParts(parts) : "";
+        const resolvedContent = content || partsText;
+        if (!resolvedContent && parts.length === 0) {
+          logLegacyMigrationWarning({
+            conversationId: segments[2],
+            sessionId: segments[4],
+            reason: "Transcript entry missing content and parts.",
+            entry
+          });
+        } else if (content && partsText && content !== partsText) {
+          logLegacyMigrationWarning({
+            conversationId: segments[2],
+            sessionId: segments[4],
+            reason: "Transcript entry content does not match text parts.",
+            entry
+          });
+        }
+        const normalizedParts = normalizeMessageParts(resolvedContent, parts);
+        return {
+          role,
+          content: resolvedContent,
+          parts: normalizedParts,
+          metadata: entry.metadata
+        };
+      });
     sendJson(res, 200, transcript);
     return;
   }

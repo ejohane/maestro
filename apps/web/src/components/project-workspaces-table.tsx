@@ -63,6 +63,8 @@ type OpenPullRequest = {
   updatedAt?: string
   provider: "github" | "gitlab"
   repo: string
+  projectId: string
+  projectName: string
 }
 
 type WorkspaceRow = {

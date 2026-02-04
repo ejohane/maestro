@@ -1,4 +1,4 @@
-import { Conversation, CurrentContext, Project, Session } from "@maestro/core";
+import { Conversation, CurrentContext, MessageRole, Project, Session, TranscriptEntry } from "@maestro/core";
 export interface MaestroPaths {
     root: string;
     projectsDir: string;
@@ -47,8 +47,10 @@ export declare const readSettings: (repoRoot: string) => Promise<MaestroSettings
 export declare const writeSettings: (repoRoot: string, settings: MaestroSettings) => Promise<void>;
 export declare const appendTranscriptEntry: (repoRoot: string, conversationId: string, sessionId: string, entry: unknown) => Promise<void>;
 export declare const appendEventEntry: (repoRoot: string, conversationId: string, sessionId: string, entry: unknown) => Promise<void>;
+export type TranscriptMessageRole = Exclude<MessageRole, "tool">;
 export type TranscriptMessage = {
-    role: "user" | "assistant" | "system";
+    role: TranscriptMessageRole;
     content: string;
 };
 export declare const readTranscriptHistory: (repoRoot: string, conversationId: string, sessionId: string) => Promise<TranscriptMessage[]>;
+export declare const readTranscriptEntries: (repoRoot: string, conversationId: string, sessionId: string) => Promise<TranscriptEntry[]>;

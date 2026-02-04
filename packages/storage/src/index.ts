@@ -4,8 +4,12 @@ import os from "node:os";
 import {
   Conversation,
   CurrentContext,
+  MessagePart,
+  MessageRole,
   Project,
   Session,
+  TranscriptEntry,
+  getTextFromParts,
   nowIso
 } from "@maestro/core";
 
@@ -313,7 +317,32 @@ export const appendEventEntry = async (
   await appendNdjson(filePath, entry);
 };
 
-export type TranscriptMessage = { role: "user" | "assistant" | "system"; content: string };
+export type TranscriptMessageRole = Exclude<MessageRole, "tool">;
+
+export type TranscriptMessage = { role: TranscriptMessageRole; content: string };
+
+const isMessagePart = (part: unknown): part is MessagePart => {
+  return (
+    typeof part === "object" &&
+    part !== null &&
+    "type" in part &&
+    typeof (part as { type?: unknown }).type === "string"
+  );
+};
+
+const logLegacyMigrationWarning = (context: {
+  conversationId: string;
+  sessionId: string;
+  line: number;
+  reason: string;
+}): void => {
+  const prefix = "[legacy-migration]";
+  console.warn(`${prefix} ${context.reason}`, {
+    conversationId: context.conversationId,
+    sessionId: context.sessionId,
+    line: context.line
+  });
+};
 
 export const readTranscriptHistory = async (
   repoRoot: string,
@@ -327,17 +356,34 @@ export const readTranscriptHistory = async (
       .trim()
       .split("\n")
       .filter(Boolean)
-      .map((line) => {
-        const parsed = JSON.parse(line) as { role?: string; content?: string };
-        if (
-          parsed.role === "user" ||
-          parsed.role === "assistant" ||
-          parsed.role === "system"
-        ) {
-          return { role: parsed.role, content: parsed.content ?? "" };
-        }
-        return { role: "user", content: parsed.content ?? "" };
-      });
+        .map((line, index) => {
+          const parsed = JSON.parse(line) as Partial<TranscriptEntry>;
+          const role: TranscriptMessageRole =
+            parsed.role === "user" || parsed.role === "assistant" || parsed.role === "system"
+              ? parsed.role
+              : parsed.role === "tool"
+                ? "assistant"
+                : "user";
+          const content = typeof parsed.content === "string" ? parsed.content : "";
+          const parts = Array.isArray(parsed.parts) ? parsed.parts.filter(isMessagePart) : [];
+          const partsText = parts.length > 0 ? getTextFromParts(parts) : "";
+          if (!content && !partsText) {
+            logLegacyMigrationWarning({
+              conversationId,
+              sessionId,
+              line: index + 1,
+              reason: "Transcript entry missing content and parts."
+            });
+          } else if (content && partsText && content !== partsText) {
+            logLegacyMigrationWarning({
+              conversationId,
+              sessionId,
+              line: index + 1,
+              reason: "Transcript entry content does not match text parts."
+            });
+          }
+          return { role, content: content || partsText };
+        });
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
       return [];
@@ -350,9 +396,9 @@ export const readTranscriptEntries = async (
   repoRoot: string,
   conversationId: string,
   sessionId: string
-): Promise<unknown[]> => {
+): Promise<TranscriptEntry[]> => {
   const filePath = getTranscriptPath(repoRoot, conversationId, sessionId);
-  return readNdjsonFile(filePath);
+  return readNdjsonFile(filePath) as Promise<TranscriptEntry[]>;
 };
 
 export const readEventEntries = async (

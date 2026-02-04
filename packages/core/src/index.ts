@@ -43,6 +43,108 @@ export interface CurrentContext {
   sessionId?: string;
 }
 
+export type MessageRole = "user" | "assistant" | "system" | "tool";
+
+export type ToolApprovalStatus = "pending" | "approved" | "rejected";
+
+export type ToolApproval = {
+  status: ToolApprovalStatus;
+  by?: "user" | "system" | "policy";
+  reason?: string;
+  ts?: string;
+};
+
+export type TextPart = {
+  type: "text";
+  text: string;
+};
+
+export type ReasoningPart = {
+  type: "reasoning";
+  text: string;
+};
+
+export type ToolCallPart = {
+  type: "tool";
+  callId: string;
+  name: string;
+  input: unknown;
+  status?: "pending" | "running" | "completed" | "error";
+  approval?: ToolApproval;
+};
+
+export type ToolResultPart = {
+  type: "tool_result";
+  callId: string;
+  name: string;
+  output: unknown;
+  isError?: boolean;
+};
+
+export type SourceCitation = {
+  id?: string;
+  title?: string;
+  url?: string;
+  snippet?: string;
+  locator?: string;
+};
+
+export type SourcesPart = {
+  type: "sources";
+  sources: SourceCitation[];
+};
+
+export type FileReference = {
+  id: string;
+  name?: string;
+  path?: string;
+  mimeType?: string;
+  size?: number;
+  source?: "upload" | "workspace" | "tool" | "generated";
+};
+
+export type FilePart = {
+  type: "file";
+  file: FileReference;
+};
+
+export type DataPart = {
+  type: `data-${string}`;
+  data: unknown;
+  label?: string;
+};
+
+export type MessagePart =
+  | TextPart
+  | ReasoningPart
+  | ToolCallPart
+  | ToolResultPart
+  | SourcesPart
+  | FilePart
+  | DataPart;
+
+export type Message = {
+  id?: string;
+  role: MessageRole;
+  content?: string;
+  parts?: MessagePart[];
+  createdAt?: string;
+  metadata?: Record<string, unknown>;
+};
+
+export type TranscriptEntry = Message & {
+  ts: string;
+  sessionId: string;
+  conversationId: string;
+};
+
+export const getTextFromParts = (parts: MessagePart[]): string => {
+  return parts
+    .map((part) => (part.type === "text" ? part.text : ""))
+    .filter((text) => text.length > 0)
+    .join("");
+};
+
 export const nowIso = (): string => new Date().toISOString();
 
 const prefixLabel: Record<IdPrefix, string> = {
