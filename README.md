@@ -178,6 +178,7 @@ bun run dev
 ## Environment variables
 
 - `MAESTRO_MODEL` - Default model ID used by the session.
+- `MAESTRO_MODELS` - Comma-separated list of additional model IDs for the model switcher.
 - `MAESTRO_OPENCODE_URL` - OpenCode server URL (defaults to `http://localhost:4096`).
 - `OPENCODE_SERVER_USERNAME` - Basic auth username (defaults to `opencode`).
 - `OPENCODE_SERVER_PASSWORD` - Basic auth password (enables auth when set).

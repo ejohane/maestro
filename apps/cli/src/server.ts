@@ -905,7 +905,14 @@ const handleApi = async (req: IncomingMessage, res: ServerResponse, repoRoot: st
         )
       );
       const models = new Set<string>();
+      const envModels = (process.env.MAESTRO_MODELS ?? process.env.MAESTRO_MODEL_LIST ?? "")
+        .split(",")
+        .map((model) => model.trim())
+        .filter(Boolean);
       models.add(defaultModel);
+      for (const model of envModels) {
+        models.add(model);
+      }
       for (const sessions of sessionLists) {
         for (const session of sessions) {
           if (session.model?.trim()) {

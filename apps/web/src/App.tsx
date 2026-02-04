@@ -952,6 +952,15 @@ const App = () => {
   )
 
   const fallbackModel = defaultModel?.trim() || "openai/gpt-5.2-codex"
+  const selectedModel = selectedChat?.model ?? fallbackModel
+  const activeProvider = React.useMemo(() => {
+    const normalized = selectedModel?.trim()
+    if (!normalized) {
+      return null
+    }
+    const [provider, modelId] = normalized.split("/")
+    return modelId ? provider : null
+  }, [selectedModel])
   const modelOptions = React.useMemo(() => {
     const candidates = [fallbackModel, ...availableModels, selectedChat?.model].filter(
       (value): value is string => Boolean(value)
@@ -963,15 +972,17 @@ const App = () => {
       if (!normalized || seen.has(normalized)) {
         continue
       }
-      seen.add(normalized)
       const [provider, modelId] = normalized.split("/")
+      if (activeProvider && modelId && provider && provider !== activeProvider) {
+        continue
+      }
+      seen.add(normalized)
       const label = modelId ? modelId : normalized
       const description = modelId && provider ? provider : undefined
       options.push({ id: normalized, label, description })
     }
     return options
-  }, [availableModels, fallbackModel, selectedChat?.model])
-  const selectedModel = selectedChat?.model ?? fallbackModel
+  }, [activeProvider, availableModels, fallbackModel, selectedChat?.model])
   const usageFromMessages = React.useMemo(() => {
     for (let index = messages.length - 1; index >= 0; index -= 1) {
       const usage = extractUsageFromMetadata(messages[index]?.metadata)
@@ -2200,10 +2211,40 @@ const App = () => {
       }
       const session = (await response.json()) as ApiSession
       setSessionForm((prev) => ({ ...prev, title: "" }))
+      const nextChat: ChatSession = {
+        id: session.id,
+        name: session.title?.trim() || session.model || session.id,
+        model: session.model,
+        createdAt: session.createdAt,
+        updatedAt: session.updatedAt,
+      }
       setIsProjectsView(false)
       setSelectedProjectId(selectedProject.id)
       setSelectedWorkspaceId(selectedWorkspace.id)
       setSelectedChatId(session.id)
+      setProjects((current) =>
+        current.map((project) => {
+          if (project.id !== selectedProject.id) {
+            return project
+          }
+          return {
+            ...project,
+            workspaces: project.workspaces.map((workspace) => {
+              if (workspace.id !== selectedWorkspace.id) {
+                return workspace
+              }
+              const existing = workspace.chats.some((chat) => chat.id === session.id)
+              if (existing) {
+                return workspace
+              }
+              return {
+                ...workspace,
+                chats: [nextChat, ...workspace.chats],
+              }
+            }),
+          }
+        })
+      )
       await loadProjects()
     } catch (err) {
       setCreateSessionError(
