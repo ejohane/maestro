@@ -961,10 +961,23 @@ const App = () => {
     const [provider, modelId] = normalized.split("/")
     return modelId ? provider : null
   }, [selectedModel])
+  const settingsModels = React.useMemo(
+    () =>
+      settingsForm.modelProviders.flatMap((provider) =>
+        provider.models
+          .map((model) => model.id?.trim())
+          .filter(Boolean)
+          .map((modelId) => (modelId.includes("/") ? modelId : `${provider.id}/${modelId}`))
+      ),
+    [settingsForm.modelProviders]
+  )
   const modelOptions = React.useMemo(() => {
-    const candidates = [fallbackModel, ...availableModels, selectedChat?.model].filter(
-      (value): value is string => Boolean(value)
-    )
+    const candidates = [
+      fallbackModel,
+      ...availableModels,
+      ...settingsModels,
+      selectedChat?.model,
+    ].filter((value): value is string => Boolean(value))
     const seen = new Set<string>()
     const options: ModelOption[] = []
     for (const model of candidates) {
@@ -982,7 +995,7 @@ const App = () => {
       options.push({ id: normalized, label, description })
     }
     return options
-  }, [activeProvider, availableModels, fallbackModel, selectedChat?.model])
+  }, [activeProvider, availableModels, fallbackModel, selectedChat?.model, settingsModels])
   const usageFromMessages = React.useMemo(() => {
     for (let index = messages.length - 1; index >= 0; index -= 1) {
       const usage = extractUsageFromMetadata(messages[index]?.metadata)
