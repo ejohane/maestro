@@ -28,6 +28,20 @@ const formatPayload = (payload: unknown): string => {
   }
 }
 
+const PREVIEW_MAX_LENGTH = 160
+
+const formatPreview = (payload: unknown): string => {
+  const raw = formatPayload(payload)
+  const condensed = raw.replace(/\s+/g, " ").trim()
+  if (!condensed) {
+    return ""
+  }
+  if (condensed.length <= PREVIEW_MAX_LENGTH) {
+    return condensed
+  }
+  return `${condensed.slice(0, PREVIEW_MAX_LENGTH - 3)}...`
+}
+
 const ApprovalBadge = ({ status }: { status: ToolApprovalStatus }) => {
   const tone =
     status === "approved"
@@ -115,6 +129,7 @@ export const ToolInvocationCard = ({
     call.status ?? (isStreaming ? "running" : "pending")
   const approvalStatus = call.approval?.status
   const inputText = formatPayload(call.input)
+  const inputPreview = formatPreview(call.input) || "No input"
 
   return (
     <Card className={cn("border-dashed bg-muted/10", className)} {...props}>
@@ -126,6 +141,12 @@ export const ToolInvocationCard = ({
           <ToolStatusBadge status={status} />
         </div>
         <div className="text-xs text-muted-foreground">Call ID: {call.callId}</div>
+        <div className="flex min-w-0 flex-wrap items-center gap-2 text-xs text-muted-foreground">
+          <span className="font-semibold uppercase tracking-[0.18em]">Input</span>
+          <span className="min-w-0 flex-1 truncate text-foreground/80">
+            {inputPreview}
+          </span>
+        </div>
       </CardHeader>
       <CardContent className="grid gap-3 px-4 pb-4">
         <PayloadBlock label="Input" value={inputText} />
@@ -168,6 +189,7 @@ export type ToolResultCardProps = HTMLAttributes<HTMLDivElement> & {
 
 export const ToolResultCard = ({ result, className, ...props }: ToolResultCardProps) => {
   const outputText = formatPayload(result.output)
+  const outputPreview = formatPreview(result.output) || "No output"
   const statusLabel = result.isError ? "Error" : "Completed"
   const statusTone = result.isError
     ? "bg-rose-500/15 text-rose-700"
@@ -185,6 +207,12 @@ export const ToolResultCard = ({ result, className, ...props }: ToolResultCardPr
           </Badge>
         </div>
         <div className="text-xs text-muted-foreground">Call ID: {result.callId}</div>
+        <div className="flex min-w-0 flex-wrap items-center gap-2 text-xs text-muted-foreground">
+          <span className="font-semibold uppercase tracking-[0.18em]">Output</span>
+          <span className="min-w-0 flex-1 truncate text-foreground/80">
+            {outputPreview}
+          </span>
+        </div>
       </CardHeader>
       <CardContent className="grid gap-3 px-4 pb-4">
         <PayloadBlock label="Output" value={outputText} />

@@ -39,10 +39,6 @@ import {
   type TaskItem,
 } from "./components/ai-elements/task-queue"
 import {
-  ToolInvocationCard,
-  ToolResultCard,
-} from "./components/ai-elements/tool-invocation"
-import {
   PromptInput,
   PromptInputActionAddAttachments,
   PromptInputActionMenu,
@@ -91,6 +87,7 @@ import {
 import { useTheme } from "./hooks/use-theme"
 import type { FileReference, MessageRole, SourceCitation } from "@maestro/core"
 import { Check, Copy, RotateCcw } from "lucide-react"
+import { cn } from "./lib/utils"
 import {
   applyMessageDelta,
   applyMessageEnd,
@@ -1005,18 +1002,7 @@ const App = () => {
     }
     return null
   }, [messages])
-  const stubUsage = React.useMemo<ContextUsage>(
-    () => ({
-      inputTokens: 1200,
-      outputTokens: 840,
-      totalTokens: 2040,
-      costUsd: 0.08,
-      model: selectedModel,
-      source: "stub",
-    }),
-    [selectedModel]
-  )
-  const contextUsage = usageFromMessages ?? stubUsage
+  const contextUsage = usageFromMessages ?? undefined
 
   const recentSessions = React.useMemo(() => {
     const sessions: RecentSession[] = []
@@ -2737,33 +2723,6 @@ const App = () => {
     ]
   )
 
-  const handleToolApproval = (
-    messageId: string,
-    callId: string,
-    status: "approved" | "rejected"
-  ) => {
-    setMessages((prev) =>
-      prev.map((message) => {
-        if (message.id !== messageId) {
-          return message
-        }
-        const nextParts = message.parts.map((part) => {
-          if (part.type !== "tool" || part.callId !== callId) {
-            return part
-          }
-          return {
-            ...part,
-            approval: {
-              ...(part.approval ?? {}),
-              status,
-            },
-          }
-        })
-        return { ...message, parts: nextParts }
-      })
-    )
-  }
-
   const formatDate = (value?: string) => {
     if (!value) {
       return "Unknown"
@@ -3818,13 +3777,6 @@ const App = () => {
                           typeof text === "string" && text.trim().length > 0
                       )
                       .join("\n\n")
-                    const toolParts = message.parts.filter(
-                      (
-                        part
-                      ): part is StructuredMessagePart & {
-                        type: "tool" | "tool_result"
-                      } => part.type === "tool" || part.type === "tool_result"
-                    )
                     const sources = getSourcesFromParts(message.parts)
                     const messageText = getTextFromParts(message.parts) || message.content || ""
                     const hasMessageText = Boolean(messageText)
@@ -3970,44 +3922,6 @@ const App = () => {
                                   ))}
                                 </div>
                               ) : null}
-                              {toolParts.length ? (
-                                <div className="grid gap-2">
-                                  {toolParts.map((part, index) =>
-                                    part.type === "tool" ? (
-                                      <ToolInvocationCard
-                                        key={part.id ?? `${message.id}-tool-${index}`}
-                                        call={part}
-                                        isStreaming={message.isStreaming}
-                                        onApprove={
-                                          part.approval?.status === "pending"
-                                            ? () =>
-                                                handleToolApproval(
-                                                  message.id,
-                                                  part.callId,
-                                                  "approved"
-                                                )
-                                            : undefined
-                                        }
-                                        onReject={
-                                          part.approval?.status === "pending"
-                                            ? () =>
-                                                handleToolApproval(
-                                                  message.id,
-                                                  part.callId,
-                                                  "rejected"
-                                                )
-                                            : undefined
-                                        }
-                                      />
-                                    ) : (
-                                      <ToolResultCard
-                                        key={part.id ?? `${message.id}-tool-result-${index}`}
-                                        result={part}
-                                      />
-                                    )
-                                  )}
-                                </div>
-                              ) : null}
                               {hasBranches ? (
                                 <MessageBranch defaultBranch={defaultBranch}>
                                   <MessageBranchContent>
@@ -4074,20 +3988,18 @@ const App = () => {
                               ) : null}
                             </>
                           ) : (
-                            <>
-                              <CitationProvider sources={sources}>
-                                <MessageResponse components={{ a: CitationAnchor }}>
-                                  {messageMarkdown}
-                                </MessageResponse>
-                              </CitationProvider>
-                              {showToolbar ? (
-                                <MessageToolbar className={toolbarClassName}>
-                                  {actionButtons}
-                                </MessageToolbar>
-                              ) : null}
-                            </>
+                            <CitationProvider sources={sources}>
+                              <MessageResponse components={{ a: CitationAnchor }}>
+                                {messageMarkdown}
+                              </MessageResponse>
+                            </CitationProvider>
                           )}
                         </MessageContent>
+                        {message.role === "user" && showToolbar ? (
+                          <MessageToolbar className={cn("self-end", toolbarClassName)}>
+                            {actionButtons}
+                          </MessageToolbar>
+                        ) : null}
                       </Message>
                     )
                   })
@@ -4150,7 +4062,9 @@ const App = () => {
                           </PromptInputActionMenuContent>
                         </PromptInputActionMenu>
                       </PromptInputTools>
-                      <ContextUsageIndicator usage={contextUsage} />
+                      {contextUsage ? (
+                        <ContextUsageIndicator usage={contextUsage} />
+                      ) : null}
                       <span>Shift + Enter for a new line</span>
                     </div>
                     <PromptInputSubmit

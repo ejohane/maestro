@@ -1648,7 +1648,18 @@ const handleApi = async (req: IncomingMessage, res: ServerResponse, repoRoot: st
           const part = (event as any).properties?.part;
           const delta = (event as any).properties?.delta;
           const partSessionId = (part as { sessionID?: unknown })?.sessionID;
+          const partRole = (part as { role?: unknown })?.role;
+          const messageRole = (event as any).properties?.message?.role;
+          const resolvedRole =
+            typeof partRole === "string"
+              ? partRole
+              : typeof messageRole === "string"
+                ? messageRole
+                : undefined;
           if (!part || !isMessagePart(part) || partSessionId !== opencodeSessionId) {
+            continue;
+          }
+          if (resolvedRole && resolvedRole !== "assistant") {
             continue;
           }
           assistantParts = upsertMessagePart(assistantParts, part, delta);
