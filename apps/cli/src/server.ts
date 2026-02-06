@@ -218,6 +218,183 @@ const getDefaultModel = (): string => {
   return process.env.MAESTRO_MODEL ?? "openai/gpt-5.2-codex";
 };
 
+const slugifyProjectName = (value: string): string => {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .replace(/-{2,}/g, "-");
+};
+
+const parseWorkspaceDirName = (
+  dirName: string
+): { projectSlug: string; titleSlug: string; hash: string } | null => {
+  const parts = dirName.split("--").filter(Boolean);
+  if (parts.length < 3) {
+    return null;
+  }
+  const hash = parts[parts.length - 1];
+  const projectSlug = parts[0];
+  const titleSlug = parts.slice(1, -1).join("-");
+  if (!hash || !projectSlug) {
+    return null;
+  }
+  return { projectSlug, titleSlug, hash };
+};
+
+const resolveRepoRootFromWorktree = async (worktreePath: string): Promise<string | null> => {
+  try {
+    const { stdout } = await execFileAsync("git", [
+      "-C",
+      worktreePath,
+      "rev-parse",
+      "--git-common-dir"
+    ]);
+    const commonDir = stdout.trim();
+    if (!commonDir) {
+      return null;
+    }
+    const commonPath = path.resolve(worktreePath, commonDir);
+    return path.dirname(commonPath);
+  } catch {
+    return null;
+  }
+};
+
+const resolveProjectForWorkspace = async (
+  worktreePath: string,
+  projectSlug: string,
+  projects: Project[]
+): Promise<Project | undefined> => {
+  const repoRoot = await resolveRepoRootFromWorktree(worktreePath);
+  if (repoRoot) {
+    const match = projects.find((project) => project.repoPath === repoRoot);
+    if (match) {
+      return match;
+    }
+  }
+  if (projectSlug) {
+    const match = projects.find(
+      (project) => slugifyProjectName(project.name) === projectSlug
+    );
+    if (match) {
+      return match;
+    }
+  }
+  return undefined;
+};
+
+const runGitInWorkspace = async (worktreePath: string, args: string[]): Promise<string> => {
+  const { stdout } = await execFileAsync("git", ["-C", worktreePath, ...args]);
+  return stdout.trim();
+};
+
+const inferWorkspaceGitState = async (
+  worktreePath: string,
+  defaultBranch: string
+): Promise<{ branch: string; baseRef: string; baseSha: string }> => {
+  let branch = "";
+  try {
+    branch = await runGitInWorkspace(worktreePath, ["rev-parse", "--abbrev-ref", "HEAD"]);
+  } catch {
+    branch = "";
+  }
+
+  const originRef = `origin/${defaultBranch}`;
+  let baseRef = originRef;
+  try {
+    await runGitInWorkspace(worktreePath, ["rev-parse", "--verify", originRef]);
+  } catch {
+    baseRef = defaultBranch;
+  }
+
+  let baseSha = "";
+  try {
+    baseSha = await runGitInWorkspace(worktreePath, ["rev-parse", baseRef]);
+  } catch {
+    baseRef = "HEAD";
+    try {
+      baseSha = await runGitInWorkspace(worktreePath, ["rev-parse", "HEAD"]);
+    } catch {
+      baseSha = "";
+    }
+  }
+
+  return { branch, baseRef, baseSha };
+};
+
+const ensureWorkspaceConversations = async (
+  repoRoot: string,
+  projects: Project[],
+  conversations: Conversation[]
+): Promise<Conversation[]> => {
+  const { workspacesDir } = getMaestroPaths(repoRoot);
+  let entries: string[] = [];
+  try {
+    entries = await fs.readdir(workspacesDir);
+  } catch {
+    return conversations;
+  }
+
+  const conversationIds = new Set(conversations.map((conversation) => conversation.id));
+  const discovered: Conversation[] = [];
+
+  for (const entry of entries) {
+    const workspacePath = path.join(workspacesDir, entry);
+    let stats: Awaited<ReturnType<typeof fs.stat>>;
+    try {
+      stats = await fs.stat(workspacePath);
+    } catch {
+      continue;
+    }
+    if (!stats.isDirectory()) {
+      continue;
+    }
+    const parsed = parseWorkspaceDirName(entry);
+    if (!parsed) {
+      continue;
+    }
+    const conversationId = `c_${parsed.hash}`;
+    if (conversationIds.has(conversationId)) {
+      continue;
+    }
+    const project = await resolveProjectForWorkspace(workspacePath, parsed.projectSlug, projects);
+    if (!project) {
+      continue;
+    }
+    const createdAt = (stats.birthtime ?? stats.ctime ?? new Date()).toISOString();
+    const updatedAt = (stats.mtime ?? stats.ctime ?? new Date()).toISOString();
+    const { branch, baseRef, baseSha } = await inferWorkspaceGitState(
+      workspacePath,
+      project.defaultBranch
+    );
+    const conversation: Conversation = {
+      id: conversationId,
+      projectId: project.id,
+      title: parsed.titleSlug || undefined,
+      branch: branch || `conv/${conversationId}`,
+      workspacePath,
+      baseRef: baseRef || project.defaultBranch,
+      baseSha: baseSha || "",
+      createdAt,
+      updatedAt
+    };
+    try {
+      await writeConversation(project.repoPath, conversation);
+      conversationIds.add(conversationId);
+      discovered.push(conversation);
+    } catch {
+      continue;
+    }
+  }
+
+  if (!discovered.length) {
+    return conversations;
+  }
+  return conversations.concat(discovered);
+};
+
 const sendSseEvent = (res: ServerResponse, event: string, payload: unknown): void => {
   res.write(`event: ${event}\n`);
   res.write(`data: ${JSON.stringify(payload)}\n\n`);
@@ -1317,7 +1494,13 @@ const handleApi = async (req: IncomingMessage, res: ServerResponse, repoRoot: st
 
   if (req.method === "GET" && segments.length === 2 && segments[1] === "conversations") {
     const conversations = await listConversations(requestRepoRoot);
-    sendJson(res, 200, conversations);
+    const projects = await listProjects(requestRepoRoot, { includeAll: true });
+    const hydrated = await ensureWorkspaceConversations(
+      requestRepoRoot,
+      projects,
+      conversations
+    );
+    sendJson(res, 200, hydrated);
     return;
   }
 
