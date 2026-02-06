@@ -2,92 +2,9 @@ import * as React from "react"
 
 import { AppSidebar } from "./components/app-sidebar"
 import { ProjectWorkspacesTable } from "./components/project-workspaces-table"
-import {
-  Conversation,
-  ConversationContent,
-  ConversationEmptyState,
-  ConversationScrollButton,
-} from "./components/ai-elements/conversation"
-import { Loader } from "./components/ai-elements/loader"
-import {
-  Message,
-  MessageAction,
-  MessageActions,
-  MessageBranch,
-  MessageBranchContent,
-  MessageBranchNext,
-  MessageBranchPage,
-  MessageBranchPrevious,
-  MessageBranchSelector,
-  MessageCheckpoint,
-  MessageContent,
-  MessageAttachments,
-  MessageResponse,
-  MessageToolbar,
-} from "./components/ai-elements/message"
-import {
-  CitationAnchor,
-  CitationProvider,
-  prepareCitationMarkdown,
-  SourcesList,
-} from "./components/ai-elements/sources"
-import { ReasoningSection } from "./components/ai-elements/reasoning"
-import { PlanSection, type PlanStep } from "./components/ai-elements/plan"
-import {
-  QueueSection,
-  TaskListSection,
-  type TaskItem,
-} from "./components/ai-elements/task-queue"
-import {
-  PromptInput,
-  PromptInputActionAddAttachments,
-  PromptInputActionMenu,
-  PromptInputActionMenuContent,
-  PromptInputActionMenuTrigger,
-  PromptInputFooter,
-  PromptInputHeader,
-  PromptInputSubmit,
-  PromptInputTextarea,
-  PromptInputTools,
-  type PromptInputMessage,
-  usePromptInputAttachments,
-} from "./components/ai-elements/prompt-input"
-import {
-  ContextUsageIndicator,
-  type ContextUsage,
-} from "./components/ai-elements/context-usage"
-import { ModelSelector, type ModelOption } from "./components/ai-elements/model-selector"
-import {
-  Breadcrumb,
-  BreadcrumbItem,
-  BreadcrumbLink,
-  BreadcrumbList,
-  BreadcrumbPage,
-  BreadcrumbSeparator,
-} from "./components/ui/breadcrumb"
-import { Badge } from "./components/ui/badge"
-import { Button } from "./components/ui/button"
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from "./components/ui/card"
-import { Input } from "./components/ui/input"
-import { Separator } from "./components/ui/separator"
-import { Shimmer } from "./components/ui/shimmer"
-import {
-  SidebarInset,
-  SidebarProvider,
-  SidebarRail,
-  SidebarTrigger,
-} from "./components/ui/sidebar"
+import type { PromptInputMessage } from "./components/ai-elements/prompt-input"
+import { SidebarInset, SidebarProvider, SidebarRail } from "./components/ui/sidebar"
 import { useTheme } from "./hooks/use-theme"
-import type { FileReference, MessageRole, SourceCitation } from "@maestro/core"
-import { Check, Copy, RotateCcw } from "lucide-react"
-import { cn } from "./lib/utils"
 import {
   applyMessageDelta,
   applyMessageEnd,
@@ -95,492 +12,49 @@ import {
   createClientMessage,
   getTextFromParts,
   normalizeMessageParts,
-  type ClientMessage,
   type StructuredMessagePart,
 } from "./lib/messages"
-
-const PromptInputAttachmentsPreview = () => {
-  const attachments = usePromptInputAttachments()
-
-  if (!attachments.files.length) {
-    return null
-  }
-
-  const items = attachments.files.map((file) => ({
-    id: file.id,
-    name: file.filename,
-    path: file.url,
-    mimeType: file.mediaType,
-    size: file.size,
-    source: "upload" as const,
-  }))
-
-  return (
-    <PromptInputHeader className="text-foreground">
-      <MessageAttachments attachments={items} onRemove={attachments.remove} />
-    </PromptInputHeader>
-  )
-}
-
-type GitProvider = "github" | "gitlab"
-
-type ApiProject = {
-  id: string
-  name: string
-  icon?: string
-  repoPath: string
-  defaultBranch: string
-  gitProvider?: GitProvider
-  repoUrl?: string
-  createdAt: string
-  updatedAt: string
-}
-
-type ApiConversation = {
-  id: string
-  projectId: string
-  title?: string
-  branch: string
-  workspacePath: string
-  createdAt: string
-  updatedAt: string
-}
-
-type ApiSession = {
-  id: string
-  conversationId: string
-  title?: string
-  model?: string
-  createdAt: string
-  updatedAt: string
-}
-
-type ApiPullRequest = {
-  id: string
-  number: string
-  title: string
-  url: string
-  author?: string
-  sourceBranch?: string
-  targetBranch?: string
-  updatedAt?: string
-  provider: GitProvider
-  repo: string
-}
-
-type ApiTranscriptEntry = {
-  role: MessageRole
-  content?: string
-  parts?: StructuredMessagePart[]
-  metadata?: Record<string, unknown>
-}
-
-type ApiModelsResponse = {
-  defaultModel: string
-  models: string[]
-}
-
-type CreateConversationResponse = {
-  project: ApiProject
-  conversation: ApiConversation
-  session: ApiSession
-}
-
-type ChatSession = {
-  id: string
-  name: string
-  model?: string
-  createdAt?: string
-  updatedAt?: string
-}
-
-type Workspace = {
-  id: string
-  name: string
-  branch?: string
-  chats: ChatSession[]
-  createdAt?: string
-  updatedAt?: string
-}
-
-type Project = {
-  id: string
-  name: string
-  icon?: string
-  repoPath: string
-  defaultBranch: string
-  gitProvider?: GitProvider
-  repoUrl?: string
-  createdAt: string
-  updatedAt: string
-  workspaces: Workspace[]
-}
-
-type RecentSession = {
-  id: string
-  name: string
-  projectId: string
-  projectName: string
-  workspaceId: string
-  workspaceName: string
-  updatedAt?: string
-}
-
-type OpenPullRequest = ApiPullRequest & {
-  projectId: string
-  projectName: string
-}
-
-type MergedPullRequestAction = {
-  workspaceId?: string
-  workspaceName?: string
-  workspaceDeleted?: boolean
-}
-type ChatMessage = ClientMessage
-type ModelProviderModel = {
-  id: string
-  name?: string
-}
-
-type ModelProvider = {
-  id: string
-  name?: string
-  models: ModelProviderModel[]
-}
-
-type CheckpointRestore = {
-  messageId?: string
-  partId?: string
-  url?: string
-  method?: string
-  payload?: unknown
-  label?: string
-}
-
-type CheckpointMarker = {
-  id: string
-  label: string
-  description?: string
-  status?: string
-  timestamp?: string
-  restore?: CheckpointRestore
-}
-
-type PlanEntry = {
-  id: string
-  title?: string
-  summary?: string
-  steps: PlanStep[]
-  isStreaming?: boolean
-}
-
-type TaskEntry = {
-  id: string
-  title?: string
-  summary?: string
-  items: TaskItem[]
-  isStreaming?: boolean
-}
-
-type QueueEntry = TaskEntry & {
-  totalCount?: number
-}
-
-type MessageBranchEntry = {
-  id: string
-  content: string
-  parts: StructuredMessagePart[]
-  sources: SourceCitation[]
-  label?: string
-}
-
-const toTrimmedString = (value: unknown): string | undefined => {
-  if (typeof value !== "string") {
-    return undefined
-  }
-  const trimmed = value.trim()
-  return trimmed.length > 0 ? trimmed : undefined
-}
-
-const toRecord = (value: unknown): Record<string, unknown> | undefined => {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return undefined
-  }
-  return value as Record<string, unknown>
-}
-
-const toStringArray = (value: unknown): string[] => {
-  if (!Array.isArray(value)) {
-    return []
-  }
-  return value
-    .map((item) => (typeof item === "string" ? item.trim() : ""))
-    .filter((item) => item.length > 0)
-}
-
-const parsePlanStep = (
-  value: unknown,
-  fallbackId: string,
-  index: number
-): PlanStep | null => {
-  if (typeof value === "string") {
-    const title = value.trim()
-    if (!title) {
-      return null
-    }
-    return {
-      id: `${fallbackId}-step-${index}`,
-      title,
-    }
-  }
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return null
-  }
-  const record = value as Record<string, unknown>
-  const titleCandidate =
-    toTrimmedString(record.title ?? record.label ?? record.name ?? record.step ?? record.summary) ??
-    toTrimmedString(record.text)
-  const descriptionCandidate = toTrimmedString(
-    record.description ?? record.detail ?? record.summary ?? record.text
-  )
-  const bullets = toStringArray(record.items ?? record.steps ?? record.tasks ?? record.bullets)
-  const status = toTrimmedString(record.status ?? record.state)
-  let title = titleCandidate
-  let description = descriptionCandidate
-  if (!title && description) {
-    title = description
-    description = undefined
-  }
-  if (!title && bullets.length > 0) {
-    title = `Step ${index + 1}`
-  }
-  if (!title) {
-    return null
-  }
-  return {
-    id: typeof record.id === "string" ? record.id : `${fallbackId}-step-${index}`,
-    title,
-    description,
-    bullets: bullets.length > 0 ? bullets : undefined,
-    status,
-  }
-}
-
-const parsePlanSteps = (value: unknown, fallbackId: string): PlanStep[] => {
-  if (Array.isArray(value)) {
-    return value
-      .map((item, index) => parsePlanStep(item, fallbackId, index))
-      .filter((step): step is PlanStep => Boolean(step))
-  }
-  const single = parsePlanStep(value, fallbackId, 0)
-  return single ? [single] : []
-}
-
-const parseProgressNumber = (value: unknown): number | undefined => {
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return value
-  }
-  if (typeof value === "string") {
-    const parsed = Number.parseFloat(value)
-    if (Number.isFinite(parsed)) {
-      return parsed
-    }
-  }
-  return undefined
-}
-
-const normalizePercent = (value: number): number => {
-  if (!Number.isFinite(value)) {
-    return 0
-  }
-  return value <= 1 && value >= 0 ? value * 100 : value
-}
-
-const clampPercent = (value: number): number => {
-  return Math.max(0, Math.min(100, value))
-}
-
-const parseProgressValue = (
-  value: unknown
-): { value: number; label?: string } | null => {
-  if (value === null || value === undefined) {
-    return null
-  }
-  if (typeof value === "object" && !Array.isArray(value)) {
-    const record = value as Record<string, unknown>
-    const current = parseProgressNumber(record.current ?? record.completed ?? record.done)
-    const total = parseProgressNumber(record.total ?? record.max ?? record.goal)
-    if (typeof current === "number" && typeof total === "number" && total > 0) {
-      const percent = clampPercent((current / total) * 100)
-      return { value: percent, label: `${current}/${total}` }
-    }
-    const nested = parseProgressValue(
-      record.percent ?? record.percentage ?? record.progress ?? record.value
-    )
-    if (nested) {
-      return nested
-    }
-  }
-  if (typeof value === "string") {
-    const trimmed = value.trim()
-    if (!trimmed) {
-      return null
-    }
-    if (trimmed.endsWith("%")) {
-      const parsed = Number.parseFloat(trimmed.slice(0, -1))
-      if (Number.isFinite(parsed)) {
-        return { value: clampPercent(parsed), label: trimmed }
-      }
-    }
-    const fractionMatch = trimmed.match(/^(\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)$/)
-    if (fractionMatch) {
-      const current = Number.parseFloat(fractionMatch[1])
-      const total = Number.parseFloat(fractionMatch[2])
-      if (Number.isFinite(current) && Number.isFinite(total) && total > 0) {
-        return { value: clampPercent((current / total) * 100), label: trimmed }
-      }
-    }
-    const parsed = Number.parseFloat(trimmed)
-    if (Number.isFinite(parsed)) {
-      const percent = clampPercent(normalizePercent(parsed))
-      return { value: percent, label: `${Math.round(percent)}%` }
-    }
-    return null
-  }
-  if (typeof value === "number") {
-    const percent = clampPercent(normalizePercent(value))
-    return { value: percent, label: `${Math.round(percent)}%` }
-  }
-  return null
-}
-
-const parseTaskItem = (
-  value: unknown,
-  fallbackId: string,
-  index: number
-): TaskItem | null => {
-  if (typeof value === "string") {
-    const title = value.trim()
-    if (!title) {
-      return null
-    }
-    return { id: `${fallbackId}-item-${index}`, title }
-  }
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return null
-  }
-  const record = value as Record<string, unknown>
-  const titleCandidate =
-    toTrimmedString(
-      record.title ?? record.label ?? record.name ?? record.task ?? record.item ?? record.summary
-    ) ?? toTrimmedString(record.text)
-  const descriptionCandidate = toTrimmedString(
-    record.description ?? record.detail ?? record.summary ?? record.text
-  )
-  const statusCandidate = toTrimmedString(record.status ?? record.state ?? record.phase)
-  const progressCandidate = parseProgressValue(
-    record.progress ?? record.percent ?? record.percentage ?? record.completion
-  )
-  const isDone =
-    typeof record.done === "boolean"
-      ? record.done
-      : typeof record.completed === "boolean"
-        ? record.completed
-        : typeof record.isDone === "boolean"
-          ? record.isDone
-          : undefined
-  let title = titleCandidate
-  let description = descriptionCandidate
-  if (!title && description) {
-    title = description
-    description = undefined
-  }
-  if (!title) {
-    return null
-  }
-  const status = statusCandidate ?? (isDone ? "Done" : undefined)
-  return {
-    id: typeof record.id === "string" ? record.id : `${fallbackId}-item-${index}`,
-    title,
-    description,
-    status,
-    progress: progressCandidate?.value,
-    progressLabel: progressCandidate?.label,
-  }
-}
-
-const parseTaskItems = (value: unknown, fallbackId: string): TaskItem[] => {
-  if (Array.isArray(value)) {
-    return value
-      .map((item, index) => parseTaskItem(item, fallbackId, index))
-      .filter((item): item is TaskItem => Boolean(item))
-  }
-  const single = parseTaskItem(value, fallbackId, 0)
-  return single ? [single] : []
-}
-
-const parseUsageNumber = (value: unknown): number | undefined => {
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return value
-  }
-  if (typeof value === "string") {
-    const parsed = Number.parseFloat(value)
-    if (Number.isFinite(parsed)) {
-      return parsed
-    }
-  }
-  return undefined
-}
-
-const extractUsageFromMetadata = (
-  metadata?: Record<string, unknown>
-): ContextUsage | null => {
-  if (!metadata) {
-    return null
-  }
-  const usageCandidate =
-    (metadata.usage ??
-      metadata.usageSummary ??
-      metadata.usage_summary ??
-      metadata.tokenUsage ??
-      metadata.tokens) as Record<string, unknown> | undefined
-  if (!usageCandidate || typeof usageCandidate !== "object" || Array.isArray(usageCandidate)) {
-    return null
-  }
-  const record = usageCandidate as Record<string, unknown>
-  const inputTokens = parseUsageNumber(
-    record.inputTokens ?? record.promptTokens ?? record.input_tokens ?? record.prompt_tokens
-  )
-  const outputTokens = parseUsageNumber(
-    record.outputTokens ??
-      record.completionTokens ??
-      record.output_tokens ??
-      record.completion_tokens
-  )
-  const totalTokens = parseUsageNumber(
-    record.totalTokens ?? record.total_tokens ?? record.total
-  )
-  const costUsd = parseUsageNumber(
-    record.costUsd ?? record.cost_usd ?? record.cost ?? record.totalCostUsd ?? record.total_cost_usd
-  )
-  const model = typeof record.model === "string" ? record.model : undefined
-  if (
-    typeof inputTokens !== "number" &&
-    typeof outputTokens !== "number" &&
-    typeof totalTokens !== "number" &&
-    typeof costUsd !== "number"
-  ) {
-    return null
-  }
-  return {
-    inputTokens,
-    outputTokens,
-    totalTokens,
-    costUsd,
-    model,
-    source: "metadata",
-  }
-}
+import { extractUsageFromMetadata } from "./features/workbench/message-entries"
+import {
+  buildModelOptions,
+  collectAllWorkspaces,
+  collectProjectRecentSessions,
+  collectRecentSessions,
+  collectSettingsModels,
+  filterProjectPullRequests,
+  getActiveProvider,
+  hasProjectsWithRepos,
+  sortOpenPullRequests,
+} from "./features/workbench/selectors"
+import { formatDate, formatDateTime } from "./features/workbench/date-format"
+import { ChatView } from "./features/workbench/views/chat-view"
+import { ProjectsView } from "./features/workbench/views/projects-view"
+import { SecondaryItemsView } from "./features/workbench/views/secondary-items-view"
+import { SettingsView } from "./features/workbench/views/settings-view"
+import { WorkbenchHeader } from "./features/workbench/views/workbench-header"
+import { WorkbenchOverview } from "./features/workbench/views/workbench-overview"
+import { WorkspaceSessionsView } from "./features/workbench/views/workspace-sessions-view"
+import type {
+  ApiConversation,
+  ApiModelsResponse,
+  ApiProject,
+  ApiPullRequest,
+  ApiSession,
+  ApiTranscriptEntry,
+  ChatSession,
+  ChatMessage,
+  CheckpointMarker,
+  SessionFormState,
+  CreateConversationResponse,
+  MergedPullRequestAction,
+  ModelProvider,
+  OpenPullRequest,
+  Project,
+  ProjectFormState,
+  SettingsFormState,
+  WorkspaceFormState,
+  Workspace,
+} from "./features/workbench/types"
 
 const App = () => {
   const { theme, toggleTheme } = useTheme()
@@ -596,7 +70,7 @@ const App = () => {
     null
   )
   const [selectedChatId, setSelectedChatId] = React.useState<string | null>(null)
-  const [projectForm, setProjectForm] = React.useState({
+  const [projectForm, setProjectForm] = React.useState<ProjectFormState>({
     name: "",
     repoPath: "",
     defaultBranch: "main",
@@ -608,13 +82,14 @@ const App = () => {
   const [createProjectError, setCreateProjectError] = React.useState<string | null>(
     null
   )
-  const [workspaceForm, setWorkspaceForm] = React.useState({ title: "" })
+  const [workspaceForm, setWorkspaceForm] = React.useState<WorkspaceFormState>({
+    title: "",
+  })
   const [isCreatingWorkspace, setIsCreatingWorkspace] = React.useState(false)
   const [createWorkspaceError, setCreateWorkspaceError] = React.useState<string | null>(
     null
   )
-  const [sessionForm, setSessionForm] = React.useState({
-    title: "",
+  const [sessionForm, setSessionForm] = React.useState<SessionFormState>({
     providerId: "",
     modelId: "",
   })
@@ -622,8 +97,12 @@ const App = () => {
   const [createSessionError, setCreateSessionError] = React.useState<string | null>(null)
   const [deletingSessionId, setDeletingSessionId] = React.useState<string | null>(null)
   const [deleteSessionError, setDeleteSessionError] = React.useState<string | null>(null)
-  const [isDeletingWorkspace, setIsDeletingWorkspace] = React.useState(false)
-  const [deleteWorkspaceError, setDeleteWorkspaceError] = React.useState<string | null>(null)
+  const [deletingWorkspace, setDeletingWorkspace] = React.useState<
+    Record<string, boolean>
+  >({})
+  const [deleteWorkspaceErrors, setDeleteWorkspaceErrors] = React.useState<
+    Record<string, string>
+  >({})
   const [messages, setMessages] = React.useState<ChatMessage[]>([])
   const [copiedMessageId, setCopiedMessageId] = React.useState<string | null>(null)
   const [chatStatus, setChatStatus] = React.useState<"idle" | "streaming" | "error">(
@@ -645,10 +124,10 @@ const App = () => {
   const [openPullRequests, setOpenPullRequests] = React.useState<OpenPullRequest[]>([])
   const [isLoadingPullRequests, setIsLoadingPullRequests] = React.useState(false)
   const [pullRequestsError, setPullRequestsError] = React.useState<string | null>(null)
-  const [settingsForm, setSettingsForm] = React.useState({
+  const [settingsForm, setSettingsForm] = React.useState<SettingsFormState>({
     githubToken: "",
     gotlandToken: "",
-    modelProviders: [] as ModelProvider[],
+    modelProviders: [],
     defaultProvider: "",
     defaultModel: "",
   })
@@ -950,49 +429,22 @@ const App = () => {
 
   const fallbackModel = defaultModel?.trim() || "openai/gpt-5.2-codex"
   const selectedModel = selectedChat?.model ?? fallbackModel
-  const activeProvider = React.useMemo(() => {
-    const normalized = selectedModel?.trim()
-    if (!normalized) {
-      return null
-    }
-    const [provider, modelId] = normalized.split("/")
-    return modelId ? provider : null
-  }, [selectedModel])
+  const activeProvider = React.useMemo(() => getActiveProvider(selectedModel), [selectedModel])
   const settingsModels = React.useMemo(
-    () =>
-      settingsForm.modelProviders.flatMap((provider) =>
-        provider.models
-          .map((model) => model.id?.trim())
-          .filter(Boolean)
-          .map((modelId) => (modelId.includes("/") ? modelId : `${provider.id}/${modelId}`))
-      ),
+    () => collectSettingsModels(settingsForm.modelProviders),
     [settingsForm.modelProviders]
   )
-  const modelOptions = React.useMemo(() => {
-    const candidates = [
-      fallbackModel,
-      ...availableModels,
-      ...settingsModels,
-      selectedChat?.model,
-    ].filter((value): value is string => Boolean(value))
-    const seen = new Set<string>()
-    const options: ModelOption[] = []
-    for (const model of candidates) {
-      const normalized = model.trim()
-      if (!normalized || seen.has(normalized)) {
-        continue
-      }
-      const [provider, modelId] = normalized.split("/")
-      if (activeProvider && modelId && provider && provider !== activeProvider) {
-        continue
-      }
-      seen.add(normalized)
-      const label = modelId ? modelId : normalized
-      const description = modelId && provider ? provider : undefined
-      options.push({ id: normalized, label, description })
-    }
-    return options
-  }, [activeProvider, availableModels, fallbackModel, selectedChat?.model, settingsModels])
+  const modelOptions = React.useMemo(
+    () =>
+      buildModelOptions({
+        fallbackModel,
+        availableModels,
+        settingsModels,
+        selectedChatModel: selectedChat?.model,
+        activeProvider,
+      }),
+    [activeProvider, availableModels, fallbackModel, selectedChat?.model, settingsModels]
+  )
   const usageFromMessages = React.useMemo(() => {
     for (let index = messages.length - 1; index >= 0; index -= 1) {
       const usage = extractUsageFromMetadata(messages[index]?.metadata)
@@ -1004,96 +456,29 @@ const App = () => {
   }, [messages])
   const contextUsage = usageFromMessages ?? undefined
 
-  const recentSessions = React.useMemo(() => {
-    const sessions: RecentSession[] = []
-    projects.forEach((project) => {
-      project.workspaces.forEach((workspace) => {
-        workspace.chats.forEach((chat) => {
-          sessions.push({
-            id: chat.id,
-            name: chat.name,
-            projectId: project.id,
-            projectName: project.name,
-            workspaceId: workspace.id,
-            workspaceName: workspace.name,
-            updatedAt: chat.updatedAt ?? chat.createdAt,
-          })
-        })
-      })
-    })
-    return sessions
-      .sort((a, b) => {
-        const aTime = a.updatedAt ? new Date(a.updatedAt).getTime() : 0
-        const bTime = b.updatedAt ? new Date(b.updatedAt).getTime() : 0
-        return bTime - aTime
-      })
-      .slice(0, recentSessionsLimit)
-  }, [projects, recentSessionsLimit])
-
-  const projectRecentSessions = React.useMemo(() => {
-    if (!selectedProject) {
-      return [] as RecentSession[]
-    }
-    const sessions: RecentSession[] = []
-    selectedProject.workspaces.forEach((workspace) => {
-      workspace.chats.forEach((chat) => {
-        sessions.push({
-          id: chat.id,
-          name: chat.name,
-          projectId: selectedProject.id,
-          projectName: selectedProject.name,
-          workspaceId: workspace.id,
-          workspaceName: workspace.name,
-          updatedAt: chat.updatedAt ?? chat.createdAt,
-        })
-      })
-    })
-    return sessions
-      .sort((a, b) => {
-        const aTime = a.updatedAt ? new Date(a.updatedAt).getTime() : 0
-        const bTime = b.updatedAt ? new Date(b.updatedAt).getTime() : 0
-        return bTime - aTime
-      })
-      .slice(0, recentSessionsLimit)
-  }, [selectedProject, recentSessionsLimit])
-
-  const allWorkspaces = React.useMemo(() => {
-    return projects
-      .flatMap((project) =>
-        project.workspaces.map((workspace) => ({
-          id: workspace.id,
-          name: workspace.name,
-          projectId: project.id,
-          projectName: project.name,
-          updatedAt: workspace.updatedAt ?? workspace.createdAt,
-        }))
-      )
-      .sort((a, b) => {
-        const aTime = a.updatedAt ? new Date(a.updatedAt).getTime() : 0
-        const bTime = b.updatedAt ? new Date(b.updatedAt).getTime() : 0
-        return bTime - aTime
-      })
-  }, [projects])
-
-  const sortedPullRequests = React.useMemo(() => {
-    return [...openPullRequests].sort((a, b) => {
-      const aTime = a.updatedAt ? new Date(a.updatedAt).getTime() : 0
-      const bTime = b.updatedAt ? new Date(b.updatedAt).getTime() : 0
-      return bTime - aTime
-    })
-  }, [openPullRequests])
-
-  const projectPullRequests = React.useMemo(() => {
-    if (!selectedProject) {
-      return [] as OpenPullRequest[]
-    }
-    return sortedPullRequests.filter((item) => item.projectId === selectedProject.id)
-  }, [sortedPullRequests, selectedProject])
-
-  const hasRepoProjects = React.useMemo(
-    () => projects.some((project) => project.repoUrl?.trim()),
-    [projects]
+  const recentSessions = React.useMemo(
+    () => collectRecentSessions(projects, recentSessionsLimit),
+    [projects, recentSessionsLimit]
   )
+
+  const projectRecentSessions = React.useMemo(
+    () => collectProjectRecentSessions(selectedProject, recentSessionsLimit),
+    [selectedProject, recentSessionsLimit]
+  )
+
+  const allWorkspaces = React.useMemo(() => collectAllWorkspaces(projects), [projects])
+
+  const sortedPullRequests = React.useMemo(
+    () => sortOpenPullRequests(openPullRequests),
+    [openPullRequests]
+  )
+
+  const projectPullRequests = React.useMemo(
+    () => filterProjectPullRequests(sortedPullRequests, selectedProject?.id),
+    [sortedPullRequests, selectedProject?.id]
+  )
+
+  const hasRepoProjects = React.useMemo(() => hasProjectsWithRepos(projects), [projects])
   const getPullRequestKey = React.useCallback((item: OpenPullRequest) => {
     return `${item.projectId}:${item.number}`
   }, [])
@@ -1128,395 +513,6 @@ const App = () => {
       }
     }
   }, [])
-
-  const getSourcesFromParts = (parts: StructuredMessagePart[]): SourceCitation[] => {
-    return parts
-      .filter(
-        (
-          part
-        ): part is StructuredMessagePart & {
-          type: "sources"
-          sources: SourceCitation[]
-        } => part.type === "sources"
-      )
-      .flatMap((part) => part.sources)
-      .filter((source): source is SourceCitation => Boolean(source))
-  }
-
-  const getCheckpointMarkers = (
-    parts: StructuredMessagePart[],
-    messageId: string
-  ): CheckpointMarker[] => {
-    return parts
-      .filter(
-        (
-          part
-        ): part is StructuredMessagePart & { type: "data-checkpoint"; data?: unknown } =>
-          part.type === "data-checkpoint"
-      )
-      .map((part, index) => {
-        const data = toRecord(part.data) ?? {}
-        const labelCandidate =
-          typeof part.label === "string"
-            ? part.label
-            : typeof data.label === "string"
-              ? data.label
-              : typeof data.name === "string"
-                ? data.name
-                : undefined
-        const label = labelCandidate?.trim() || `Checkpoint ${index + 1}`
-        const description =
-          typeof data.description === "string"
-            ? data.description
-            : typeof data.detail === "string"
-              ? data.detail
-              : undefined
-        const status = typeof data.status === "string" ? data.status : undefined
-        const timestamp =
-          typeof data.timestamp === "string"
-            ? data.timestamp
-            : typeof data.ts === "string"
-              ? data.ts
-              : undefined
-        const restoreSource = toRecord(data.restore) ?? toRecord(data)
-        const restoreAvailable =
-          typeof restoreSource?.available === "boolean"
-            ? restoreSource.available
-            : typeof restoreSource?.enabled === "boolean"
-              ? restoreSource.enabled
-              : true
-        const messageIdCandidate = toTrimmedString(
-          restoreSource?.messageId ??
-            restoreSource?.messageID ??
-            restoreSource?.message_id ??
-            restoreSource?.message
-        )
-        const partIdCandidate = toTrimmedString(
-          restoreSource?.partId ??
-            restoreSource?.partID ??
-            restoreSource?.part_id ??
-            restoreSource?.part
-        )
-        const urlCandidate = toTrimmedString(
-          restoreSource?.url ??
-            restoreSource?.href ??
-            restoreSource?.restoreUrl ??
-            restoreSource?.restore_url
-        )
-        const methodCandidate = toTrimmedString(
-          restoreSource?.method ?? restoreSource?.httpMethod ?? restoreSource?.http_method
-        )
-        const restoreLabel = toTrimmedString(
-          restoreSource?.label ??
-            restoreSource?.actionLabel ??
-            restoreSource?.action_label ??
-            restoreSource?.title
-        )
-        const restorePayload = restoreSource?.payload ?? restoreSource?.body
-        const fallbackPartId = typeof part.id === "string" ? part.id : undefined
-        const restore =
-          restoreAvailable && (messageIdCandidate || urlCandidate)
-            ? {
-                messageId: messageIdCandidate,
-                partId: partIdCandidate ?? fallbackPartId,
-                url: urlCandidate,
-                method: methodCandidate,
-                payload: restorePayload,
-                label: restoreLabel,
-              }
-            : undefined
-        return {
-          id: part.id ?? `${messageId}-checkpoint-${index}`,
-          label,
-          description,
-          status,
-          timestamp,
-          restore,
-        }
-      })
-  }
-
-  const getPlanEntries = (
-    parts: StructuredMessagePart[],
-    messageId: string
-  ): PlanEntry[] => {
-    const planParts = parts.filter(
-      (
-        part
-      ): part is StructuredMessagePart & { type: "data-plan" | "data-plans"; data?: unknown } =>
-        part.type === "data-plan" || part.type === "data-plans"
-    )
-
-    return planParts
-      .map((part, index) => {
-        const planId = part.id ?? `${messageId}-plan-${index}`
-        const data = part.data
-        const record =
-          data && typeof data === "object" && !Array.isArray(data)
-            ? (data as Record<string, unknown>)
-            : undefined
-        const title =
-          toTrimmedString(part.label) ??
-          toTrimmedString(record?.title ?? record?.label ?? record?.name)
-        const summary = toTrimmedString(
-          record?.summary ?? record?.description ?? record?.detail ?? record?.overview
-        )
-        const stepsSource =
-          record?.steps ??
-          record?.items ??
-          record?.plan ??
-          record?.tasks ??
-          record?.phases ??
-          record?.checklist
-        const steps =
-          stepsSource !== undefined ? parsePlanSteps(stepsSource, planId) : parsePlanSteps(data, planId)
-        const statusValue = toTrimmedString(record?.status ?? record?.state)
-        const statusStreaming =
-          typeof statusValue === "string" &&
-          ["streaming", "in_progress", "running", "pending"].includes(statusValue.toLowerCase())
-        const streamingFlag =
-          typeof record?.isStreaming === "boolean"
-            ? record.isStreaming
-            : typeof record?.streaming === "boolean"
-              ? record.streaming
-              : undefined
-
-        return {
-          id: planId,
-          title,
-          summary,
-          steps,
-          isStreaming: streamingFlag ?? statusStreaming,
-        }
-      })
-      .filter((entry) => entry.steps.length > 0 || entry.title || entry.summary || entry.isStreaming)
-  }
-
-  const getTaskEntries = (
-    parts: StructuredMessagePart[],
-    messageId: string
-  ): TaskEntry[] => {
-    const taskParts = parts.filter(
-      (
-        part
-      ): part is StructuredMessagePart & { type: "data-task" | "data-tasks"; data?: unknown } =>
-        part.type === "data-task" || part.type === "data-tasks"
-    )
-
-    return taskParts
-      .map((part, index) => {
-        const taskId = part.id ?? `${messageId}-task-${index}`
-        const data = part.data
-        const record =
-          data && typeof data === "object" && !Array.isArray(data)
-            ? (data as Record<string, unknown>)
-            : undefined
-        const title =
-          toTrimmedString(part.label) ??
-          toTrimmedString(record?.title ?? record?.label ?? record?.name ?? record?.task)
-        const summary = toTrimmedString(
-          record?.summary ?? record?.description ?? record?.detail ?? record?.overview
-        )
-        const itemsSource =
-          record?.items ?? record?.tasks ?? record?.steps ?? record?.list ?? record?.queue
-        const items =
-          itemsSource !== undefined
-            ? parseTaskItems(itemsSource, taskId)
-            : parseTaskItems(data, taskId)
-        const statusValue = toTrimmedString(record?.status ?? record?.state)
-        const isStreaming =
-          typeof record?.isStreaming === "boolean"
-            ? record.isStreaming
-            : typeof record?.streaming === "boolean"
-              ? record.streaming
-              : typeof statusValue === "string" &&
-                  ["streaming", "running", "in_progress", "pending"].includes(
-                    statusValue.toLowerCase()
-                  )
-
-        return {
-          id: taskId,
-          title,
-          summary,
-          items,
-          isStreaming,
-        }
-      })
-      .filter((entry) => entry.items.length > 0 || entry.title || entry.summary || entry.isStreaming)
-  }
-
-  const getQueueEntries = (
-    parts: StructuredMessagePart[],
-    messageId: string
-  ): QueueEntry[] => {
-    const queueParts = parts.filter(
-      (
-        part
-      ): part is StructuredMessagePart & { type: "data-queue" | "data-queues"; data?: unknown } =>
-        part.type === "data-queue" || part.type === "data-queues"
-    )
-
-    return queueParts
-      .map((part, index) => {
-        const queueId = part.id ?? `${messageId}-queue-${index}`
-        const data = part.data
-        const record =
-          data && typeof data === "object" && !Array.isArray(data)
-            ? (data as Record<string, unknown>)
-            : undefined
-        const title =
-          toTrimmedString(part.label) ??
-          toTrimmedString(record?.title ?? record?.label ?? record?.name ?? record?.queue)
-        const summary = toTrimmedString(
-          record?.summary ?? record?.description ?? record?.detail ?? record?.overview
-        )
-        const itemsSource =
-          record?.items ?? record?.queue ?? record?.tasks ?? record?.entries ?? record?.list
-        const items =
-          itemsSource !== undefined
-            ? parseTaskItems(itemsSource, queueId)
-            : parseTaskItems(data, queueId)
-        const totalCount = parseProgressNumber(
-          record?.total ?? record?.count ?? record?.size ?? record?.length
-        )
-        const statusValue = toTrimmedString(record?.status ?? record?.state)
-        const isStreaming =
-          typeof record?.isStreaming === "boolean"
-            ? record.isStreaming
-            : typeof record?.streaming === "boolean"
-              ? record.streaming
-              : typeof statusValue === "string" &&
-                  ["streaming", "running", "in_progress", "pending"].includes(
-                    statusValue.toLowerCase()
-                  )
-
-        return {
-          id: queueId,
-          title,
-          summary,
-          items,
-          totalCount,
-          isStreaming,
-        }
-      })
-      .filter((entry) => entry.items.length > 0 || entry.title || entry.summary || entry.isStreaming)
-  }
-
-  const parseBranchEntries = (
-    value: unknown,
-    messageId: string
-  ): MessageBranchEntry[] => {
-    if (!Array.isArray(value)) {
-      return []
-    }
-
-    return value
-      .map((branch, index) => {
-        if (typeof branch === "string") {
-          const content = branch.trim()
-          if (!content) {
-            return null
-          }
-          const parts = normalizeMessageParts(content)
-          return {
-            id: `${messageId}-branch-${index}`,
-            content,
-            parts,
-            sources: getSourcesFromParts(parts),
-          }
-        }
-
-        if (branch && typeof branch === "object") {
-          const record = branch as Record<string, unknown>
-          const contentValue =
-            typeof record.content === "string"
-              ? record.content
-              : typeof record.text === "string"
-                ? record.text
-                : ""
-          const partsValue = Array.isArray(record.parts)
-            ? (record.parts as StructuredMessagePart[])
-            : normalizeMessageParts(contentValue)
-          const sourcesValue = Array.isArray(record.sources)
-            ? (record.sources as SourceCitation[]).filter(Boolean)
-            : getSourcesFromParts(partsValue)
-          const content = contentValue || getTextFromParts(partsValue)
-          if (!content.trim()) {
-            return null
-          }
-          const label = typeof record.label === "string" ? record.label : undefined
-          return {
-            id:
-              typeof record.id === "string"
-                ? record.id
-                : `${messageId}-branch-${index}`,
-            content,
-            parts: partsValue,
-            sources: sourcesValue,
-            label,
-          }
-        }
-
-        return null
-      })
-      .filter((branch): branch is MessageBranchEntry => Boolean(branch))
-  }
-
-  const getMessageBranches = (
-    message: ChatMessage,
-    baseText: string,
-    baseSources: SourceCitation[]
-  ) => {
-    const metadata =
-      message.metadata && typeof message.metadata === "object"
-        ? (message.metadata as Record<string, unknown>)
-        : undefined
-    const metadataBranches = metadata?.branches
-    const dataBranchParts = message.parts.filter(
-      (part) => part.type === "data-branch" || part.type === "data-branches"
-    ) as Array<StructuredMessagePart & { data?: unknown }>
-    const parsedBranches = [
-      ...parseBranchEntries(metadataBranches, message.id),
-      ...dataBranchParts.flatMap((part) => {
-        if (Array.isArray(part.data)) {
-          return parseBranchEntries(part.data, message.id)
-        }
-        if (part.data && typeof part.data === "object") {
-          const record = part.data as Record<string, unknown>
-          if (Array.isArray(record.branches)) {
-            return parseBranchEntries(record.branches, message.id)
-          }
-        }
-        return []
-      }),
-    ]
-
-    const normalizedBase = baseText.trim()
-    const uniqueBranches = parsedBranches.filter(
-      (branch) => branch.content.trim() && branch.content.trim() !== normalizedBase
-    )
-    const baseBranch = normalizedBase
-      ? [
-          {
-            id: `${message.id}-branch-base`,
-            content: baseText,
-            parts: message.parts,
-            sources: baseSources,
-          },
-        ]
-      : []
-    const branches = [...baseBranch, ...uniqueBranches]
-    const metadataBranchIndex =
-      typeof metadata?.branchIndex === "number" ? metadata.branchIndex : undefined
-    const defaultBranch =
-      typeof metadataBranchIndex === "number" &&
-      metadataBranchIndex >= 0 &&
-      metadataBranchIndex < branches.length
-        ? metadataBranchIndex
-        : 0
-
-    return { branches, defaultBranch }
-  }
 
   const fetchTranscript = React.useCallback(
     async (conversationId: string, sessionId: string, signal: AbortSignal) => {
@@ -1586,7 +582,14 @@ const App = () => {
   }, [selectedWorkspace?.id, selectedChat?.id, loadTranscript])
 
   React.useEffect(() => {
-    setDeleteWorkspaceError(null)
+    if (!selectedWorkspaceId) {
+      return
+    }
+    setDeleteWorkspaceErrors((prev) => {
+      const next = { ...prev }
+      delete next[selectedWorkspaceId]
+      return next
+    })
   }, [selectedWorkspaceId])
 
   React.useEffect(() => {
@@ -1859,25 +862,6 @@ const App = () => {
     setWorkspaceForm({ title: value })
   }
 
-  const handleSessionFormChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const value = event.target.value
-    setSessionForm((prev) => ({ ...prev, title: value }))
-  }
-
-  const handleSessionProviderChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
-    const value = event.target.value
-    setSessionForm((prev) => {
-      const provider = settingsForm.modelProviders.find((item) => item.id === value)
-      const modelId = provider?.models[0]?.id ?? ""
-      return { ...prev, providerId: value, modelId }
-    })
-  }
-
-  const handleSessionModelChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
-    const value = event.target.value
-    setSessionForm((prev) => ({ ...prev, modelId: value }))
-  }
-
   const updateModelProvider = (
     index: number,
     updater: (provider: ModelProvider) => ModelProvider
@@ -2132,26 +1116,17 @@ const App = () => {
     }
   }
 
-  const handleDeleteWorkspace = async () => {
-    if (!selectedProject || !selectedWorkspace) {
-      return
-    }
-    const workspaceLabel = selectedWorkspace.name || selectedWorkspace.id
-    const confirmed = window.confirm(
-      `Delete workspace "${workspaceLabel}"? This removes the worktree and all sessions.`
-    )
-    if (!confirmed) {
-      return
-    }
-    setIsDeletingWorkspace(true)
-    setDeleteWorkspaceError(null)
+  const handleDeleteWorkspace = async (workspaceId: string, workspaceName?: string) => {
+    setDeletingWorkspace((prev) => ({ ...prev, [workspaceId]: true }))
+    setDeleteWorkspaceErrors((prev) => {
+      const next = { ...prev }
+      delete next[workspaceId]
+      return next
+    })
     try {
-      const response = await fetch(
-        `/api/conversations/${selectedWorkspace.id}?confirm=true`,
-        {
-          method: "DELETE",
-        }
-      )
+      const response = await fetch(`/api/conversations/${workspaceId}?confirm=true`, {
+        method: "DELETE",
+      })
       if (!response.ok) {
         let message = "Failed to delete workspace."
         try {
@@ -2164,16 +1139,36 @@ const App = () => {
         }
         throw new Error(message)
       }
-      setSelectedWorkspaceId(null)
-      setSelectedChatId(null)
+      if (selectedWorkspace?.id === workspaceId) {
+        setSelectedWorkspaceId(null)
+        setSelectedChatId(null)
+      }
       await loadProjects()
+      return true
     } catch (err) {
-      setDeleteWorkspaceError(
-        err instanceof Error ? err.message : "Failed to delete workspace."
-      )
+      setDeleteWorkspaceErrors((prev) => ({
+        ...prev,
+        [workspaceId]:
+          err instanceof Error ? err.message : "Failed to delete workspace.",
+      }))
+      return false
     } finally {
-      setIsDeletingWorkspace(false)
+      setDeletingWorkspace((prev) => ({ ...prev, [workspaceId]: false }))
     }
+  }
+
+  const handleConfirmDeleteWorkspace = async (
+    workspaceId: string,
+    workspaceName?: string
+  ) => {
+    const workspaceLabel = workspaceName || workspaceId
+    const confirmed = window.confirm(
+      `Delete workspace "${workspaceLabel}"? This removes the worktree and all sessions.`
+    )
+    if (!confirmed) {
+      return false
+    }
+    return handleDeleteWorkspace(workspaceId, workspaceName)
   }
 
   const handleCreateSession = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -2181,7 +1176,7 @@ const App = () => {
     if (!selectedProject || !selectedWorkspace) {
       return
     }
-    const title = sessionForm.title.trim()
+    const title = ""
     const providerId = sessionForm.providerId.trim()
     const modelId = sessionForm.modelId.trim()
     const model = providerId && modelId ? `${providerId}/${modelId}` : undefined
@@ -2209,7 +1204,6 @@ const App = () => {
         throw new Error(message)
       }
       const session = (await response.json()) as ApiSession
-      setSessionForm((prev) => ({ ...prev, title: "" }))
       const nextChat: ChatSession = {
         id: session.id,
         name: session.title?.trim() || session.model || session.id,
@@ -2723,31 +1717,6 @@ const App = () => {
     ]
   )
 
-  const formatDate = (value?: string) => {
-    if (!value) {
-      return "Unknown"
-    }
-    const date = new Date(value)
-    if (Number.isNaN(date.getTime())) {
-      return "Unknown"
-    }
-    return new Intl.DateTimeFormat("en-US", { dateStyle: "medium" }).format(date)
-  }
-
-  const formatDateTime = (value?: string) => {
-    if (!value) {
-      return "Unknown"
-    }
-    const date = new Date(value)
-    if (Number.isNaN(date.getTime())) {
-      return "Unknown"
-    }
-    return new Intl.DateTimeFormat("en-US", {
-      dateStyle: "medium",
-      timeStyle: "short",
-    }).format(date)
-  }
-
   const isProjectView = Boolean(
     !isSettingsView &&
       selectedProject &&
@@ -2757,10 +1726,6 @@ const App = () => {
   )
   const isWorkspaceView = Boolean(!isSettingsView && selectedWorkspace && !selectedChat)
   const isChatView = Boolean(!isSettingsView && selectedChat)
-  const sessionProvider = settingsForm.modelProviders.find(
-    (provider) => provider.id === sessionForm.providerId
-  )
-  const sessionModels = sessionProvider?.models ?? []
   const settingsDefaultProvider = settingsForm.modelProviders.find(
     (provider) => provider.id === settingsForm.defaultProvider
   )
@@ -2849,1272 +1814,154 @@ const App = () => {
         />
       <SidebarRail />
       <SidebarInset>
-        <header className="flex h-16 shrink-0 items-center gap-2 border-b px-4">
-          <SidebarTrigger className="-ml-1" />
-          <Separator orientation="vertical" className="mr-2 h-4" />
-          <Breadcrumb>
-            <BreadcrumbList>
-              {isSettingsView ? (
-                <BreadcrumbItem>
-                  <BreadcrumbPage>Settings</BreadcrumbPage>
-                </BreadcrumbItem>
-              ) : (
-                <>
-                  <BreadcrumbItem>
-                    {selectedProject ? (
-                      <BreadcrumbLink
-                        href="#"
-                        onClick={(event) => {
-                          event.preventDefault()
-                          handleSelectProjectsView()
-                        }}
-                      >
-                        Home
-                      </BreadcrumbLink>
-                    ) : (
-                      <BreadcrumbPage>Home</BreadcrumbPage>
-                    )}
-                  </BreadcrumbItem>
-                  {selectedProject && !isLoading ? (
-                    <>
-                      <BreadcrumbSeparator />
-                      <BreadcrumbItem>
-                        {selectedWorkspace || selectedChat ? (
-                          <BreadcrumbLink
-                            href="#"
-                            onClick={(event) => {
-                              event.preventDefault()
-                              handleSelectProject(selectedProject.id)
-                            }}
-                          >
-                            {selectedProject.name}
-                          </BreadcrumbLink>
-                        ) : (
-                          <BreadcrumbPage>{selectedProject.name}</BreadcrumbPage>
-                        )}
-                      </BreadcrumbItem>
-                    </>
-                  ) : null}
-                  {selectedWorkspace && !isLoading ? (
-                    <>
-                      <BreadcrumbSeparator />
-                      <BreadcrumbItem>
-                        {selectedChat ? (
-                          <BreadcrumbLink
-                            href="#"
-                            onClick={(event) => {
-                              event.preventDefault()
-                              if (!selectedProject) {
-                                return
-                              }
-                              handleSelectWorkspace(
-                                selectedProject.id,
-                                selectedWorkspace.id
-                              )
-                            }}
-                          >
-                            {selectedWorkspace.name}
-                          </BreadcrumbLink>
-                        ) : (
-                          <BreadcrumbPage>{selectedWorkspace.name}</BreadcrumbPage>
-                        )}
-                      </BreadcrumbItem>
-                    </>
-                  ) : null}
-                  {selectedChat && !isLoading ? (
-                    <>
-                      <BreadcrumbSeparator />
-                      <BreadcrumbItem>
-                        <BreadcrumbPage>{selectedChat.name}</BreadcrumbPage>
-                      </BreadcrumbItem>
-                    </>
-                  ) : null}
-                </>
-              )}
-            </BreadcrumbList>
-          </Breadcrumb>
-        </header>
+        <WorkbenchHeader
+          isSettingsView={isSettingsView}
+          isLoading={isLoading}
+          selectedProject={selectedProject}
+          selectedWorkspace={selectedWorkspace}
+          selectedChat={selectedChat}
+          onSelectProjectsView={handleSelectProjectsView}
+          onSelectProject={handleSelectProject}
+          onSelectWorkspace={handleSelectWorkspace}
+        />
         {isSettingsView ? (
-          <div className="flex flex-1 flex-col gap-4 p-6">
-            <div className="rounded-xl border bg-card p-6 shadow-sm">
-              <div className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
-                Settings
-              </div>
-              <div className="mt-3 text-2xl font-semibold text-foreground">
-                Maestro preferences
-              </div>
-              <div className="mt-2 max-w-2xl text-sm text-muted-foreground">
-                Manage access tokens and appearance for this device.
-              </div>
-            </div>
-            <div className="grid gap-4 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,0.9fr)]">
-              <Card>
-                <form onSubmit={handleSettingsSubmit}>
-                  <CardHeader>
-                    <CardTitle>Access tokens</CardTitle>
-                    <CardDescription>
-                      Keep your GitHub and Gotland integrations up to date.
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="grid gap-4">
-                    <div className="grid gap-2">
-                      <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                        GitHub token
-                      </label>
-                      <Input
-                        type="password"
-                        autoComplete="new-password"
-                        value={settingsForm.githubToken}
-                        onChange={handleSettingsChange("githubToken")}
-                        placeholder="ghp_..."
-                      />
-                      <div className="text-xs text-muted-foreground">
-                        Leave blank to clear. Environment variable GITHUB_TOKEN
-                        overrides this value.
-                      </div>
-                    </div>
-                    <div className="grid gap-2">
-                      <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                        Gotland token
-                      </label>
-                      <Input
-                        type="password"
-                        autoComplete="new-password"
-                        value={settingsForm.gotlandToken}
-                        onChange={handleSettingsChange("gotlandToken")}
-                        placeholder="gotland_..."
-                      />
-                      <div className="text-xs text-muted-foreground">
-                        Stored locally in ~/.maestro/settings.json.
-                      </div>
-                    </div>
-                    <div className="h-px w-full bg-border/60" />
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                      <div>
-                        <div className="text-sm font-semibold text-foreground">
-                          Model providers
-                        </div>
-                        <div className="text-xs text-muted-foreground">
-                          Seeded from OpenCode, fully editable.
-                        </div>
-                      </div>
-                      <Button type="button" variant="outline" onClick={handleAddProvider}>
-                        Add provider
-                      </Button>
-                    </div>
-                    <div className="grid gap-3">
-                      <div className="grid gap-2">
-                        <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                          Default provider
-                        </label>
-                        <select
-                          value={settingsForm.defaultProvider}
-                          onChange={handleDefaultProviderChange}
-                          className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-base ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 md:text-sm"
-                        >
-                          {settingsForm.modelProviders.length ? (
-                            settingsForm.modelProviders.map((provider) => (
-                              <option key={provider.id} value={provider.id}>
-                                {provider.name?.trim() || provider.id}
-                              </option>
-                            ))
-                          ) : (
-                            <option value="">No providers available</option>
-                          )}
-                        </select>
-                      </div>
-                      <div className="grid gap-2">
-                        <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                          Default model
-                        </label>
-                        <select
-                          value={settingsForm.defaultModel}
-                          onChange={handleDefaultModelChange}
-                          disabled={!settingsDefaultModels.length}
-                          className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-base ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 md:text-sm"
-                        >
-                          {settingsDefaultModels.length ? (
-                            settingsDefaultModels.map((model) => (
-                              <option key={model.id} value={model.id}>
-                                {model.name?.trim() || model.id}
-                              </option>
-                            ))
-                          ) : (
-                            <option value="">No models available</option>
-                          )}
-                        </select>
-                      </div>
-                    </div>
-                    <div className="grid gap-3">
-                      {settingsForm.modelProviders.length ? (
-                        settingsForm.modelProviders.map((provider, providerIndex) => (
-                          <div
-                            key={`${provider.id}-${providerIndex}`}
-                            className="rounded-lg border bg-muted/20 p-4"
-                          >
-                            <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] sm:items-end">
-                              <div className="grid gap-2">
-                                <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                                  Provider name
-                                </label>
-                                <Input
-                                  value={provider.name ?? ""}
-                                  onChange={(event) =>
-                                    updateModelProvider(providerIndex, (current) => ({
-                                      ...current,
-                                      name: event.target.value,
-                                    }))
-                                  }
-                                  placeholder="OpenAI"
-                                />
-                              </div>
-                              <div className="grid gap-2">
-                                <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                                  Provider id
-                                </label>
-                                <Input
-                                  value={provider.id}
-                                  onChange={(event) =>
-                                    updateModelProvider(providerIndex, (current) => ({
-                                      ...current,
-                                      id: event.target.value,
-                                    }))
-                                  }
-                                  placeholder="openai"
-                                />
-                              </div>
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                onClick={() => handleRemoveProvider(providerIndex)}
-                              >
-                                Remove
-                              </Button>
-                            </div>
-                            <div className="mt-4 grid gap-3">
-                              <div className="flex flex-wrap items-center justify-between gap-3">
-                                <div className="text-sm font-semibold text-foreground">Models</div>
-                                <Button
-                                  type="button"
-                                  variant="outline"
-                                  size="sm"
-                                  onClick={() => handleAddModel(providerIndex)}
-                                >
-                                  Add model
-                                </Button>
-                              </div>
-                              {provider.models.length ? (
-                                provider.models.map((model, modelIndex) => (
-                                  <div
-                                    key={`${model.id}-${modelIndex}`}
-                                    className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] sm:items-end"
-                                  >
-                                    <div className="grid gap-2">
-                                      <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                                        Model name
-                                      </label>
-                                      <Input
-                                        value={model.name ?? ""}
-                                        onChange={(event) =>
-                                          updateModelProvider(providerIndex, (current) => ({
-                                            ...current,
-                                            models: current.models.map((item, index) =>
-                                              index === modelIndex
-                                                ? { ...item, name: event.target.value }
-                                                : item
-                                            ),
-                                          }))
-                                        }
-                                        placeholder="GPT-5.2 Codex"
-                                      />
-                                    </div>
-                                    <div className="grid gap-2">
-                                      <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                                        Model id
-                                      </label>
-                                      <Input
-                                        value={model.id}
-                                        onChange={(event) =>
-                                          updateModelProvider(providerIndex, (current) => ({
-                                            ...current,
-                                            models: current.models.map((item, index) =>
-                                              index === modelIndex
-                                                ? { ...item, id: event.target.value }
-                                                : item
-                                            ),
-                                          }))
-                                        }
-                                        placeholder="gpt-5.2-codex"
-                                      />
-                                    </div>
-                                    <Button
-                                      type="button"
-                                      variant="ghost"
-                                      onClick={() =>
-                                        handleRemoveModel(providerIndex, modelIndex)
-                                      }
-                                    >
-                                      Remove
-                                    </Button>
-                                  </div>
-                                ))
-                              ) : (
-                                <div className="rounded-md border border-dashed px-3 py-2 text-xs text-muted-foreground">
-                                  No models yet. Add one to enable selection.
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        ))
-                      ) : (
-                        <div className="rounded-md border border-dashed px-3 py-3 text-sm text-muted-foreground">
-                          No providers yet. Add one or check OpenCode connection.
-                        </div>
-                      )}
-                    </div>
-                    {settingsError ? (
-                      <div className="rounded-md border border-destructive/50 bg-destructive/5 px-3 py-2 text-sm text-destructive">
-                        {settingsError}
-                      </div>
-                    ) : null}
-                    {settingsSavedMessage ? (
-                      <div className="rounded-md border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-700">
-                        {settingsSavedMessage}
-                      </div>
-                    ) : null}
-                  </CardContent>
-                  <CardFooter>
-                    <Button type="submit" disabled={isSavingSettings}>
-                      {isSavingSettings ? "Saving..." : "Save settings"}
-                    </Button>
-                  </CardFooter>
-                </form>
-              </Card>
-              <div className="grid gap-4">
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Appearance</CardTitle>
-                    <CardDescription>
-                      Choose the theme that feels best for long sessions.
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="grid gap-3">
-                    <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-muted/30 px-4 py-3">
-                      <div>
-                        <div className="text-sm font-semibold text-foreground">Theme</div>
-                        <div className="text-xs text-muted-foreground">
-                          Currently set to {theme === "dark" ? "dark" : "light"} mode.
-                        </div>
-                      </div>
-                      <Button type="button" variant="outline" onClick={toggleTheme}>
-                        Switch to {nextThemeLabel}
-                      </Button>
-                    </div>
-                  </CardContent>
-                </Card>
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Security</CardTitle>
-                    <CardDescription>
-                      Tokens stay on this machine unless you export them.
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="text-sm text-muted-foreground">
-                    Maestro uses environment variables first, then falls back to your local
-                    settings file if needed.
-                  </CardContent>
-                </Card>
-              </div>
-            </div>
-          </div>
+          <SettingsView
+            settingsForm={settingsForm}
+            settingsDefaultModels={settingsDefaultModels}
+            settingsError={settingsError}
+            settingsSavedMessage={settingsSavedMessage}
+            isSavingSettings={isSavingSettings}
+            theme={theme}
+            nextThemeLabel={nextThemeLabel}
+            onToggleTheme={toggleTheme}
+            onSettingsSubmit={handleSettingsSubmit}
+            onSettingsChange={handleSettingsChange}
+            updateModelProvider={updateModelProvider}
+            onAddProvider={handleAddProvider}
+            onRemoveProvider={handleRemoveProvider}
+            onAddModel={handleAddModel}
+            onRemoveModel={handleRemoveModel}
+            onDefaultProviderChange={handleDefaultProviderChange}
+            onDefaultModelChange={handleDefaultModelChange}
+          />
         ) : (
           <div className="flex flex-1 flex-col gap-4 p-6">
-          <div className="rounded-xl border bg-card p-6 shadow-sm">
-            <div className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
-              {viewLabel}
-            </div>
-            <div className="mt-3 flex flex-wrap items-center gap-3 text-2xl font-semibold text-foreground">
-              {isProjectView && projectIconValue ? (
-                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-muted text-lg">
-                  {projectIconValue}
-                </div>
-              ) : null}
-              <span>{viewTitle}</span>
-            </div>
-            <div className="mt-2 max-w-2xl text-sm text-muted-foreground">
-              {viewDescription}
-            </div>
-            {isProjectView && selectedProject ? (
-              <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
-                <span className="text-muted-foreground">Repository</span>
-                {projectRepoHref ? (
-                  <a
-                    className="font-medium text-primary hover:underline"
-                    href={projectRepoHref}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    Open repo
-                  </a>
-                ) : (
-                  <span className="text-foreground">{projectRepoLabel}</span>
-                )}
-                {selectedProject.gitProvider ? (
-                  <Badge variant="secondary">
-                    {selectedProject.gitProvider === "github" ? "GitHub" : "GitLab"}
-                  </Badge>
-                ) : null}
-              </div>
-            ) : null}
-            {isWorkspaceView ? (
-              <div className="mt-4 flex flex-wrap items-center gap-3">
-                <Button
-                  type="button"
-                  variant="destructive"
-                  onClick={handleDeleteWorkspace}
-                  disabled={isDeletingWorkspace}
-                >
-                  {isDeletingWorkspace ? "Deleting workspace..." : "Delete workspace"}
-                </Button>
-                {deleteWorkspaceError ? (
-                  <div className="rounded-md border border-destructive/50 bg-destructive/5 px-3 py-2 text-xs text-destructive">
-                    {deleteWorkspaceError}
-                  </div>
-                ) : null}
-              </div>
-            ) : null}
-          </div>
-          <div className="rounded-xl border bg-background p-4">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div>
-                <div className="text-sm font-semibold text-foreground">Recent sessions</div>
-                <div className="text-xs text-muted-foreground">
-                  {isProjectView
-                    ? `Last ${recentSessionsLimit} sessions in this project.`
-                    : `Last ${recentSessionsLimit} sessions across your workspaces.`}
-                </div>
-              </div>
-            </div>
-            <div className="mt-4 flex gap-3 overflow-x-auto pb-2">
-              {recentSessionsForView.length ? (
-                recentSessionsForView.map((session) => (
-                  <button
-                    key={session.id}
-                    type="button"
-                    onClick={() =>
-                      handleSelectChat(
-                        session.projectId,
-                        session.workspaceId,
-                        session.id
-                      )
-                    }
-                    className="min-w-[220px] rounded-lg border bg-muted/20 px-4 py-3 text-left transition hover:border-primary/60 hover:bg-muted/40"
-                  >
-                    <div className="text-sm font-semibold text-foreground">
-                      {session.name}
-                    </div>
-                    <div className="mt-1 text-xs text-muted-foreground">
-                      {session.projectName} · {session.workspaceName}
-                    </div>
-                    <div className="mt-2 text-xs text-muted-foreground">
-                      Updated {formatDateTime(session.updatedAt)}
-                    </div>
-                  </button>
-                ))
-              ) : (
-                <div className="rounded-lg border border-dashed px-4 py-3 text-sm text-muted-foreground">
-                  No sessions yet. Create a workspace to start chatting.
-                </div>
-              )}
-            </div>
-          </div>
-          {isProjectsView ? (
-            <div className="grid gap-4 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
-              <div className="grid gap-4">
-                <Card className="border-dashed">
-                  <form onSubmit={handleCreateProject}>
-                    <CardHeader>
-                      <CardTitle>Create a new project</CardTitle>
-                      <CardDescription>
-                        Connect a repo, set the default branch, and start a workspace.
-                      </CardDescription>
-                    </CardHeader>
-                    <CardContent className="grid gap-3">
-                      <div className="grid gap-2">
-                        <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                          Project name
-                        </label>
-                        <Input
-                          value={projectForm.name}
-                          onChange={handleProjectFormChange("name")}
-                          placeholder="e.g. Marketing site"
-                        />
-                      </div>
-                      <div className="grid gap-2">
-                        <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                          Repo path
-                        </label>
-                        <Input
-                          value={projectForm.repoPath}
-                          onChange={handleProjectFormChange("repoPath")}
-                          placeholder="/path/to/repo (optional)"
-                        />
-                      </div>
-                      <div className="grid gap-2">
-                        <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                          Repo URL
-                        </label>
-                        <Input
-                          value={projectForm.repoUrl}
-                          onChange={handleProjectFormChange("repoUrl")}
-                          placeholder="https://github.com/org/repo (optional)"
-                        />
-                      </div>
-                      <div className="grid gap-2">
-                        <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                          Git provider
-                        </label>
-                        <select
-                          value={projectForm.gitProvider}
-                          onChange={handleProjectFormChange("gitProvider")}
-                          className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-base ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 md:text-sm"
-                        >
-                          <option value="">Auto-detect</option>
-                          <option value="github">GitHub</option>
-                          <option value="gitlab">GitLab</option>
-                        </select>
-                      </div>
-                      <div className="grid gap-2">
-                        <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                          Default branch
-                        </label>
-                        <Input
-                          value={projectForm.defaultBranch}
-                          onChange={handleProjectFormChange("defaultBranch")}
-                          placeholder="main"
-                        />
-                      </div>
-                      {createProjectError ? (
-                        <div className="rounded-md border border-destructive/50 bg-destructive/5 px-3 py-2 text-sm text-destructive">
-                          {createProjectError}
-                        </div>
-                      ) : null}
-                    </CardContent>
-                    <CardFooter className="flex flex-wrap items-center gap-3">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        onClick={handleSelectDirectory}
-                        disabled={isSelectingDirectory}
-                      >
-                        {isSelectingDirectory ? "Selecting folder..." : "Select folder"}
-                      </Button>
-                      <Button
-                        type="submit"
-                        disabled={!projectForm.name.trim() || isCreatingProject}
-                      >
-                        {isCreatingProject ? "Creating project..." : "Create project"}
-                      </Button>
-                    </CardFooter>
-                  </form>
-                </Card>
-                <Card>
-                  <CardHeader>
-                    <CardTitle>All workspaces</CardTitle>
-                    <CardDescription>
-                      Active workspaces across every project.
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="grid gap-3">
-                    {allWorkspaces.length ? (
-                      allWorkspaces.map((workspace) => (
-                        <button
-                          key={workspace.id}
-                          type="button"
-                          onClick={() =>
-                            handleSelectWorkspace(workspace.projectId, workspace.id)
-                          }
-                          className="rounded-lg border bg-muted/20 px-4 py-3 text-left transition hover:border-primary/60 hover:bg-muted/40"
-                        >
-                          <div className="flex flex-wrap items-center justify-between gap-2">
-                            <div>
-                              <div className="text-sm font-semibold text-foreground">
-                                {workspace.name}
-                              </div>
-                              <div className="text-xs text-muted-foreground">
-                                {workspace.projectName}
-                              </div>
-                            </div>
-                            <div className="text-xs text-muted-foreground">
-                              Updated {formatDateTime(workspace.updatedAt)}
-                            </div>
-                          </div>
-                        </button>
-                      ))
-                    ) : (
-                      <div className="rounded-lg border border-dashed px-4 py-3 text-sm text-muted-foreground">
-                        No workspaces yet. Create one from a project.
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
-              </div>
-              <div className="grid gap-4">
-                <div className="grid gap-4 sm:grid-cols-2">
-                  {isLoading ? (
-                    <Card className="flex items-center justify-center border-dashed p-6 text-sm text-muted-foreground">
-                      Loading projects...
-                    </Card>
-                  ) : error ? (
-                    <Card className="flex items-center justify-center border-destructive/40 bg-destructive/5 p-6 text-sm text-destructive">
-                      {error}
-                    </Card>
-                  ) : projects.length ? (
-                    projects.map((project) => (
-                      <button
-                        key={project.id}
-                        type="button"
-                        onClick={() => handleSelectProject(project.id)}
-                        className="text-left"
-                      >
-                        <Card className="h-full transition hover:border-primary/60 hover:shadow-md">
-                          <CardHeader>
-                            <CardTitle className="flex items-center gap-2">
-                              {project.icon ? (
-                                <span className="text-xl leading-none">{project.icon}</span>
-                              ) : null}
-                              <span>{project.name}</span>
-                            </CardTitle>
-                            <CardDescription className="truncate">
-                              {project.repoUrl?.trim() || project.repoPath}
-                            </CardDescription>
-                          </CardHeader>
-                          <CardContent className="grid gap-2 text-sm text-muted-foreground">
-                            <div>
-                              <span className="font-medium text-foreground">
-                                {project.workspaces.length}
-                              </span>{" "}
-                              workspaces
-                            </div>
-                            <div>
-                              Default branch: {project.defaultBranch || "main"}
-                            </div>
-                            <div>Updated {formatDate(project.updatedAt)}</div>
-                          </CardContent>
-                        </Card>
-                      </button>
-                    ))
-                  ) : (
-                    <Card className="flex items-center justify-center border-dashed p-6 text-sm text-muted-foreground">
-                      No projects yet. Create your first one.
-                    </Card>
-                  )}
-                </div>
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Open PRs and MRs</CardTitle>
-                    <CardDescription>
-                      Pull requests for GitHub repos and merge requests for GitLab.
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="grid gap-3">
-                    {isLoadingPullRequests ? (
-                      <div className="rounded-lg border border-dashed px-4 py-3 text-sm text-muted-foreground">
-                        Loading open pull requests...
-                      </div>
-                    ) : pullRequestsError ? (
-                      <div className="rounded-lg border border-destructive/50 bg-destructive/5 px-4 py-3 text-sm text-destructive">
-                        {pullRequestsError}
-                      </div>
-                    ) : sortedPullRequests.length ? (
-                      sortedPullRequests.map((item) => (
-                        <a
-                          key={`${item.projectId}-${item.id}`}
-                          href={item.url}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="rounded-lg border bg-muted/20 px-4 py-3 transition hover:border-primary/60 hover:bg-muted/40"
-                        >
-                          <div className="flex flex-wrap items-center justify-between gap-2">
-                            <div className="text-sm font-semibold text-foreground">
-                              {item.title}
-                            </div>
-                            <Badge variant="secondary">
-                              {item.provider === "github" ? "PR" : "MR"}
-                            </Badge>
-                          </div>
-                          <div className="mt-1 text-xs text-muted-foreground">
-                            {item.projectName} · {item.repo}
-                          </div>
-                          <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                            {item.author ? `@${item.author}` : "Unknown author"}
-                            {item.sourceBranch && item.targetBranch
-                              ? `${item.sourceBranch} → ${item.targetBranch}`
-                              : null}
-                            <span>Updated {formatDateTime(item.updatedAt)}</span>
-                          </div>
-                        </a>
-                      ))
-                    ) : hasRepoProjects ? (
-                      <div className="rounded-lg border border-dashed px-4 py-3 text-sm text-muted-foreground">
-                        No open pull requests right now.
-                      </div>
-                    ) : (
-                      <div className="rounded-lg border border-dashed px-4 py-3 text-sm text-muted-foreground">
-                        Add a repo URL to projects to see open PRs or MRs here.
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
-              </div>
-            </div>
-          ) : showWorkspaceCreator ? (
-            selectedProject ? (
-              <ProjectWorkspacesTable
-                projectId={selectedProject.id}
-                projectName={selectedProject.name}
-                workspaces={selectedProject.workspaces}
-                pullRequests={projectPullRequests}
+            <WorkbenchOverview
+              isProjectView={isProjectView}
+              isWorkspaceView={isWorkspaceView}
+              selectedProject={selectedProject}
+              selectedWorkspace={selectedWorkspace}
+              projectIconValue={projectIconValue}
+              viewLabel={viewLabel}
+              viewTitle={viewTitle}
+              viewDescription={viewDescription}
+              projectRepoLabel={projectRepoLabel}
+              projectRepoHref={projectRepoHref}
+              deletingWorkspace={deletingWorkspace}
+              deleteWorkspaceErrors={deleteWorkspaceErrors}
+              recentSessionsLimit={recentSessionsLimit}
+              recentSessionsForView={recentSessionsForView}
+              formatDateTime={formatDateTime}
+              onDeleteWorkspace={(workspaceId, workspaceName) =>
+                void handleConfirmDeleteWorkspace(workspaceId, workspaceName)
+              }
+              onSelectChat={handleSelectChat}
+            />
+            {isProjectsView ? (
+              <ProjectsView
+                projectForm={projectForm}
+                createProjectError={createProjectError}
+                isCreatingProject={isCreatingProject}
+                isSelectingDirectory={isSelectingDirectory}
+                allWorkspaces={allWorkspaces}
+                projects={projects}
+                isLoading={isLoading}
+                error={error}
+                sortedPullRequests={sortedPullRequests}
+                hasRepoProjects={hasRepoProjects}
                 isLoadingPullRequests={isLoadingPullRequests}
                 pullRequestsError={pullRequestsError}
-                onSelectWorkspace={handleSelectWorkspace}
-                onCreateWorkspace={handleCreateWorkspace}
-                workspaceTitle={workspaceForm.title}
-                onWorkspaceTitleChange={handleWorkspaceFormChange}
-                isCreatingWorkspace={isCreatingWorkspace}
-                createWorkspaceError={createWorkspaceError}
+                formatDate={formatDate}
                 formatDateTime={formatDateTime}
-                onMergePullRequest={handleMergePullRequest}
-                mergedPullRequests={mergedPullRequests}
-                mergingPullRequests={mergingPullRequests}
-                mergePullRequestErrors={mergePullRequestErrors}
-                onDeleteMergedWorkspace={handleDeleteMergedWorkspace}
-                deletingMergeWorkspace={deletingMergeWorkspace}
-                deleteMergeWorkspaceErrors={deleteMergeWorkspaceErrors}
-                getPullRequestKey={getPullRequestKey}
+                onCreateProject={handleCreateProject}
+                onProjectFormChange={handleProjectFormChange}
+                onSelectDirectory={() => void handleSelectDirectory()}
+                onSelectWorkspace={handleSelectWorkspace}
+                onSelectProject={handleSelectProject}
               />
-            ) : null
-          ) : isWorkspaceView ? (
-            <div className="grid gap-4 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
-              <Card className="border-dashed">
-                <form onSubmit={handleCreateSession}>
-                  <CardHeader>
-                    <CardTitle>Create a new session</CardTitle>
-                    <CardDescription>
-                      Start a focused chat within this workspace. OpenCode will name it.
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="grid gap-3">
-                    <div className="grid gap-2">
-                      <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                        Session name
-                      </label>
-                      <Input
-                        value={sessionForm.title}
-                        onChange={handleSessionFormChange}
-                        placeholder="e.g. Bug bash follow-up"
-                      />
-                    </div>
-                    <div className="grid gap-2">
-                      <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                        Provider
-                      </label>
-                      <select
-                        value={sessionForm.providerId}
-                        onChange={handleSessionProviderChange}
-                        className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-base ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 md:text-sm"
-                      >
-                        {settingsForm.modelProviders.length ? (
-                          settingsForm.modelProviders.map((provider) => (
-                            <option key={provider.id} value={provider.id}>
-                              {provider.name?.trim() || provider.id}
-                            </option>
-                          ))
-                        ) : (
-                          <option value="">No providers available</option>
-                        )}
-                      </select>
-                    </div>
-                    <div className="grid gap-2">
-                      <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                        Model
-                      </label>
-                      <select
-                        value={sessionForm.modelId}
-                        onChange={handleSessionModelChange}
-                        disabled={!sessionModels.length}
-                        className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-base ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 md:text-sm"
-                      >
-                        {sessionModels.length ? (
-                          sessionModels.map((model) => (
-                            <option key={model.id} value={model.id}>
-                              {model.name?.trim() || model.id}
-                            </option>
-                          ))
-                        ) : (
-                          <option value="">No models available</option>
-                        )}
-                      </select>
-                      <div className="text-xs text-muted-foreground">
-                        Manage providers and models from Settings.
-                      </div>
-                    </div>
-                    {createSessionError ? (
-                      <div className="rounded-md border border-destructive/50 bg-destructive/5 px-3 py-2 text-sm text-destructive">
-                        {createSessionError}
-                      </div>
-                    ) : null}
-                  </CardContent>
-                  <CardFooter>
-                    <Button type="submit" disabled={isCreatingSession}>
-                      {isCreatingSession ? "Creating session..." : "Create session"}
-                    </Button>
-                  </CardFooter>
-                </form>
-              </Card>
-              <Card>
-                <CardHeader>
-                  <CardTitle>Chat sessions</CardTitle>
-                  <CardDescription>Jump back into any active thread.</CardDescription>
-                </CardHeader>
-                <CardContent className="grid gap-3">
-                  {selectedWorkspace?.chats.length ? (
-                    selectedWorkspace.chats.map((chat) => {
-                      const isDeleting = deletingSessionId === chat.id
-                      return (
-                        <div
-                          key={chat.id}
-                          className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-muted/30 px-4 py-3 text-sm"
-                        >
-                          <div className="min-w-0 flex-1">
-                            <div className="truncate font-medium text-foreground">
-                              {chat.name}
-                            </div>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="sm"
-                              onClick={() => {
-                                if (!selectedProject || !selectedWorkspace) {
-                                  return
-                                }
-                                handleSelectChat(selectedProject.id, selectedWorkspace.id, chat.id)
-                              }}
-                            >
-                              Open
-                            </Button>
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => handleDeleteSession(chat.id)}
-                              disabled={isDeleting}
-                            >
-                              {isDeleting ? "Deleting..." : "Delete"}
-                            </Button>
-                          </div>
-                        </div>
-                      )
-                    })
-                  ) : (
-                    <div className="rounded-lg border border-dashed px-4 py-3 text-sm text-muted-foreground">
-                      No sessions yet. Create your first one.
-                    </div>
-                  )}
-                  {deleteSessionError ? (
-                    <div className="rounded-md border border-destructive/50 bg-destructive/5 px-3 py-2 text-xs text-destructive">
-                      {deleteSessionError}
-                    </div>
-                  ) : null}
-                </CardContent>
-              </Card>
-            </div>
-          ) : isChatView ? (
-            <Conversation className="min-h-[520px] rounded-xl border bg-card shadow-sm">
-              <ConversationContent className="gap-4">
-                {isTranscriptLoading ? (
-                  <div className="flex h-full min-h-[320px] items-center justify-center">
-                    <div className="grid w-full max-w-lg gap-3 px-4 text-sm text-muted-foreground">
-                      <div className="inline-flex items-center gap-2">
-                        <Loader className="mr-1" /> Loading transcript...
-                      </div>
-                      <div className="grid gap-2">
-                        <Shimmer className="h-4 w-32" />
-                        <Shimmer className="h-3 w-full" />
-                        <Shimmer className="h-3 w-5/6" />
-                      </div>
-                    </div>
-                  </div>
-                ) : messages.length ? (
-                  messages.map((message, messageIndex) => {
-                    const attachmentParts = message.parts.filter(
-                      (part): part is StructuredMessagePart & {
-                        type: "file"
-                        file: FileReference
-                      } => part.type === "file"
-                    )
-                    const attachments = attachmentParts.map((part, index) => {
-                      const file = part.file
-                      return {
-                        id: file.id || part.id || `attachment-${message.id}-${index}`,
-                        name: file.name,
-                        path: file.path,
-                        mimeType: file.mimeType,
-                        size: file.size,
-                        source: file.source,
-                      }
-                    })
-                    const reasoningParts = message.parts.filter(
-                      (part): part is StructuredMessagePart & { type: "reasoning" } =>
-                        part.type === "reasoning"
-                    )
-                    const reasoningText = reasoningParts
-                      .map((part) => part.text)
-                      .filter(
-                        (text): text is string =>
-                          typeof text === "string" && text.trim().length > 0
-                      )
-                      .join("\n\n")
-                    const sources = getSourcesFromParts(message.parts)
-                    const messageText = getTextFromParts(message.parts) || message.content || ""
-                    const hasMessageText = Boolean(messageText)
-                    const messageMarkdown = prepareCitationMarkdown(messageText, sources)
-                    const showReasoning = message.role === "assistant" && Boolean(reasoningText)
-                    const checkpointMarkers = getCheckpointMarkers(message.parts, message.id)
-                    const planEntries = getPlanEntries(message.parts, message.id)
-                    const taskEntries = getTaskEntries(message.parts, message.id)
-                    const queueEntries = getQueueEntries(message.parts, message.id)
-                    const { branches: messageBranches, defaultBranch } = getMessageBranches(
-                      message,
-                      messageText,
-                      sources
-                    )
-                    const hasBranches = messageBranches.length > 1
-                    const isCopied = copiedMessageId === message.id
-                    const lastUserMessageText =
-                      message.role === "assistant"
-                        ? (() => {
-                            for (let index = messageIndex; index >= 0; index -= 1) {
-                              const candidate = messages[index]
-                              if (candidate?.role !== "user") {
-                                continue
-                              }
-                              const candidateText =
-                                getTextFromParts(candidate.parts) ||
-                                candidate.content ||
-                                ""
-                              if (candidateText.trim()) {
-                                return candidateText
-                              }
-                            }
-                            return ""
-                          })()
-                        : ""
-                    const canRetry =
-                      message.role === "assistant" &&
-                      !message.isStreaming &&
-                      !isChatStreaming &&
-                      Boolean(lastUserMessageText.trim())
-                    const canCopy = Boolean(messageText.trim())
-                    const showActions = canCopy || canRetry
-                    const showToolbar = showActions || hasBranches
-                    const toolbarClassName = hasBranches ? undefined : "justify-end"
-                    const canRestoreCheckpoint = !isChatStreaming && !isTranscriptLoading
-                    const actionButtons = showActions ? (
-                      <MessageActions>
-                        {canCopy ? (
-                          <MessageAction
-                            aria-label={isCopied ? "Copied" : "Copy message"}
-                            label={isCopied ? "Copied" : "Copy message"}
-                            onClick={() => void handleCopyMessage(message.id, messageText)}
-                            tooltip={isCopied ? "Copied" : "Copy"}
-                          >
-                            {isCopied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
-                          </MessageAction>
-                        ) : null}
-                        {canRetry ? (
-                          <MessageAction
-                            aria-label="Retry"
-                            label="Retry"
-                            onClick={() => handleRetryMessage(messageIndex)}
-                            tooltip="Retry"
-                          >
-                            <RotateCcw className="size-3.5" />
-                          </MessageAction>
-                        ) : null}
-                      </MessageActions>
-                    ) : null
-
-                    return (
-                      <Message key={message.id} from={message.role}>
-                        <MessageContent>
-                          {attachments.length ? (
-                            <MessageAttachments attachments={attachments} />
-                          ) : null}
-                          {checkpointMarkers.length ? (
-                            <div className="flex flex-wrap gap-2">
-                              {checkpointMarkers.map((checkpoint) => (
-                                <MessageCheckpoint
-                                  key={checkpoint.id}
-                                  label={checkpoint.label}
-                                  description={checkpoint.description}
-                                  status={checkpoint.status}
-                                  timestamp={checkpoint.timestamp}
-                                  onRestore={
-                                    checkpoint.restore
-                                      ? () => void handleRestoreCheckpoint(checkpoint)
-                                      : undefined
-                                  }
-                                  restoreLabel={checkpoint.restore?.label}
-                                  isRestoring={Boolean(restoringCheckpoints[checkpoint.id])}
-                                  restoreDisabled={!canRestoreCheckpoint}
-                                />
-                              ))}
-                            </div>
-                          ) : null}
-                          {message.role === "assistant" ? (
-                            <>
-                              {showReasoning ? (
-                                <ReasoningSection
-                                  text={reasoningText}
-                                  isStreaming={message.isStreaming}
-                                />
-                              ) : null}
-                              {planEntries.length ? (
-                                <div className="grid gap-2">
-                                  {planEntries.map((plan) => (
-                                    <PlanSection
-                                      key={plan.id}
-                                      title={plan.title}
-                                      summary={plan.summary}
-                                      steps={plan.steps}
-                                      isStreaming={plan.isStreaming ?? message.isStreaming}
-                                    />
-                                  ))}
-                                </div>
-                              ) : null}
-                              {taskEntries.length ? (
-                                <div className="grid gap-2">
-                                  {taskEntries.map((task) => (
-                                    <TaskListSection
-                                      key={task.id}
-                                      title={task.title}
-                                      summary={task.summary}
-                                      items={task.items}
-                                      isStreaming={task.isStreaming ?? message.isStreaming}
-                                    />
-                                  ))}
-                                </div>
-                              ) : null}
-                              {queueEntries.length ? (
-                                <div className="grid gap-2">
-                                  {queueEntries.map((queue) => (
-                                    <QueueSection
-                                      key={queue.id}
-                                      title={queue.title}
-                                      summary={queue.summary}
-                                      items={queue.items}
-                                      totalCount={queue.totalCount}
-                                      isStreaming={queue.isStreaming ?? message.isStreaming}
-                                    />
-                                  ))}
-                                </div>
-                              ) : null}
-                              {hasBranches ? (
-                                <MessageBranch defaultBranch={defaultBranch}>
-                                  <MessageBranchContent>
-                                    {messageBranches.map((branch) => {
-                                      const branchMarkdown = prepareCitationMarkdown(
-                                        branch.content,
-                                        branch.sources
-                                      )
-
-                                      return (
-                                        <div className="grid gap-2" key={branch.id}>
-                                          <CitationProvider sources={branch.sources}>
-                                            <MessageResponse components={{ a: CitationAnchor }}>
-                                              {branchMarkdown}
-                                            </MessageResponse>
-                                          </CitationProvider>
-                                          {branch.sources.length ? (
-                                            <SourcesList sources={branch.sources} />
-                                          ) : null}
-                                        </div>
-                                      )
-                                    })}
-                                  </MessageBranchContent>
-                                  {showToolbar ? (
-                                    <MessageToolbar className={toolbarClassName}>
-                                      {actionButtons}
-                                      <MessageBranchSelector from={message.role}>
-                                        <MessageBranchPrevious />
-                                        <MessageBranchPage />
-                                        <MessageBranchNext />
-                                      </MessageBranchSelector>
-                                    </MessageToolbar>
-                                  ) : null}
-                                </MessageBranch>
-                              ) : hasMessageText ? (
-                                <>
-                                  <CitationProvider sources={sources}>
-                                    <MessageResponse components={{ a: CitationAnchor }}>
-                                      {messageMarkdown}
-                                    </MessageResponse>
-                                  </CitationProvider>
-                                  {sources.length ? <SourcesList sources={sources} /> : null}
-                                  {showToolbar ? (
-                                    <MessageToolbar className={toolbarClassName}>
-                                      {actionButtons}
-                                    </MessageToolbar>
-                                  ) : null}
-                                </>
-                              ) : showToolbar ? (
-                                <MessageToolbar className={toolbarClassName}>
-                                  {actionButtons}
-                                </MessageToolbar>
-                              ) : null}
-                              {message.isStreaming && !hasMessageText && isAwaitingFirstToken ? (
-                                <div className="grid gap-2">
-                                  <span className="inline-flex items-center gap-2 text-muted-foreground">
-                                    <Loader /> Waiting for response...
-                                  </span>
-                                  <div className="grid gap-1">
-                                    <Shimmer className="h-3 w-4/5" />
-                                    <Shimmer className="h-3 w-2/3" />
-                                  </div>
-                                </div>
-                              ) : null}
-                            </>
-                          ) : (
-                            <CitationProvider sources={sources}>
-                              <MessageResponse components={{ a: CitationAnchor }}>
-                                {messageMarkdown}
-                              </MessageResponse>
-                            </CitationProvider>
-                          )}
-                        </MessageContent>
-                        {message.role === "user" && showToolbar ? (
-                          <MessageToolbar className={cn("self-end", toolbarClassName)}>
-                            {actionButtons}
-                          </MessageToolbar>
-                        ) : null}
-                      </Message>
-                    )
-                  })
-                ) : (
-                  <ConversationEmptyState
-                    className="min-h-[320px]"
-                  >
-                    <div className="flex flex-col items-center gap-4 text-center">
-                      <div className="space-y-1">
-                        <h3 className="text-sm font-medium">No messages yet</h3>
-                        <p className="text-sm text-muted-foreground">
-                          Ask a question to start the session.
-                        </p>
-                      </div>
-                      <div className="flex w-full max-w-xl flex-wrap justify-center gap-2">
-                        {emptyStateSuggestions.map((suggestion) => (
-                          <Button
-                            key={suggestion}
-                            className="rounded-full text-xs"
-                            disabled={promptDisabled}
-                            onClick={() => handleSuggestionClick(suggestion)}
-                            size="xs"
-                            type="button"
-                            variant="outline"
-                          >
-                            {suggestion}
-                          </Button>
-                        ))}
-                      </div>
-                    </div>
-                  </ConversationEmptyState>
-                )}
-              </ConversationContent>
-              <ConversationScrollButton />
-              <div className="border-t bg-background/80 p-4">
-                <PromptInput multiple onSubmit={handlePromptSubmit}>
-                  <PromptInputAttachmentsPreview />
-                  <PromptInputTextarea
-                    value={promptValue}
-                    onChange={handlePromptChange}
-                    placeholder="Ask for a review, summary, or next steps..."
-                    disabled={promptDisabled}
-                  />
-                  <PromptInputFooter>
-                    <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                      <PromptInputTools>
-                        <ModelSelector
-                          models={modelOptions}
-                          value={selectedModel}
-                          disabled={promptDisabled || isUpdatingModel}
-                          onSelect={handleUpdateSessionModel}
-                        />
-                        <PromptInputActionMenu>
-                          <PromptInputActionMenuTrigger
-                            aria-label="Prompt actions"
-                            disabled={promptDisabled}
-                          />
-                          <PromptInputActionMenuContent>
-                            <PromptInputActionAddAttachments disabled={promptDisabled} />
-                          </PromptInputActionMenuContent>
-                        </PromptInputActionMenu>
-                      </PromptInputTools>
-                      {contextUsage ? (
-                        <ContextUsageIndicator usage={contextUsage} />
-                      ) : null}
-                      <span>Shift + Enter for a new line</span>
-                    </div>
-                    <PromptInputSubmit
-                      type="submit"
-                      disabled={promptDisabled || !promptValue.trim()}
-                    >
-                      {isChatStreaming ? "Streaming..." : "Send"}
-                    </PromptInputSubmit>
-                  </PromptInputFooter>
-                </PromptInput>
-                {updateModelError ? (
-                  <div className="mt-3 rounded-md border border-destructive/50 bg-destructive/5 px-3 py-2 text-xs text-destructive">
-                    {updateModelError}
-                  </div>
-                ) : null}
-                {chatError ? (
-                  <div className="mt-3 rounded-md border border-destructive/50 bg-destructive/5 px-3 py-2 text-xs text-destructive">
-                    {chatError}
-                  </div>
-                ) : null}
-                {restoreCheckpointError ? (
-                  <div className="mt-3 rounded-md border border-destructive/50 bg-destructive/5 px-3 py-2 text-xs text-destructive">
-                    {restoreCheckpointError}
-                  </div>
-                ) : null}
-              </div>
-            </Conversation>
-          ) : (
-            <div className="rounded-xl border bg-background p-6">
-              <div className="text-sm font-semibold text-foreground">
-                {secondaryTitle}
-              </div>
-              <div className="mt-3 grid gap-3 md:grid-cols-2">
-                {secondaryItems.length ? (
-                  secondaryItems.map((item) => (
-                    <div
-                      key={item}
-                      className="rounded-lg border bg-muted/30 px-4 py-3 text-sm text-foreground"
-                    >
-                      {item}
-                    </div>
-                  ))
-                ) : (
-                  <div className="rounded-lg border border-dashed px-4 py-3 text-sm text-muted-foreground">
-                    Nothing to show yet.
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
+            ) : showWorkspaceCreator ? (
+              selectedProject ? (
+                <ProjectWorkspacesTable
+                  projectId={selectedProject.id}
+                  projectName={selectedProject.name}
+                  workspaces={selectedProject.workspaces}
+                  pullRequests={projectPullRequests}
+                  isLoadingPullRequests={isLoadingPullRequests}
+                  pullRequestsError={pullRequestsError}
+                  onSelectWorkspace={handleSelectWorkspace}
+                  onCreateWorkspace={handleCreateWorkspace}
+                  workspaceTitle={workspaceForm.title}
+                  onWorkspaceTitleChange={handleWorkspaceFormChange}
+                  isCreatingWorkspace={isCreatingWorkspace}
+                  createWorkspaceError={createWorkspaceError}
+                  formatDateTime={formatDateTime}
+                  onMergePullRequest={handleMergePullRequest}
+                  mergedPullRequests={mergedPullRequests}
+                  mergingPullRequests={mergingPullRequests}
+                  mergePullRequestErrors={mergePullRequestErrors}
+                  onDeleteMergedWorkspace={handleDeleteMergedWorkspace}
+                  deletingMergeWorkspace={deletingMergeWorkspace}
+                  deleteMergeWorkspaceErrors={deleteMergeWorkspaceErrors}
+                  onDeleteWorkspace={handleDeleteWorkspace}
+                  deletingWorkspace={deletingWorkspace}
+                  deleteWorkspaceErrors={deleteWorkspaceErrors}
+                  getPullRequestKey={getPullRequestKey}
+                />
+              ) : null
+            ) : isWorkspaceView ? (
+              <WorkspaceSessionsView
+                selectedProject={selectedProject}
+                selectedWorkspace={selectedWorkspace}
+                createSessionError={createSessionError}
+                isCreatingSession={isCreatingSession}
+                deletingSessionId={deletingSessionId}
+                deleteSessionError={deleteSessionError}
+                onCreateSession={handleCreateSession}
+                onDeleteSession={handleDeleteSession}
+                onSelectChat={handleSelectChat}
+              />
+            ) : isChatView ? (
+              <ChatView
+                isTranscriptLoading={isTranscriptLoading}
+                messages={messages}
+                copiedMessageId={copiedMessageId}
+                isChatStreaming={isChatStreaming}
+                isAwaitingFirstToken={isAwaitingFirstToken}
+                restoringCheckpoints={restoringCheckpoints}
+                emptyStateSuggestions={emptyStateSuggestions}
+                promptDisabled={promptDisabled}
+                promptValue={promptValue}
+                modelOptions={modelOptions}
+                selectedModel={selectedModel}
+                isUpdatingModel={isUpdatingModel}
+                contextUsage={contextUsage}
+                updateModelError={updateModelError}
+                chatError={chatError}
+                restoreCheckpointError={restoreCheckpointError}
+                onSuggestionClick={handleSuggestionClick}
+                onPromptSubmit={handlePromptSubmit}
+                onPromptChange={handlePromptChange}
+                onUpdateSessionModel={handleUpdateSessionModel}
+                onCopyMessage={handleCopyMessage}
+                onRetryMessage={handleRetryMessage}
+                onRestoreCheckpoint={handleRestoreCheckpoint}
+              />
+            ) : (
+              <SecondaryItemsView
+                title={secondaryTitle}
+                items={secondaryItems}
+              />
+            )}
           </div>
         )}
       </SidebarInset>

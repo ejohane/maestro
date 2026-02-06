@@ -17,6 +17,14 @@ import { ArrowUpDown, SlidersHorizontal } from "lucide-react"
 import { Badge } from "./ui/badge"
 import { Button } from "./ui/button"
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "./ui/dialog"
+import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
@@ -105,6 +113,9 @@ type ProjectWorkspacesTableProps = {
   ) => void
   deletingMergeWorkspace: Record<string, boolean>
   deleteMergeWorkspaceErrors: Record<string, string>
+  onDeleteWorkspace: (workspaceId: string, workspaceName?: string) => Promise<boolean>
+  deletingWorkspace: Record<string, boolean>
+  deleteWorkspaceErrors: Record<string, string>
   getPullRequestKey: (item: OpenPullRequest) => string
 }
 
@@ -172,8 +183,15 @@ const ProjectWorkspacesTable = ({
   onDeleteMergedWorkspace,
   deletingMergeWorkspace,
   deleteMergeWorkspaceErrors,
+  onDeleteWorkspace,
+  deletingWorkspace,
+  deleteWorkspaceErrors,
   getPullRequestKey,
 }: ProjectWorkspacesTableProps) => {
+  const [deleteDialogWorkspace, setDeleteDialogWorkspace] = React.useState<
+    WorkspaceRow | null
+  >(null)
+
   const data = React.useMemo<WorkspaceRow[]>(() => {
     return workspaces
       .map((workspace) => {
@@ -401,20 +419,31 @@ const ProjectWorkspacesTable = ({
         enableSorting: false,
         enableHiding: false,
         cell: ({ row }) => (
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => onSelectWorkspace(projectId, row.original.id)}
-          >
-            Open
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => onSelectWorkspace(projectId, row.original.id)}
+            >
+              Open
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              size="sm"
+              onClick={() => setDeleteDialogWorkspace(row.original)}
+            >
+              Delete
+            </Button>
+          </div>
         ),
       },
     ],
     [
       formatDateTime,
       onDeleteMergedWorkspace,
+      onDeleteWorkspace,
       onMergePullRequest,
       onSelectWorkspace,
       projectId,
@@ -424,6 +453,8 @@ const ProjectWorkspacesTable = ({
       mergePullRequestErrors,
       deletingMergeWorkspace,
       deleteMergeWorkspaceErrors,
+      deletingWorkspace,
+      deleteWorkspaceErrors,
     ]
   )
 
@@ -464,6 +495,12 @@ const ProjectWorkspacesTable = ({
 
   const totalRows = table.getPrePaginationRowModel().rows.length
   const filteredRows = table.getFilteredRowModel().rows.length
+  const deleteDialogError = deleteDialogWorkspace
+    ? deleteWorkspaceErrors[deleteDialogWorkspace.id]
+    : null
+  const isDeletingWorkspace = deleteDialogWorkspace
+    ? deletingWorkspace[deleteDialogWorkspace.id]
+    : false
 
   return (
     <div className="rounded-xl border bg-background p-4">
@@ -697,6 +734,15 @@ const ProjectWorkspacesTable = ({
                 >
                   Open workspace
                 </Button>
+                <Button
+                  type="button"
+                  variant="destructive"
+                  size="sm"
+                  className="mt-2 w-full"
+                  onClick={() => setDeleteDialogWorkspace(item)}
+                >
+                  Delete workspace
+                </Button>
               </div>
             )
           })
@@ -769,6 +815,59 @@ const ProjectWorkspacesTable = ({
           </Button>
         </div>
       </div>
+      <Dialog
+        open={Boolean(deleteDialogWorkspace)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setDeleteDialogWorkspace(null)
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete workspace</DialogTitle>
+            <DialogDescription>
+              {deleteDialogWorkspace
+                ? `Delete "${deleteDialogWorkspace.name}"? This removes the worktree and all sessions.`
+                : "Delete this workspace? This removes the worktree and all sessions."}
+            </DialogDescription>
+          </DialogHeader>
+          {deleteDialogError ? (
+            <div className="rounded-md border border-destructive/50 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+              {deleteDialogError}
+            </div>
+          ) : null}
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setDeleteDialogWorkspace(null)}
+              disabled={Boolean(isDeletingWorkspace)}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              disabled={Boolean(isDeletingWorkspace) || !deleteDialogWorkspace}
+              onClick={async () => {
+                if (!deleteDialogWorkspace) {
+                  return
+                }
+                const success = await onDeleteWorkspace(
+                  deleteDialogWorkspace.id,
+                  deleteDialogWorkspace.name
+                )
+                if (success) {
+                  setDeleteDialogWorkspace(null)
+                }
+              }}
+            >
+              {isDeletingWorkspace ? "Deleting..." : "Delete"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
