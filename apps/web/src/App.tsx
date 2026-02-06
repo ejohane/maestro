@@ -427,7 +427,7 @@ const App = () => {
     [selectedWorkspace, selectedChatId]
   )
 
-  const fallbackModel = defaultModel?.trim() || "openai/gpt-5.2-codex"
+  const fallbackModel = defaultModel?.trim() || "openai/gpt-5.3-codex"
   const selectedModel = selectedChat?.model ?? fallbackModel
   const activeProvider = React.useMemo(() => getActiveProvider(selectedModel), [selectedModel])
   const settingsModels = React.useMemo(

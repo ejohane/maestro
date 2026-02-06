@@ -1,7 +1,7 @@
 import type { ModelProvider } from "@maestro/storage";
 
 export const STATIC_DEFAULT_PROVIDER = "openai";
-export const STATIC_DEFAULT_MODEL = "gpt-5.2-codex";
+export const STATIC_DEFAULT_MODEL = "gpt-5.3-codex";
 
 export const STATIC_MODEL_PROVIDERS: ModelProvider[] = [
   {
@@ -13,6 +13,7 @@ export const STATIC_MODEL_PROVIDERS: ModelProvider[] = [
       { id: "gpt-4", name: "GPT-4" },
       { id: "o1-pro", name: "o1-pro" },
       { id: "gpt-4o-2024-05-13", name: "GPT-4o (2024-05-13)" },
+      { id: "gpt-5.3-codex", name: "GPT-5.3 Codex" },
       { id: "gpt-5.2-codex", name: "GPT-5.2 Codex" },
       { id: "gpt-5.1-codex", name: "GPT-5.1 Codex" },
       { id: "gpt-4o-2024-08-06", name: "GPT-4o (2024-08-06)" },

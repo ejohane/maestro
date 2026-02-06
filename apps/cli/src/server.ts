@@ -215,7 +215,7 @@ const isWorktreeDirty = async (worktreePath: string): Promise<boolean> => {
 };
 
 const getDefaultModel = (): string => {
-  return process.env.MAESTRO_MODEL ?? "openai/gpt-5.2-codex";
+  return process.env.MAESTRO_MODEL ?? "openai/gpt-5.3-codex";
 };
 
 const slugifyProjectName = (value: string): string => {

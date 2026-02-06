@@ -18,7 +18,7 @@ const modelProviders: ModelProvider[] = [
     id: "openai",
     name: "OpenAI",
     models: [
-      { id: "gpt-5.2-codex", name: "GPT 5.2 Codex" },
+      { id: "gpt-5.3-codex", name: "GPT 5.3 Codex" },
       { id: "openai/o4-mini" },
     ],
   },
@@ -116,7 +116,7 @@ describe("workbench selectors", () => {
 
   it("collects settings models and prefixes provider ids", () => {
     expect(collectSettingsModels(modelProviders)).toEqual([
-      "openai/gpt-5.2-codex",
+      "openai/gpt-5.3-codex",
       "openai/o4-mini",
       "anthropic/claude-sonnet-4",
     ])
@@ -124,7 +124,7 @@ describe("workbench selectors", () => {
 
   it("builds deduped model options and filters by active provider", () => {
     const options = buildModelOptions({
-      fallbackModel: "openai/gpt-5.2-codex",
+      fallbackModel: "openai/gpt-5.3-codex",
       availableModels: ["openai/o3", "anthropic/claude-sonnet-4", "openai/o3"],
       settingsModels: collectSettingsModels(modelProviders),
       selectedChatModel: "openai/o3",
@@ -132,7 +132,7 @@ describe("workbench selectors", () => {
     })
 
     expect(options.map((option) => option.id)).toEqual([
-      "openai/gpt-5.2-codex",
+      "openai/gpt-5.3-codex",
       "openai/o3",
       "openai/o4-mini",
     ])

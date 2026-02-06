@@ -78,8 +78,8 @@ describe("SettingsView", () => {
     const providerIdInput = screen.getByPlaceholderText("openai")
     const providerBlock = providerIdInput.closest("div.rounded-lg") as HTMLElement
     const providerNameInput = within(providerBlock).getByPlaceholderText("OpenAI")
-    const modelNameInput = within(providerBlock).getAllByPlaceholderText("GPT-5.2 Codex")[0]
-    const modelIdInput = within(providerBlock).getAllByPlaceholderText("gpt-5.2-codex")[0]
+    const modelNameInput = within(providerBlock).getAllByPlaceholderText("GPT-5.3 Codex")[0]
+    const modelIdInput = within(providerBlock).getAllByPlaceholderText("gpt-5.3-codex")[0]
 
     fireEvent.change(providerNameInput, { target: { value: "OpenAI Labs" } })
     fireEvent.change(providerIdInput, { target: { value: "openai-updated" } })

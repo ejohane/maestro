@@ -247,7 +247,7 @@ export const SettingsView = ({
                                       ),
                                     }))
                                   }
-                                  placeholder="GPT-5.2 Codex"
+                                  placeholder="GPT-5.3 Codex"
                                 />
                               </div>
                               <div className="grid gap-2">
@@ -266,7 +266,7 @@ export const SettingsView = ({
                                       ),
                                     }))
                                   }
-                                  placeholder="gpt-5.2-codex"
+                                  placeholder="gpt-5.3-codex"
                                 />
                               </div>
                               <Button
