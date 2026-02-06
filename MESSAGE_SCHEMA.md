@@ -188,7 +188,7 @@ Used as a fast path for updating the text part and message content when streamin
 
 ## Client rendering and part mapping
 
-The web UI builds its rendering model from message parts in `apps/web/src/App.tsx`:
+The web UI builds its rendering model from message parts in `apps/web/src/features/workbench/message-entries.ts` and renders them in `apps/web/src/features/workbench/views/chat-view.tsx`:
 
 - Text is rendered from `getTextFromParts(parts)` (fallbacks to `content`).
 - `reasoning` parts are grouped and shown in the assistant reasoning panel.
@@ -209,8 +209,8 @@ When introducing a new structured part:
 
 1. Pick a unique `type` (prefer the `data-*` namespace for app-specific payloads).
 2. Ensure the server streams and stores the part with a stable `id` or `index` to support updates.
-3. Add a selector/mapping in `apps/web/src/App.tsx` to translate the new part into a render model.
-4. Render the new model in the chat view alongside other message sections.
+3. Add a selector/mapping in `apps/web/src/features/workbench/message-entries.ts` to translate the new part into a render model.
+4. Render the new model in `apps/web/src/features/workbench/views/chat-view.tsx` alongside other message sections.
 5. Update this document with the new part shape and any streaming notes.
 
 ## Legacy mapping rules
