@@ -11,10 +11,11 @@ import {
   type StructuredMessagePart,
 } from "../../../lib/messages"
 import { extractUsageFromMetadata } from "../message-entries"
-import type { ChatMessage, CheckpointMarker } from "../types"
+import type { ChatMessage, ChatSession, CheckpointMarker } from "../types"
 import { useWorkbench } from "../workbench-context"
 
 type ChatController = {
+  activeChat: ChatSession | null
   messages: ChatMessage[]
   copiedMessageId: string | null
   chatStatus: "idle" | "streaming" | "error"
@@ -35,7 +36,13 @@ type ChatController = {
   onRestoreCheckpoint: (checkpoint: CheckpointMarker) => Promise<void>
 }
 
-export const useChatController = (): ChatController => {
+type ChatControllerOptions = {
+  workspaceSessionId?: string | null
+}
+
+export const useChatController = ({
+  workspaceSessionId = null,
+}: ChatControllerOptions = {}): ChatController => {
   const { meta } = useWorkbench()
   const { selectedWorkspace, selectedChat } = meta
 
@@ -72,6 +79,24 @@ export const useChatController = (): ChatController => {
       }
     }
   }, [])
+
+  const activeChat = React.useMemo<ChatSession | null>(() => {
+    if (selectedChat) {
+      return selectedChat
+    }
+    if (!selectedWorkspace) {
+      return null
+    }
+    if (workspaceSessionId) {
+      const workspaceSession = selectedWorkspace.chats.find(
+        (chatEntry) => chatEntry.id === workspaceSessionId
+      )
+      if (workspaceSession) {
+        return workspaceSession
+      }
+    }
+    return selectedWorkspace.chats[0] ?? null
+  }, [selectedChat, selectedWorkspace, workspaceSessionId])
 
   const fetchTranscript = React.useCallback(
     async (conversationId: string, sessionId: string, signal: AbortSignal) => {
@@ -116,7 +141,7 @@ export const useChatController = (): ChatController => {
         setIsAwaitingFirstToken(false)
       }
       const conversationId = selectedWorkspace?.id
-      const sessionId = selectedChat?.id
+      const sessionId = activeChat?.id
       if (!conversationId || !sessionId) {
         setIsTranscriptLoading(false)
         return
@@ -138,12 +163,12 @@ export const useChatController = (): ChatController => {
         }
       }
     },
-    [fetchTranscript, selectedWorkspace?.id, selectedChat?.id]
+    [activeChat?.id, fetchTranscript, selectedWorkspace?.id]
   )
 
   React.useEffect(() => {
     void loadTranscript(true)
-  }, [selectedWorkspace?.id, selectedChat?.id, loadTranscript])
+  }, [selectedWorkspace?.id, activeChat?.id, loadTranscript])
 
   const onPromptChange = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
     setPromptValue(event.target.value)
@@ -167,7 +192,7 @@ export const useChatController = (): ChatController => {
   }, [])
 
   const onPromptSubmit = async (message: PromptInputMessage) => {
-    if (!selectedWorkspace || !selectedChat) {
+    if (!selectedWorkspace || !activeChat) {
       return
     }
     if (chatStatus === "streaming") {
@@ -179,7 +204,7 @@ export const useChatController = (): ChatController => {
     }
 
     const conversationId = selectedWorkspace.id
-    const sessionId = selectedChat.id
+    const sessionId = activeChat.id
     const userMessageId = createLocalMessageId()
     const assistantMessageId = createLocalMessageId()
     const attachmentParts: StructuredMessagePart[] = message.files.map((file) => {
@@ -424,7 +449,7 @@ export const useChatController = (): ChatController => {
 
   const onRestoreCheckpoint = React.useCallback(
     async (checkpoint: CheckpointMarker) => {
-      if (!selectedWorkspace || !selectedChat) {
+      if (!selectedWorkspace || !activeChat) {
         return
       }
       if (!checkpoint.restore) {
@@ -450,7 +475,7 @@ export const useChatController = (): ChatController => {
             throw new Error("Checkpoint restore is missing a message id.")
           }
           response = await fetch(
-            `/api/conversations/${selectedWorkspace.id}/sessions/${selectedChat.id}/checkpoints/restore`,
+            `/api/conversations/${selectedWorkspace.id}/sessions/${activeChat.id}/checkpoints/restore`,
             {
               method: "POST",
               headers: { "Content-Type": "application/json" },
@@ -489,7 +514,7 @@ export const useChatController = (): ChatController => {
     [
       loadTranscript,
       restoringCheckpoints,
-      selectedChat,
+      activeChat,
       selectedWorkspace,
       setRestoreCheckpointError,
     ]
@@ -508,9 +533,10 @@ export const useChatController = (): ChatController => {
   const isChatStreaming = chatStatus === "streaming"
   const contextUsage = usageFromMessages ?? undefined
   const promptDisabled =
-    isChatStreaming || !selectedWorkspace || !selectedChat || isTranscriptLoading
+    isChatStreaming || !selectedWorkspace || !activeChat || isTranscriptLoading
 
   return {
+    activeChat,
     messages,
     copiedMessageId,
     chatStatus,
