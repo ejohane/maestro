@@ -12,6 +12,29 @@ January 2026
 
 ---
 
+## UI Visual Verification (Agent Requirement)
+
+When implementing or restyling UI, do not rely on code inspection alone.
+
+- Use the `agent-browser` skill to open the running app and verify the rendered UI.
+- Match the target context before comparing: viewport, theme (dark/light), and relevant state.
+- Capture at least one screenshot of the updated view and compare it against the request/mockup.
+- If visuals do not match, iterate and re-verify before final handoff.
+
+Suggested command flow:
+
+```bash
+agent-browser open http://127.0.0.1:5175
+agent-browser set viewport 1512 862
+agent-browser set media dark
+agent-browser snapshot -i
+agent-browser screenshot --full
+```
+
+Document in your final update that visual verification was performed with `agent-browser`.
+
+---
+
 ## Abstract
 
 Composition patterns for building flexible, maintainable React components. Avoid boolean prop proliferation by using compound components, lifting state, and composing internals. These patterns make codebases easier for both humans and AI agents to work with as they scale.
