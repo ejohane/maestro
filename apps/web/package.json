@@ -7,9 +7,9 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "node ./node_modules/vitest/vitest.mjs run",
-    "test:coverage": "node ./node_modules/vitest/vitest.mjs run --coverage",
-    "test:watch": "node ./node_modules/vitest/vitest.mjs"
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@maestro/core": "0.0.0",
