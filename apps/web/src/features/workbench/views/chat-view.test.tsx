@@ -112,8 +112,12 @@ vi.mock("../../../components/ai-elements/prompt-input", () => ({
   PromptInputTools: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
 }))
 
-vi.mock("../../../components/ai-elements/reasoning", () => ({
-  ReasoningSection: ({ text }: { text: string }) => <div>reasoning:{text}</div>,
+vi.mock("../../../components/ai-elements/chain-of-thought", () => ({
+  ChainOfThoughtSection: ({
+    entry,
+  }: {
+    entry: { steps: Array<{ label: string }> }
+  }) => <div>thought:{entry.steps.map((step) => step.label).join("|")}</div>,
 }))
 
 vi.mock("../../../components/ai-elements/sources", () => ({
@@ -297,7 +301,7 @@ describe("ChatView", () => {
     expect(props.onUpdateSessionModel).toHaveBeenCalledWith("openai/gpt-5")
 
     expect(screen.getByText("attachments:plan.md")).toBeInTheDocument()
-    expect(screen.getByText("reasoning:Because cohesion improves.")).toBeInTheDocument()
+    expect(screen.getByText("thought:Reasoning")).toBeInTheDocument()
     expect(screen.getByText("plan:Execution plan")).toBeInTheDocument()
     expect(screen.getByText("task:Tasks")).toBeInTheDocument()
     expect(screen.getByText("queue:Queue")).toBeInTheDocument()

@@ -56,6 +56,35 @@ Transcript entries in `transcript.ndjson` use the message shape plus storage met
 { "type": "reasoning", "text": "Short chain-of-thought summary." }
 ```
 
+Optional fields:
+
+```json
+{
+  "type": "reasoning",
+  "text": "Inspecting dependencies.",
+  "time": { "start": 1738924201000, "end": 1738924202400 },
+  "metadata": { "source": "model" }
+}
+```
+
+### Step start part
+
+```json
+{ "type": "step-start", "snapshot": "Inspect code paths" }
+```
+
+### Step finish part
+
+```json
+{
+  "type": "step-finish",
+  "reason": "Collected enough context to patch safely.",
+  "snapshot": "Patch plan drafted",
+  "cost": 0.00012,
+  "tokens": { "input": 320, "output": 96, "reasoning": 154 }
+}
+```
+
 ### Tool call part (with approvals)
 
 ```json
@@ -191,8 +220,8 @@ Used as a fast path for updating the text part and message content when streamin
 The web UI builds its rendering model from message parts in `apps/web/src/features/workbench/message-entries.ts` and renders them in `apps/web/src/features/workbench/views/chat-view.tsx`:
 
 - Text is rendered from `getTextFromParts(parts)` (fallbacks to `content`).
-- `reasoning` parts are grouped and shown in the assistant reasoning panel.
-- `tool` and `tool_result` parts are shown in the tool output section.
+- `reasoning`, `step-start`, `step-finish`, and `tool` parts are grouped into the assistant chain-of-thought timeline.
+- `tool_result` parts are available for dedicated tool output rendering.
 - `file` parts render as attachments.
 - `sources` parts are flattened into citations and injected into markdown.
 - `data-checkpoint` parts become checkpoint markers.

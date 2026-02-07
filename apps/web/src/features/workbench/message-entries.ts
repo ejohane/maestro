@@ -9,6 +9,9 @@ import {
   type StructuredMessagePart,
 } from "../../lib/messages"
 import type {
+  ChainOfThoughtEntry,
+  ChainOfThoughtStepStatus,
+  ChainOfThoughtToolStatus,
   ChatMessage,
   CheckpointMarker,
   MessageBranchEntry,
@@ -317,6 +320,258 @@ export const getSourcesFromParts = (parts: StructuredMessagePart[]): SourceCitat
     )
     .flatMap((part) => part.sources)
     .filter((source): source is SourceCitation => Boolean(source))
+}
+
+type ThoughtStepAccumulator = {
+  id: string
+  label?: string
+  summary?: string
+  reasoningChunks: string[]
+  tools: ChainOfThoughtEntry["steps"][number]["tools"]
+  status: ChainOfThoughtStepStatus
+  hasStart: boolean
+  hasFinish: boolean
+}
+
+const parseToolStatus = (value: string | undefined): ChainOfThoughtToolStatus => {
+  switch (value) {
+    case "running":
+      return "running"
+    case "completed":
+      return "completed"
+    case "error":
+      return "error"
+    default:
+      return "pending"
+  }
+}
+
+const parseTimeBounds = (
+  value: unknown
+): { start?: number; end?: number } => {
+  const record = toRecord(value)
+  if (!record) {
+    return {}
+  }
+  const start = parseUsageNumber(record.start)
+  const end = parseUsageNumber(record.end)
+  return { start, end }
+}
+
+const normalizeThoughtLabel = (
+  label: string | undefined,
+  summary: string | undefined,
+  toolName: string | undefined,
+  reasoning: string | undefined,
+  index: number
+): string => {
+  if (label) {
+    return label
+  }
+  if (summary) {
+    return summary
+  }
+  if (toolName) {
+    return `Using ${toolName}`
+  }
+  if (reasoning) {
+    const firstLine = reasoning.split("\n")[0]?.trim()
+    if (firstLine) {
+      return firstLine.length > 72 ? `${firstLine.slice(0, 69)}...` : firstLine
+    }
+  }
+  return `Step ${index + 1}`
+}
+
+export const getChainOfThoughtEntry = (
+  parts: StructuredMessagePart[],
+  messageId: string,
+  isStreaming = false
+): ChainOfThoughtEntry | null => {
+  const thoughtParts = parts.filter(
+    (part) =>
+      part.type === "reasoning" ||
+      part.type === "tool" ||
+      part.type === "step-start" ||
+      part.type === "step-finish"
+  )
+
+  if (thoughtParts.length === 0) {
+    return null
+  }
+
+  const steps: ThoughtStepAccumulator[] = []
+  let activeStepIndex: number | null = null
+  let implicitCount = 0
+  let minStart: number | undefined
+  let maxEnd: number | undefined
+
+  const updateDurationBounds = (start?: number, end?: number) => {
+    if (typeof start === "number") {
+      minStart = typeof minStart === "number" ? Math.min(minStart, start) : start
+      const effectiveEnd = typeof end === "number" ? end : start
+      maxEnd = typeof maxEnd === "number" ? Math.max(maxEnd, effectiveEnd) : effectiveEnd
+    } else if (typeof end === "number") {
+      maxEnd = typeof maxEnd === "number" ? Math.max(maxEnd, end) : end
+    }
+  }
+
+  const createStep = (seed?: Partial<ThoughtStepAccumulator>): number => {
+    const index = steps.length
+    steps.push({
+      id: seed?.id ?? `${messageId}-thought-step-${index}`,
+      label: seed?.label,
+      summary: seed?.summary,
+      reasoningChunks: seed?.reasoningChunks ?? [],
+      tools: seed?.tools ?? [],
+      status: seed?.status ?? (isStreaming ? "active" : "complete"),
+      hasStart: seed?.hasStart ?? false,
+      hasFinish: seed?.hasFinish ?? false,
+    })
+    return index
+  }
+
+  const getCurrentStepIndex = (label?: string): number => {
+    if (typeof activeStepIndex === "number") {
+      return activeStepIndex
+    }
+    const lastIndex = steps.length - 1
+    if (lastIndex >= 0 && !steps[lastIndex]?.hasFinish) {
+      return lastIndex
+    }
+    implicitCount += 1
+    return createStep({
+      id: `${messageId}-thought-implicit-${implicitCount}`,
+      label,
+      status: isStreaming ? "active" : "complete",
+    })
+  }
+
+  thoughtParts.forEach((part, index) => {
+    if (part.type === "step-start") {
+      const partRecord = toRecord(part)
+      const snapshot = toTrimmedString(partRecord?.snapshot)
+      const nextStepIndex = createStep({
+        id:
+          typeof part.id === "string"
+            ? part.id
+            : `${messageId}-thought-step-start-${index}`,
+        label: snapshot,
+        status: isStreaming ? "active" : "pending",
+        hasStart: true,
+      })
+      activeStepIndex = nextStepIndex
+      return
+    }
+
+    if (part.type === "step-finish") {
+      const stepIndex = getCurrentStepIndex()
+      const step = steps[stepIndex]
+      if (!step) {
+        return
+      }
+      const partRecord = toRecord(part)
+      const finishReason = toTrimmedString(partRecord?.reason)
+      const snapshot = toTrimmedString(partRecord?.snapshot)
+      step.summary = finishReason ?? step.summary
+      step.label = step.label ?? snapshot
+      step.status = "complete"
+      step.hasFinish = true
+      activeStepIndex = null
+      return
+    }
+
+    if (part.type === "reasoning") {
+      const partRecord = toRecord(part)
+      const text = toTrimmedString(part.text ?? partRecord?.text)
+      const { start, end } = parseTimeBounds(partRecord?.time)
+      updateDurationBounds(start, end)
+      if (!text) {
+        return
+      }
+      const stepIndex = getCurrentStepIndex("Reasoning")
+      const step = steps[stepIndex]
+      if (!step) {
+        return
+      }
+      step.reasoningChunks.push(text)
+      if (step.status === "pending") {
+        step.status = isStreaming ? "active" : "complete"
+      }
+      return
+    }
+
+    if (part.type === "tool") {
+      const partRecord = toRecord(part)
+      const stateRecord = toRecord(partRecord?.state)
+      const status = parseToolStatus(
+        toTrimmedString(stateRecord?.status ?? partRecord?.status)?.toLowerCase()
+      )
+      const name =
+        toTrimmedString(partRecord?.tool ?? partRecord?.name) ?? "Tool call"
+      const callId = toTrimmedString(partRecord?.callID ?? partRecord?.callId)
+      const { start, end } = parseTimeBounds(stateRecord?.time)
+      updateDurationBounds(start, end)
+      const stepIndex = getCurrentStepIndex(name)
+      const step = steps[stepIndex]
+      if (!step) {
+        return
+      }
+      step.tools.push({
+        id:
+          typeof part.id === "string"
+            ? part.id
+            : `${messageId}-thought-tool-${index}`,
+        name,
+        callId,
+        status,
+      })
+      if (!step.label) {
+        step.label = `Using ${name}`
+      }
+      if (status === "running" || status === "pending") {
+        step.status = "active"
+      }
+    }
+  })
+
+  const finalizedSteps = steps.map((step, index) => {
+    const reasoning = step.reasoningChunks.join("\n\n").trim()
+    const firstTool = step.tools[0]?.name
+    const hasRunningTool = step.tools.some((tool) => tool.status === "running")
+    const hasPendingTool = step.tools.some((tool) => tool.status === "pending")
+    const status: ChainOfThoughtStepStatus = step.hasFinish
+      ? "complete"
+      : hasRunningTool || (isStreaming && index === steps.length - 1)
+        ? "active"
+        : hasPendingTool
+          ? "pending"
+          : step.status === "pending" && !reasoning && step.tools.length === 0
+            ? "pending"
+            : "complete"
+
+    return {
+      id: step.id,
+      label: normalizeThoughtLabel(step.label, step.summary, firstTool, reasoning, index),
+      summary: step.summary,
+      reasoning: reasoning || undefined,
+      tools: step.tools,
+      status,
+    }
+  })
+
+  if (finalizedSteps.length === 0) {
+    return null
+  }
+
+  const durationSeconds =
+    typeof minStart === "number" &&
+    typeof maxEnd === "number" &&
+    maxEnd >= minStart
+      ? Math.max(1, Math.ceil((maxEnd - minStart) / 1000))
+      : undefined
+
+  return { steps: finalizedSteps, durationSeconds }
 }
 
 export const getCheckpointMarkers = (

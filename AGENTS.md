@@ -25,6 +25,17 @@ bd close <id>         # Complete work
 bd sync               # Sync with git
 ```
 
+## Frontend Visual Verification (Mandatory)
+
+For any frontend/UI work (layout, styling, interaction, rendering behavior) or any task that requires visual confirmation:
+
+1. Use the `agent-browser` skill and verify the change in a real browser session.
+2. Exercise the relevant UI states/interactions (not just static load).
+3. Capture screenshots of the verified result.
+4. Include verification evidence in the handoff (what was checked + screenshot paths).
+
+Do not mark frontend work complete without this browser-based verification unless blocked by an explicit environmental constraint; if blocked, document the blocker and the exact command/output that failed.
+
 ## Landing the Plane (Session Completion)
 
 **When ending a work session**, you MUST complete ALL steps below. Work is NOT complete until `git push` succeeds.

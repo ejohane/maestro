@@ -195,6 +195,31 @@ export type QueueEntry = TaskEntry & {
   totalCount?: number
 }
 
+export type ChainOfThoughtStepStatus = "complete" | "active" | "pending"
+
+export type ChainOfThoughtToolStatus = "pending" | "running" | "completed" | "error"
+
+export type ChainOfThoughtToolEntry = {
+  id: string
+  name: string
+  status: ChainOfThoughtToolStatus
+  callId?: string
+}
+
+export type ChainOfThoughtStep = {
+  id: string
+  label: string
+  summary?: string
+  reasoning?: string
+  tools: ChainOfThoughtToolEntry[]
+  status: ChainOfThoughtStepStatus
+}
+
+export type ChainOfThoughtEntry = {
+  steps: ChainOfThoughtStep[]
+  durationSeconds?: number
+}
+
 export type MessageBranchEntry = {
   id: string
   content: string
