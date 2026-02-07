@@ -294,16 +294,18 @@ export function WorkbenchProvider({ children }: { children: React.ReactNode }) {
   }, [location.pathname])
 
   React.useEffect(() => {
-    if (view === "settings") {
-      if (location.pathname !== SETTINGS_PATH) {
-        navigate(SETTINGS_PATH, { replace: true })
-      }
+    const routeViewState = parseRouteViewState(location.pathname)
+    const isSyncedWithRoute =
+      routeViewState.view === view &&
+      routeViewState.selectedProjectId === selectedProjectId &&
+      routeViewState.selectedWorkspaceId === selectedWorkspaceId &&
+      routeViewState.selectedChatId === selectedChatId
+
+    // Avoid acting on stale in-memory state during route transitions.
+    if (!isSyncedWithRoute) {
       return
     }
-    if (view === "projects") {
-      if (location.pathname !== PROJECTS_PATH) {
-        navigate(PROJECTS_PATH, { replace: true })
-      }
+    if (view !== "workbench") {
       return
     }
 
