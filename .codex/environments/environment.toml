@@ -3,7 +3,7 @@ version = 1
 name = "maestro"
 
 [setup]
-script = ""
+script = "bun install"
 
 [[actions]]
 name = "Run"
