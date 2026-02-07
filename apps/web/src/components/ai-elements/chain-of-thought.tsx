@@ -49,11 +49,15 @@ export const ChainOfThoughtSection = ({
   ...props
 }: ChainOfThoughtSectionProps) => {
   const [isOpen, setIsOpen] = React.useState(defaultOpen ?? isStreaming)
+  const wasStreamingRef = React.useRef(isStreaming)
 
   React.useEffect(() => {
     if (isStreaming) {
       setIsOpen(true)
+    } else if (wasStreamingRef.current) {
+      setIsOpen(false)
     }
+    wasStreamingRef.current = isStreaming
   }, [isStreaming])
 
   if (entry.steps.length === 0) {
