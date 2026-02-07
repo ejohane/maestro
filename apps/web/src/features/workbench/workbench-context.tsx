@@ -1,4 +1,5 @@
 import * as React from "react"
+import { useLocation, useNavigate } from "react-router-dom"
 
 import type {
   ApiConversation,
@@ -51,7 +52,102 @@ type WorkbenchContextValue = {
 
 const WorkbenchContext = React.createContext<WorkbenchContextValue | null>(null)
 
+const PROJECTS_PATH = "/projects"
+const SETTINGS_PATH = "/settings"
+
+const encodeRouteSegment = (value: string) => encodeURIComponent(value)
+const decodeRouteSegment = (value: string) => {
+  try {
+    return decodeURIComponent(value)
+  } catch {
+    return value
+  }
+}
+
+const buildProjectPath = (projectId: string) =>
+  `${PROJECTS_PATH}/${encodeRouteSegment(projectId)}`
+const buildWorkspacePath = (projectId: string, workspaceId: string) =>
+  `${buildProjectPath(projectId)}/workspaces/${encodeRouteSegment(workspaceId)}`
+const buildChatPath = (projectId: string, workspaceId: string, chatId: string) =>
+  `${buildWorkspacePath(projectId, workspaceId)}/chats/${encodeRouteSegment(chatId)}`
+
+type RouteViewState = {
+  view: WorkbenchView
+  selectedProjectId: string | null
+  selectedWorkspaceId: string | null
+  selectedChatId: string | null
+}
+
+const parseRouteViewState = (pathname: string): RouteViewState => {
+  const segments = pathname.split("/").filter(Boolean)
+
+  if (segments.length === 0 || (segments.length === 1 && segments[0] === "projects")) {
+    return {
+      view: "projects",
+      selectedProjectId: null,
+      selectedWorkspaceId: null,
+      selectedChatId: null,
+    }
+  }
+
+  if (segments.length === 1 && segments[0] === "settings") {
+    return {
+      view: "settings",
+      selectedProjectId: null,
+      selectedWorkspaceId: null,
+      selectedChatId: null,
+    }
+  }
+
+  if (segments[0] === "projects" && segments[1]) {
+    const projectId = decodeRouteSegment(segments[1])
+    if (
+      segments.length === 6 &&
+      segments[2] === "workspaces" &&
+      segments[3] &&
+      segments[4] === "chats" &&
+      segments[5]
+    ) {
+      return {
+        view: "workbench",
+        selectedProjectId: projectId,
+        selectedWorkspaceId: decodeRouteSegment(segments[3]),
+        selectedChatId: decodeRouteSegment(segments[5]),
+      }
+    }
+    if (
+      segments.length === 4 &&
+      segments[2] === "workspaces" &&
+      segments[3]
+    ) {
+      return {
+        view: "workbench",
+        selectedProjectId: projectId,
+        selectedWorkspaceId: decodeRouteSegment(segments[3]),
+        selectedChatId: null,
+      }
+    }
+    if (segments.length === 2) {
+      return {
+        view: "workbench",
+        selectedProjectId: projectId,
+        selectedWorkspaceId: null,
+        selectedChatId: null,
+      }
+    }
+  }
+
+  return {
+    view: "projects",
+    selectedProjectId: null,
+    selectedWorkspaceId: null,
+    selectedChatId: null,
+  }
+}
+
 export function WorkbenchProvider({ children }: { children: React.ReactNode }) {
+  const navigate = useNavigate()
+  const location = useLocation()
   const [projects, setProjects] = React.useState<Project[]>([])
   const [isLoading, setIsLoading] = React.useState(true)
   const [error, setError] = React.useState<string | null>(null)
@@ -160,41 +256,29 @@ export function WorkbenchProvider({ children }: { children: React.ReactNode }) {
   )
 
   const selectProjectsView = React.useCallback(() => {
-    setView("projects")
-    setSelectedProjectId(null)
-    setSelectedWorkspaceId(null)
-    setSelectedChatId(null)
-  }, [])
+    navigate(PROJECTS_PATH)
+  }, [navigate])
 
   const selectSettingsView = React.useCallback(() => {
-    setView("settings")
-  }, [])
+    navigate(SETTINGS_PATH)
+  }, [navigate])
 
   const selectProject = React.useCallback((projectId: string) => {
-    setView("workbench")
-    setSelectedProjectId(projectId)
-    setSelectedWorkspaceId(null)
-    setSelectedChatId(null)
-  }, [])
+    navigate(buildProjectPath(projectId))
+  }, [navigate])
 
   const selectWorkspace = React.useCallback(
     (projectId: string, workspaceId: string) => {
-      setView("workbench")
-      setSelectedProjectId(projectId)
-      setSelectedWorkspaceId(workspaceId)
-      setSelectedChatId(null)
+      navigate(buildWorkspacePath(projectId, workspaceId))
     },
-    []
+    [navigate]
   )
 
   const selectChat = React.useCallback(
     (projectId: string, workspaceId: string, chatId: string) => {
-      setView("workbench")
-      setSelectedProjectId(projectId)
-      setSelectedWorkspaceId(workspaceId)
-      setSelectedChatId(chatId)
+      navigate(buildChatPath(projectId, workspaceId, chatId))
     },
-    []
+    [navigate]
   )
 
   React.useEffect(() => {
@@ -202,38 +286,69 @@ export function WorkbenchProvider({ children }: { children: React.ReactNode }) {
   }, [reloadProjects])
 
   React.useEffect(() => {
-    if (!projects.length) {
-      setSelectedProjectId(null)
-      setSelectedWorkspaceId(null)
-      setSelectedChatId(null)
+    const routeViewState = parseRouteViewState(location.pathname)
+    setView(routeViewState.view)
+    setSelectedProjectId(routeViewState.selectedProjectId)
+    setSelectedWorkspaceId(routeViewState.selectedWorkspaceId)
+    setSelectedChatId(routeViewState.selectedChatId)
+  }, [location.pathname])
+
+  React.useEffect(() => {
+    if (view === "settings") {
+      if (location.pathname !== SETTINGS_PATH) {
+        navigate(SETTINGS_PATH, { replace: true })
+      }
       return
     }
     if (view === "projects") {
-      setSelectedProjectId(null)
-      setSelectedWorkspaceId(null)
-      setSelectedChatId(null)
+      if (location.pathname !== PROJECTS_PATH) {
+        navigate(PROJECTS_PATH, { replace: true })
+      }
       return
     }
+
+    if (isLoading && projects.length === 0) {
+      return
+    }
+    if (!projects.length) {
+      if (location.pathname !== PROJECTS_PATH) {
+        navigate(PROJECTS_PATH, { replace: true })
+      }
+      return
+    }
+
     const project =
       projects.find((item) => item.id === selectedProjectId) ?? projects[0]
-    const shouldSelectWorkspace =
-      selectedWorkspaceId !== null ||
-      selectedChatId !== null ||
-      selectedProjectId === null
+    const shouldSelectWorkspace = selectedWorkspaceId !== null || selectedChatId !== null
     const workspace = shouldSelectWorkspace
       ? project.workspaces.find((item) => item.id === selectedWorkspaceId) ??
         project.workspaces[0] ??
         null
       : null
-    const chat = shouldSelectWorkspace
+    const shouldSelectChat = selectedChatId !== null
+    const chat = shouldSelectChat
       ? workspace?.chats.find((item) => item.id === selectedChatId) ??
         workspace?.chats[0] ??
         null
       : null
-    setSelectedProjectId(project.id)
-    setSelectedWorkspaceId(workspace?.id ?? null)
-    setSelectedChatId(chat?.id ?? null)
-  }, [projects, view])
+    const canonicalPath = chat && workspace
+      ? buildChatPath(project.id, workspace.id, chat.id)
+      : workspace
+        ? buildWorkspacePath(project.id, workspace.id)
+        : buildProjectPath(project.id)
+    if (location.pathname !== canonicalPath) {
+      navigate(canonicalPath, { replace: true })
+    }
+  }, [
+    isLoading,
+    location.pathname,
+    navigate,
+    projects,
+    selectedChatId,
+    selectedProjectId,
+    selectedWorkspaceId,
+    view,
+  ])
 
   const selectedProject = React.useMemo(
     () => projects.find((project) => project.id === selectedProjectId) ?? null,
