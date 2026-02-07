@@ -217,7 +217,7 @@
   .chat-session-composer {
     margin: 0 auto 0.9rem;
     width: 100%;
-    max-width: 50%;
+    max-width: min(100%, 64rem);
     border: 0;
     border-radius: 2.35rem;
     background: hsl(var(--background));
