@@ -265,6 +265,7 @@
   .chat-session-textarea {
     min-height: 5.15rem;
     max-height: 13rem;
+    padding: 0.9rem 1rem;
     color: hsl(0 0% 91%);
     font-size: 1.03rem;
     line-height: 1.48;
@@ -393,6 +394,7 @@
 
     .chat-session-textarea {
       min-height: 4.3rem;
+      padding: 0.8rem 0.9rem;
       font-size: 1rem;
     }
   }
