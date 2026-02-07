@@ -139,6 +139,7 @@ const WorkbenchShell = () => {
   const hasRepoProjects = React.useMemo(() => hasProjectsWithRepos(projects), [projects])
   const projectIconValue = selectedProject?.icon?.trim() ?? ""
   const nextThemeLabel = theme === "dark" ? "Light" : "Dark"
+  const activeWorkspaceChatId = selectedChat?.id ?? workspaceActiveChatId
 
   React.useEffect(() => {
     if (!isWorkspaceView) {
@@ -159,6 +160,20 @@ const WorkbenchShell = () => {
       return workspaceChats[0].id
     })
   }, [isWorkspaceView, selectedWorkspace?.id, selectedWorkspace?.chats])
+
+  const onSelectWorkspaceChat = React.useCallback(
+    (chatId: string) => {
+      if (!selectedProject || !selectedWorkspace) {
+        return
+      }
+      if (isChatView) {
+        actions.selectChat(selectedProject.id, selectedWorkspace.id, chatId)
+        return
+      }
+      setWorkspaceActiveChatId(chatId)
+    },
+    [actions, isChatView, selectedProject, selectedWorkspace]
+  )
   const {
     viewLabel,
     viewTitle,
@@ -238,9 +253,19 @@ const WorkbenchShell = () => {
           selectedProject={selectedProject}
           selectedWorkspace={selectedWorkspace}
           selectedChat={selectedChat}
+          workspaceActiveChatId={activeWorkspaceChatId}
+          isCreatingSession={isCreatingSession}
+          deletingSessionId={deletingSessionId}
+          deletingWorkspace={deletingWorkspace}
           onSelectProjectsView={actions.selectProjectsView}
           onSelectProject={actions.selectProject}
           onSelectWorkspace={actions.selectWorkspace}
+          onCreateSession={(event) => void onCreateSession(event)}
+          onSelectWorkspaceChat={onSelectWorkspaceChat}
+          onDeleteSession={(sessionId) => void onDeleteSession(sessionId)}
+          onDeleteWorkspace={(workspaceId, workspaceName) =>
+            void onConfirmDeleteWorkspace(workspaceId, workspaceName)
+          }
         />
       }
     >
@@ -340,19 +365,10 @@ const WorkbenchShell = () => {
           workspace={
             <WorkspaceSessionsSection
               selectedWorkspace={selectedWorkspace}
-              selectedWorkspaceChatId={workspaceActiveChatId}
+              selectedWorkspaceChatId={activeWorkspaceChatId}
               createSessionError={createSessionError}
-              isCreatingSession={isCreatingSession}
-              deletingSessionId={deletingSessionId}
               deleteSessionError={deleteSessionError}
-              deletingWorkspace={deletingWorkspace}
               deleteWorkspaceErrors={deleteWorkspaceErrors}
-              onCreateSession={(event) => void onCreateSession(event)}
-              onDeleteSession={(sessionId) => void onDeleteSession(sessionId)}
-              onSelectWorkspaceChat={setWorkspaceActiveChatId}
-              onDeleteWorkspace={(workspaceId, workspaceName) =>
-                void onConfirmDeleteWorkspace(workspaceId, workspaceName)
-              }
               chat={chatView}
             />
           }
