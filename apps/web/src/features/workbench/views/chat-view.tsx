@@ -1,6 +1,6 @@
 import type * as React from "react"
 import type { FileReference } from "@maestro/core"
-import { Check, Copy, RotateCcw } from "lucide-react"
+import { ArrowUp, Check, Copy, RotateCcw } from "lucide-react"
 
 import {
   Conversation,
@@ -115,8 +115,8 @@ export const ChatView = ({
   onRestoreCheckpoint,
 }: ChatViewProps) => {
   return (
-    <Conversation className="min-h-[520px] rounded-xl border bg-card shadow-sm">
-      <ConversationContent className="gap-4">
+    <Conversation className="chat-session min-h-[620px] flex-1">
+      <ConversationContent className="chat-session-content gap-6">
         {isTranscriptLoading ? (
           <div className="flex h-full min-h-[320px] items-center justify-center">
             <div className="grid w-full max-w-lg gap-3 px-4 text-sm text-muted-foreground">
@@ -233,8 +233,8 @@ export const ChatView = ({
             ) : null
 
             return (
-              <Message key={message.id} from={message.role}>
-                <MessageContent>
+              <Message key={message.id} from={message.role} className="chat-session-message">
+                <MessageContent className="chat-session-message-content">
                   {attachments.length ? <MessageAttachments attachments={attachments} /> : null}
                   {checkpointMarkers.length ? (
                     <div className="flex flex-wrap gap-2">
@@ -329,7 +329,9 @@ export const ChatView = ({
                             })}
                           </MessageBranchContent>
                           {showToolbar ? (
-                            <MessageToolbar className={toolbarClassName}>
+                            <MessageToolbar
+                              className={cn("chat-session-message-toolbar", toolbarClassName)}
+                            >
                               {actionButtons}
                               <MessageBranchSelector from={message.role}>
                                 <MessageBranchPrevious />
@@ -348,13 +350,17 @@ export const ChatView = ({
                           </CitationProvider>
                           {sources.length ? <SourcesList sources={sources} /> : null}
                           {showToolbar ? (
-                            <MessageToolbar className={toolbarClassName}>
+                            <MessageToolbar
+                              className={cn("chat-session-message-toolbar", toolbarClassName)}
+                            >
                               {actionButtons}
                             </MessageToolbar>
                           ) : null}
                         </>
                       ) : showToolbar ? (
-                        <MessageToolbar className={toolbarClassName}>
+                        <MessageToolbar
+                          className={cn("chat-session-message-toolbar", toolbarClassName)}
+                        >
                           {actionButtons}
                         </MessageToolbar>
                       ) : null}
@@ -379,7 +385,12 @@ export const ChatView = ({
                   )}
                 </MessageContent>
                 {message.role === "user" && showToolbar ? (
-                  <MessageToolbar className={cn("self-end", toolbarClassName)}>
+                  <MessageToolbar
+                    className={cn(
+                      "chat-session-message-toolbar self-end",
+                      toolbarClassName
+                    )}
+                  >
                     {actionButtons}
                   </MessageToolbar>
                 ) : null}
@@ -387,7 +398,7 @@ export const ChatView = ({
             )
           })
         ) : (
-          <ConversationEmptyState className="min-h-[320px]">
+          <ConversationEmptyState className="chat-session-empty min-h-[320px]">
             <div className="flex flex-col items-center gap-4 text-center">
               <div className="space-y-1">
                 <h3 className="text-sm font-medium">No messages yet</h3>
@@ -399,7 +410,7 @@ export const ChatView = ({
                 {emptyStateSuggestions.map((suggestion) => (
                   <Button
                     key={suggestion}
-                    className="rounded-full text-xs"
+                    className="chat-session-suggestion rounded-full text-xs"
                     disabled={promptDisabled}
                     onClick={() => onSuggestionClick(suggestion)}
                     size="xs"
@@ -414,55 +425,65 @@ export const ChatView = ({
           </ConversationEmptyState>
         )}
       </ConversationContent>
-      <ConversationScrollButton />
-      <div className="border-t bg-background/80 p-4">
-        <PromptInput multiple onSubmit={onPromptSubmit}>
+      <ConversationScrollButton className="chat-session-scroll-button" />
+      <div className="chat-session-composer">
+        <PromptInput className="chat-session-prompt" multiple onSubmit={onPromptSubmit}>
           <PromptInputAttachmentsPreview />
           <PromptInputTextarea
+            className="chat-session-textarea"
             value={promptValue}
             onChange={onPromptChange}
-            placeholder="Ask for a review, summary, or next steps..."
+            placeholder="Ask for follow-up changes"
             disabled={promptDisabled}
           />
-          <PromptInputFooter>
-            <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-              <PromptInputTools>
-                <ModelSelector
-                  models={modelOptions}
-                  value={selectedModel}
-                  disabled={promptDisabled || isUpdatingModel}
-                  onSelect={onUpdateSessionModel}
-                />
+          <PromptInputFooter className="chat-session-footer">
+            <div className="chat-session-meta">
+              <PromptInputTools className="chat-session-tools">
                 <PromptInputActionMenu>
                   <PromptInputActionMenuTrigger
                     aria-label="Prompt actions"
+                    className="chat-session-tool-button"
                     disabled={promptDisabled}
                   />
                   <PromptInputActionMenuContent>
                     <PromptInputActionAddAttachments disabled={promptDisabled} />
                   </PromptInputActionMenuContent>
                 </PromptInputActionMenu>
+                <ModelSelector
+                  className="chat-session-model-selector"
+                  label=""
+                  models={modelOptions}
+                  value={selectedModel}
+                  disabled={promptDisabled || isUpdatingModel}
+                  onSelect={onUpdateSessionModel}
+                />
+                <span className="chat-session-effort">Extra High</span>
               </PromptInputTools>
               {contextUsage ? <ContextUsageIndicator usage={contextUsage} /> : null}
-              <span>Shift + Enter for a new line</span>
             </div>
-            <PromptInputSubmit type="submit" disabled={promptDisabled || !promptValue.trim()}>
-              {isChatStreaming ? "Streaming..." : "Send"}
+            <PromptInputSubmit
+              aria-label={isChatStreaming ? "Stop generation" : "Send"}
+              className="chat-session-submit"
+              disabled={promptDisabled || !promptValue.trim()}
+              status={isChatStreaming ? "streaming" : "idle"}
+              type="submit"
+            >
+              {!isChatStreaming ? <ArrowUp className="size-4" /> : null}
             </PromptInputSubmit>
           </PromptInputFooter>
         </PromptInput>
         {updateModelError ? (
-          <div className="mt-3 rounded-md border border-destructive/50 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+          <div className="chat-session-error mt-3 rounded-md border border-destructive/50 bg-destructive/5 px-3 py-2 text-xs text-destructive">
             {updateModelError}
           </div>
         ) : null}
         {chatError ? (
-          <div className="mt-3 rounded-md border border-destructive/50 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+          <div className="chat-session-error mt-3 rounded-md border border-destructive/50 bg-destructive/5 px-3 py-2 text-xs text-destructive">
             {chatError}
           </div>
         ) : null}
         {restoreCheckpointError ? (
-          <div className="mt-3 rounded-md border border-destructive/50 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+          <div className="chat-session-error mt-3 rounded-md border border-destructive/50 bg-destructive/5 px-3 py-2 text-xs text-destructive">
             {restoreCheckpointError}
           </div>
         ) : null}

@@ -204,27 +204,29 @@ const WorkbenchShell = () => {
           />
         }
       >
-        <WorkbenchOverview
-          isProjectView={isProjectView}
-          isWorkspaceView={isWorkspaceView}
-          selectedProject={selectedProject}
-          selectedWorkspace={selectedWorkspace}
-          projectIconValue={projectIconValue}
-          viewLabel={viewLabel}
-          viewTitle={viewTitle}
-          viewDescription={viewDescription}
-          projectRepoLabel={projectRepoLabel}
-          projectRepoHref={projectRepoHref}
-          deletingWorkspace={deletingWorkspace}
-          deleteWorkspaceErrors={deleteWorkspaceErrors}
-          recentSessionsLimit={recentSessionsLimit}
-          recentSessionsForView={recentSessionsForView}
-          formatDateTime={formatDateTime}
-          onDeleteWorkspace={(workspaceId, workspaceName) =>
-            void onConfirmDeleteWorkspace(workspaceId, workspaceName)
-          }
-          onSelectChat={actions.selectChat}
-        />
+        {!isChatView ? (
+          <WorkbenchOverview
+            isProjectView={isProjectView}
+            isWorkspaceView={isWorkspaceView}
+            selectedProject={selectedProject}
+            selectedWorkspace={selectedWorkspace}
+            projectIconValue={projectIconValue}
+            viewLabel={viewLabel}
+            viewTitle={viewTitle}
+            viewDescription={viewDescription}
+            projectRepoLabel={projectRepoLabel}
+            projectRepoHref={projectRepoHref}
+            deletingWorkspace={deletingWorkspace}
+            deleteWorkspaceErrors={deleteWorkspaceErrors}
+            recentSessionsLimit={recentSessionsLimit}
+            recentSessionsForView={recentSessionsForView}
+            formatDateTime={formatDateTime}
+            onDeleteWorkspace={(workspaceId, workspaceName) =>
+              void onConfirmDeleteWorkspace(workspaceId, workspaceName)
+            }
+            onSelectChat={actions.selectChat}
+          />
+        ) : null}
         <WorkbenchMain
           view={mainView}
           projects={

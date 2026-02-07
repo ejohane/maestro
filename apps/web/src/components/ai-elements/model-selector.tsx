@@ -42,6 +42,7 @@ export const ModelSelector = ({
   const activeModel = value ?? models[0]?.id ?? ""
   const activeOption = models.find((model) => model.id === activeModel)
   const triggerLabel = activeOption?.label ?? (activeModel || "Select a model")
+  const hasLabel = label.trim().length > 0
 
   const handleSelect = (modelId: string) => {
     onSelect(modelId)
@@ -62,7 +63,7 @@ export const ModelSelector = ({
         onClick={() => setOpen(true)}
         disabled={disabled || models.length === 0}
       >
-        <span className="text-muted-foreground">{label}</span>
+        {hasLabel ? <span className="text-muted-foreground">{label}</span> : null}
         <span className="max-w-[180px] truncate text-foreground">{triggerLabel}</span>
         <ChevronsUpDown className="size-3" />
       </Button>
