@@ -341,9 +341,9 @@
   }
 
   .chat-session-submit {
-    width: 3.15rem !important;
-    min-width: 3.15rem !important;
-    height: 3.15rem !important;
+    width: 2.65rem !important;
+    min-width: 2.65rem !important;
+    height: 2.65rem !important;
     border-radius: 9999px !important;
     border: 0 !important;
     background: hsl(0 0% 68%) !important;
@@ -354,9 +354,9 @@
   }
 
   .chat-session-submit svg {
-    width: 1.45rem;
-    height: 1.45rem;
-    stroke-width: 2.35;
+    width: 1.2rem;
+    height: 1.2rem;
+    stroke-width: 2.2;
   }
 
   .chat-session-submit:hover {
