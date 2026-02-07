@@ -310,4 +310,46 @@ describe("ChatView", () => {
     expect(screen.getByText("Chat failed")).toBeInTheDocument()
     expect(screen.getByText("Restore failed")).toBeInTheDocument()
   })
+
+  it("hides echoed user text at the start of assistant responses", () => {
+    const props = createBaseProps()
+
+    const userMessage = createMessage({
+      id: "user-echo",
+      role: "user",
+      content: "nice this seems to be working a lot better!",
+      parts: [{ type: "text", text: "nice this seems to be working a lot better!" }],
+    })
+
+    const assistantMessage = createMessage({
+      id: "assistant-echo",
+      role: "assistant",
+      content:
+        "nice this seems to be working a lot better!Glad to hear it's working better! What do you want to dive into next?",
+      parts: [
+        {
+          type: "text",
+          text:
+            "nice this seems to be working a lot better!Glad to hear it's working better! What do you want to dive into next?",
+        },
+      ],
+    })
+
+    render(<ChatView {...props} messages={[userMessage, assistantMessage]} />)
+
+    fireEvent.click(screen.getAllByLabelText("Copy message")[1])
+
+    expect(props.onCopyMessage).toHaveBeenCalledWith(
+      "assistant-echo",
+      "Glad to hear it's working better! What do you want to dive into next?"
+    )
+    expect(
+      screen.queryByText(
+        "nice this seems to be working a lot better!Glad to hear it's working better! What do you want to dive into next?"
+      )
+    ).not.toBeInTheDocument()
+    expect(
+      screen.getByText("Glad to hear it's working better! What do you want to dive into next?")
+    ).toBeInTheDocument()
+  })
 })

@@ -18,7 +18,10 @@ const project: Project = {
 const workspace: Workspace = {
   id: "workspace-1",
   name: "Refactor",
-  chats: [],
+  chats: [
+    { id: "chat-1", name: "Thread A" },
+    { id: "chat-2", name: "Thread B" },
+  ],
 }
 
 const chat: ChatSession = {
@@ -26,8 +29,20 @@ const chat: ChatSession = {
   name: "Thread A",
 }
 
+const baseActions = () => ({
+  onSelectProjectsView: vi.fn(),
+  onSelectProject: vi.fn(),
+  onSelectWorkspace: vi.fn(),
+  onCreateSession: vi.fn((event) => event.preventDefault()),
+  onSelectWorkspaceChat: vi.fn(),
+  onDeleteSession: vi.fn(),
+  onDeleteWorkspace: vi.fn(),
+})
+
 describe("WorkbenchHeader", () => {
   it("renders settings breadcrumb when in settings view", () => {
+    const actions = baseActions()
+
     render(
       <SidebarProvider>
         <WorkbenchHeader
@@ -36,20 +51,27 @@ describe("WorkbenchHeader", () => {
           selectedProject={null}
           selectedWorkspace={null}
           selectedChat={null}
-          onSelectProjectsView={vi.fn()}
-          onSelectProject={vi.fn()}
-          onSelectWorkspace={vi.fn()}
+          workspaceActiveChatId={null}
+          isCreatingSession={false}
+          deletingSessionId={null}
+          deletingWorkspace={{}}
+          onSelectProjectsView={actions.onSelectProjectsView}
+          onSelectProject={actions.onSelectProject}
+          onSelectWorkspace={actions.onSelectWorkspace}
+          onCreateSession={actions.onCreateSession}
+          onSelectWorkspaceChat={actions.onSelectWorkspaceChat}
+          onDeleteSession={actions.onDeleteSession}
+          onDeleteWorkspace={actions.onDeleteWorkspace}
         />
       </SidebarProvider>
     )
 
     expect(screen.getByText("Settings")).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Create session" })).not.toBeInTheDocument()
   })
 
   it("navigates through breadcrumb interactions", () => {
-    const onSelectProjectsView = vi.fn()
-    const onSelectProject = vi.fn()
-    const onSelectWorkspace = vi.fn()
+    const actions = baseActions()
 
     render(
       <SidebarProvider>
@@ -59,9 +81,17 @@ describe("WorkbenchHeader", () => {
           selectedProject={project}
           selectedWorkspace={workspace}
           selectedChat={chat}
-          onSelectProjectsView={onSelectProjectsView}
-          onSelectProject={onSelectProject}
-          onSelectWorkspace={onSelectWorkspace}
+          workspaceActiveChatId={"chat-1"}
+          isCreatingSession={false}
+          deletingSessionId={null}
+          deletingWorkspace={{}}
+          onSelectProjectsView={actions.onSelectProjectsView}
+          onSelectProject={actions.onSelectProject}
+          onSelectWorkspace={actions.onSelectWorkspace}
+          onCreateSession={actions.onCreateSession}
+          onSelectWorkspaceChat={actions.onSelectWorkspaceChat}
+          onDeleteSession={actions.onDeleteSession}
+          onDeleteWorkspace={actions.onDeleteWorkspace}
         />
       </SidebarProvider>
     )
@@ -70,8 +100,56 @@ describe("WorkbenchHeader", () => {
     fireEvent.click(screen.getByRole("link", { name: "Core" }))
     fireEvent.click(screen.getByRole("link", { name: "Refactor" }))
 
-    expect(onSelectProjectsView).toHaveBeenCalledTimes(1)
-    expect(onSelectProject).toHaveBeenCalledWith("project-1")
-    expect(onSelectWorkspace).toHaveBeenCalledWith("project-1", "workspace-1")
+    expect(actions.onSelectProjectsView).toHaveBeenCalledTimes(1)
+    expect(actions.onSelectProject).toHaveBeenCalledWith("project-1")
+    expect(actions.onSelectWorkspace).toHaveBeenCalledWith("project-1", "workspace-1")
+  })
+
+  it("renders workspace action controls in top bar", () => {
+    const actions = baseActions()
+
+    render(
+      <SidebarProvider>
+        <WorkbenchHeader
+          isSettingsView={false}
+          isLoading={false}
+          selectedProject={project}
+          selectedWorkspace={workspace}
+          selectedChat={chat}
+          workspaceActiveChatId={"chat-1"}
+          isCreatingSession={false}
+          deletingSessionId={null}
+          deletingWorkspace={{}}
+          onSelectProjectsView={actions.onSelectProjectsView}
+          onSelectProject={actions.onSelectProject}
+          onSelectWorkspace={actions.onSelectWorkspace}
+          onCreateSession={actions.onCreateSession}
+          onSelectWorkspaceChat={actions.onSelectWorkspaceChat}
+          onDeleteSession={actions.onDeleteSession}
+          onDeleteWorkspace={actions.onDeleteWorkspace}
+        />
+      </SidebarProvider>
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Create session" }))
+    expect(actions.onCreateSession).toHaveBeenCalled()
+
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Workspace options" }), {
+      button: 0,
+    })
+    fireEvent.click(screen.getByRole("menuitem", { name: "Thread B" }))
+    expect(actions.onSelectWorkspaceChat).toHaveBeenCalledWith("chat-2")
+
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Workspace options" }), {
+      button: 0,
+    })
+    fireEvent.click(screen.getByRole("menuitem", { name: "Delete active session" }))
+    expect(actions.onDeleteSession).toHaveBeenCalledWith("chat-1")
+
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Workspace options" }), {
+      button: 0,
+    })
+    fireEvent.click(screen.getByRole("menuitem", { name: "Delete workspace" }))
+    expect(actions.onDeleteWorkspace).toHaveBeenCalledWith("workspace-1", "Refactor")
   })
 })

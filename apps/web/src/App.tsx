@@ -34,7 +34,6 @@ const WorkbenchShell = () => {
   const { theme, toggleTheme } = useTheme()
   const { state, actions, meta } = useWorkbench()
   const settings = useSettingsController()
-  const chat = useChatController()
   const projectsController = useProjectsController({
     settingsForm: settings.settingsForm,
     addAvailableModel: settings.addAvailableModel,
@@ -53,6 +52,10 @@ const WorkbenchShell = () => {
     isWorkspaceView,
     isChatView,
   } = meta
+  const [workspaceActiveChatId, setWorkspaceActiveChatId] = React.useState<string | null>(
+    null
+  )
+  const chat = useChatController({ workspaceSessionId: workspaceActiveChatId })
   const {
     projectForm,
     isCreatingProject,
@@ -136,6 +139,41 @@ const WorkbenchShell = () => {
   const hasRepoProjects = React.useMemo(() => hasProjectsWithRepos(projects), [projects])
   const projectIconValue = selectedProject?.icon?.trim() ?? ""
   const nextThemeLabel = theme === "dark" ? "Light" : "Dark"
+  const activeWorkspaceChatId = selectedChat?.id ?? workspaceActiveChatId
+
+  React.useEffect(() => {
+    if (!isWorkspaceView) {
+      setWorkspaceActiveChatId(null)
+      return
+    }
+
+    const workspaceChats = selectedWorkspace?.chats ?? []
+    if (!workspaceChats.length) {
+      setWorkspaceActiveChatId(null)
+      return
+    }
+
+    setWorkspaceActiveChatId((current) => {
+      if (current && workspaceChats.some((chatEntry) => chatEntry.id === current)) {
+        return current
+      }
+      return workspaceChats[0].id
+    })
+  }, [isWorkspaceView, selectedWorkspace?.id, selectedWorkspace?.chats])
+
+  const onSelectWorkspaceChat = React.useCallback(
+    (chatId: string) => {
+      if (!selectedProject || !selectedWorkspace) {
+        return
+      }
+      if (isChatView) {
+        actions.selectChat(selectedProject.id, selectedWorkspace.id, chatId)
+        return
+      }
+      setWorkspaceActiveChatId(chatId)
+    },
+    [actions, isChatView, selectedProject, selectedWorkspace]
+  )
   const {
     viewLabel,
     viewTitle,
@@ -163,6 +201,34 @@ const WorkbenchShell = () => {
     projectRecentSessions,
   })
 
+  const chatView = (
+    <ChatViewSection
+      isTranscriptLoading={chat.isTranscriptLoading}
+      messages={chat.messages}
+      copiedMessageId={chat.copiedMessageId}
+      isChatStreaming={chat.isChatStreaming}
+      isAwaitingFirstToken={chat.isAwaitingFirstToken}
+      restoringCheckpoints={chat.restoringCheckpoints}
+      emptyStateSuggestions={emptyStateSuggestions}
+      promptDisabled={chat.promptDisabled}
+      promptValue={chat.promptValue}
+      modelOptions={modelOptions}
+      selectedModel={selectedModel}
+      isUpdatingModel={isUpdatingModel}
+      contextUsage={chat.contextUsage}
+      updateModelError={updateModelError}
+      chatError={chat.chatError}
+      restoreCheckpointError={chat.restoreCheckpointError}
+      onSuggestionClick={chat.onSuggestionClick}
+      onPromptSubmit={chat.onPromptSubmit}
+      onPromptChange={chat.onPromptChange}
+      onUpdateSessionModel={onUpdateSessionModel}
+      onCopyMessage={chat.onCopyMessage}
+      onRetryMessage={chat.onRetryMessage}
+      onRestoreCheckpoint={chat.onRestoreCheckpoint}
+    />
+  )
+
   return (
     <WorkbenchLayout
       sidebar={
@@ -187,9 +253,19 @@ const WorkbenchShell = () => {
           selectedProject={selectedProject}
           selectedWorkspace={selectedWorkspace}
           selectedChat={selectedChat}
+          workspaceActiveChatId={activeWorkspaceChatId}
+          isCreatingSession={isCreatingSession}
+          deletingSessionId={deletingSessionId}
+          deletingWorkspace={deletingWorkspace}
           onSelectProjectsView={actions.selectProjectsView}
           onSelectProject={actions.selectProject}
           onSelectWorkspace={actions.selectWorkspace}
+          onCreateSession={(event) => void onCreateSession(event)}
+          onSelectWorkspaceChat={onSelectWorkspaceChat}
+          onDeleteSession={(sessionId) => void onDeleteSession(sessionId)}
+          onDeleteWorkspace={(workspaceId, workspaceName) =>
+            void onConfirmDeleteWorkspace(workspaceId, workspaceName)
+          }
         />
       }
     >
@@ -204,7 +280,7 @@ const WorkbenchShell = () => {
           />
         }
       >
-        {!isChatView ? (
+        {!isChatView && !isWorkspaceView ? (
           <WorkbenchOverview
             isProjectView={isProjectView}
             isWorkspaceView={isWorkspaceView}
@@ -288,44 +364,15 @@ const WorkbenchShell = () => {
           }
           workspace={
             <WorkspaceSessionsSection
-              selectedProject={selectedProject}
               selectedWorkspace={selectedWorkspace}
+              selectedWorkspaceChatId={activeWorkspaceChatId}
               createSessionError={createSessionError}
-              isCreatingSession={isCreatingSession}
-              deletingSessionId={deletingSessionId}
               deleteSessionError={deleteSessionError}
-              onCreateSession={(event) => void onCreateSession(event)}
-              onDeleteSession={(sessionId) => void onDeleteSession(sessionId)}
-              onSelectChat={actions.selectChat}
+              deleteWorkspaceErrors={deleteWorkspaceErrors}
+              chat={chatView}
             />
           }
-          chat={
-            <ChatViewSection
-              isTranscriptLoading={chat.isTranscriptLoading}
-              messages={chat.messages}
-              copiedMessageId={chat.copiedMessageId}
-              isChatStreaming={chat.isChatStreaming}
-              isAwaitingFirstToken={chat.isAwaitingFirstToken}
-              restoringCheckpoints={chat.restoringCheckpoints}
-              emptyStateSuggestions={emptyStateSuggestions}
-              promptDisabled={chat.promptDisabled}
-              promptValue={chat.promptValue}
-              modelOptions={modelOptions}
-              selectedModel={selectedModel}
-              isUpdatingModel={isUpdatingModel}
-              contextUsage={chat.contextUsage}
-              updateModelError={updateModelError}
-              chatError={chat.chatError}
-              restoreCheckpointError={chat.restoreCheckpointError}
-              onSuggestionClick={chat.onSuggestionClick}
-              onPromptSubmit={chat.onPromptSubmit}
-              onPromptChange={chat.onPromptChange}
-              onUpdateSessionModel={onUpdateSessionModel}
-              onCopyMessage={chat.onCopyMessage}
-              onRetryMessage={chat.onRetryMessage}
-              onRestoreCheckpoint={chat.onRestoreCheckpoint}
-            />
-          }
+          chat={chatView}
           secondary={<SecondaryItemsView title={secondaryTitle} items={secondaryItems} />}
         />
       </WorkbenchContent>

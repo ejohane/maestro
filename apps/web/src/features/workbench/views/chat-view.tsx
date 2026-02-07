@@ -90,6 +90,22 @@ type ChatViewProps = {
   onRestoreCheckpoint: (checkpoint: CheckpointMarker) => Promise<void>
 }
 
+const stripLeadingUserEcho = (assistantText: string, userText: string): string => {
+  const normalizedAssistantText = assistantText.trimStart()
+  const normalizedUserText = userText.trim()
+  if (!normalizedAssistantText || !normalizedUserText) {
+    return assistantText
+  }
+  if (!normalizedAssistantText.startsWith(normalizedUserText)) {
+    return assistantText
+  }
+
+  const echoedPrefixRemoved = normalizedAssistantText
+    .slice(normalizedUserText.length)
+    .replace(/^\s+/, "")
+  return echoedPrefixRemoved
+}
+
 export const ChatView = ({
   isTranscriptLoading,
   messages,
@@ -115,9 +131,16 @@ export const ChatView = ({
   onRetryMessage,
   onRestoreCheckpoint,
 }: ChatViewProps) => {
+  const isInitialSessionView = !isTranscriptLoading && messages.length === 0
+
   return (
-    <Conversation className="chat-session min-h-[620px] flex-1">
-      <ConversationContent className="chat-session-content gap-6">
+    <Conversation className="chat-session min-h-0 flex-1">
+      <ConversationContent
+        className={cn(
+          "chat-session-content gap-6",
+          !isInitialSessionView && "chat-session-content-pinned"
+        )}
+      >
         {isTranscriptLoading ? (
           <div className="flex h-full min-h-[320px] items-center justify-center">
             <div className="grid w-full max-w-lg gap-3 px-4 text-sm text-muted-foreground">
@@ -151,24 +174,7 @@ export const ChatView = ({
               }
             })
             const sources = getSourcesFromParts(message.parts)
-            const messageText = getTextFromParts(message.parts) || message.content || ""
-            const hasMessageText = Boolean(messageText)
-            const messageMarkdown = prepareCitationMarkdown(messageText, sources)
-            const chainOfThought =
-              message.role === "assistant"
-                ? getChainOfThoughtEntry(message.parts, message.id, message.isStreaming)
-                : null
-            const checkpointMarkers = getCheckpointMarkers(message.parts, message.id)
-            const planEntries = getPlanEntries(message.parts, message.id)
-            const taskEntries = getTaskEntries(message.parts, message.id)
-            const queueEntries = getQueueEntries(message.parts, message.id)
-            const { branches: messageBranches, defaultBranch } = getMessageBranches(
-              message,
-              messageText,
-              sources
-            )
-            const hasBranches = messageBranches.length > 1
-            const isCopied = copiedMessageId === message.id
+            const rawMessageText = getTextFromParts(message.parts) || message.content || ""
             const lastUserMessageText =
               message.role === "assistant"
                 ? (() => {
@@ -186,6 +192,27 @@ export const ChatView = ({
                     return ""
                   })()
                 : ""
+            const messageText =
+              message.role === "assistant"
+                ? stripLeadingUserEcho(rawMessageText, lastUserMessageText)
+                : rawMessageText
+            const hasMessageText = Boolean(messageText)
+            const messageMarkdown = prepareCitationMarkdown(messageText, sources)
+            const chainOfThought =
+              message.role === "assistant"
+                ? getChainOfThoughtEntry(message.parts, message.id, message.isStreaming)
+                : null
+            const checkpointMarkers = getCheckpointMarkers(message.parts, message.id)
+            const planEntries = getPlanEntries(message.parts, message.id)
+            const taskEntries = getTaskEntries(message.parts, message.id)
+            const queueEntries = getQueueEntries(message.parts, message.id)
+            const { branches: messageBranches, defaultBranch } = getMessageBranches(
+              message,
+              messageText,
+              sources
+            )
+            const hasBranches = messageBranches.length > 1
+            const isCopied = copiedMessageId === message.id
             const canRetry =
               message.role === "assistant" &&
               !message.isStreaming &&
@@ -418,8 +445,18 @@ export const ChatView = ({
           </ConversationEmptyState>
         )}
       </ConversationContent>
-      <ConversationScrollButton className="chat-session-scroll-button" />
-      <div className="chat-session-composer">
+      <ConversationScrollButton
+        className={cn(
+          "chat-session-scroll-button",
+          !isInitialSessionView && "chat-session-scroll-button-pinned"
+        )}
+      />
+      <div
+        className={cn(
+          "chat-session-composer",
+          !isInitialSessionView && "chat-session-composer-pinned"
+        )}
+      >
         <PromptInput className="chat-session-prompt" multiple onSubmit={onPromptSubmit}>
           <PromptInputAttachmentsPreview />
           <PromptInputTextarea

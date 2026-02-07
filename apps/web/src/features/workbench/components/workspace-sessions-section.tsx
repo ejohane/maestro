@@ -1,40 +1,31 @@
 import { WorkspaceSessionsView } from "../views/workspace-sessions-view"
-import type { Project, Workspace } from "../types"
+import type { Workspace } from "../types"
 
 type WorkspaceSessionsSectionProps = {
-  selectedProject: Project | null
   selectedWorkspace: Workspace | null
+  selectedWorkspaceChatId: string | null
   createSessionError: string | null
-  isCreatingSession: boolean
-  deletingSessionId: string | null
   deleteSessionError: string | null
-  onCreateSession: (event: React.FormEvent<HTMLFormElement>) => void
-  onDeleteSession: (sessionId: string) => void
-  onSelectChat: (projectId: string, workspaceId: string, chatId: string) => void
+  deleteWorkspaceErrors: Record<string, string>
+  chat: React.ReactNode
 }
 
 export const WorkspaceSessionsSection = ({
-  selectedProject,
   selectedWorkspace,
+  selectedWorkspaceChatId,
   createSessionError,
-  isCreatingSession,
-  deletingSessionId,
   deleteSessionError,
-  onCreateSession,
-  onDeleteSession,
-  onSelectChat,
+  deleteWorkspaceErrors,
+  chat,
 }: WorkspaceSessionsSectionProps) => {
   return (
     <WorkspaceSessionsView
-      selectedProject={selectedProject}
       selectedWorkspace={selectedWorkspace}
+      selectedWorkspaceChatId={selectedWorkspaceChatId}
       createSessionError={createSessionError}
-      isCreatingSession={isCreatingSession}
-      deletingSessionId={deletingSessionId}
       deleteSessionError={deleteSessionError}
-      onCreateSession={onCreateSession}
-      onDeleteSession={onDeleteSession}
-      onSelectChat={onSelectChat}
+      deleteWorkspaceErrors={deleteWorkspaceErrors}
+      chat={chat}
     />
   )
 }

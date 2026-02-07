@@ -51,13 +51,12 @@ export const MessageAvatar = ({
 export const Message = ({ className, from, children, ...props }: MessageProps) => (
   <div
     className={cn(
-      "group flex w-full items-start gap-3",
+      "group flex w-full items-start",
       from === "user" ? "is-user flex-row-reverse text-right" : "is-assistant",
       className
     )}
     {...props}
   >
-    <MessageAvatar from={from} />
     <div className="flex min-w-0 flex-1 flex-col gap-2">{children}</div>
   </div>
 )

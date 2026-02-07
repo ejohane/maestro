@@ -1,18 +1,8 @@
-import { fireEvent, render, screen } from "@testing-library/react"
-import { describe, expect, it, vi } from "vitest"
+import { render, screen } from "@testing-library/react"
+import { describe, expect, it } from "vitest"
 
 import { WorkspaceSessionsView } from "./workspace-sessions-view"
-import type { Project, Workspace } from "../types"
-
-const project: Project = {
-  id: "project-1",
-  name: "Core",
-  repoPath: "/tmp/core",
-  defaultBranch: "main",
-  createdAt: "2026-01-01T00:00:00Z",
-  updatedAt: "2026-01-01T00:00:00Z",
-  workspaces: [],
-}
+import type { Workspace } from "../types"
 
 const workspace: Workspace = {
   id: "workspace-1",
@@ -24,53 +14,56 @@ const workspace: Workspace = {
 }
 
 describe("WorkspaceSessionsView", () => {
-  it("renders and wires session controls", () => {
-    const onCreateSession = vi.fn((event) => event.preventDefault())
-    const onDeleteSession = vi.fn()
-    const onSelectChat = vi.fn()
-
+  it("renders the active chat content", () => {
     render(
       <WorkspaceSessionsView
-        selectedProject={project}
         selectedWorkspace={workspace}
+        selectedWorkspaceChatId={"chat-1"}
         createSessionError={null}
-        isCreatingSession={false}
-        deletingSessionId={"chat-2"}
         deleteSessionError={null}
-        onCreateSession={onCreateSession}
-        onDeleteSession={onDeleteSession}
-        onSelectChat={onSelectChat}
+        deleteWorkspaceErrors={{}}
+        chat={<div>Chat panel</div>}
       />
     )
 
-    fireEvent.click(screen.getByRole("button", { name: "Create session" }))
-    fireEvent.click(screen.getAllByRole("button", { name: "Open" })[0])
-    fireEvent.click(screen.getByRole("button", { name: "Delete" }))
-
-    expect(onCreateSession).toHaveBeenCalled()
-    expect(onSelectChat).toHaveBeenCalledWith("project-1", "workspace-1", "chat-1")
-    expect(onDeleteSession).toHaveBeenCalledWith("chat-1")
-    expect(screen.getByRole("button", { name: "Deleting..." })).toBeDisabled()
+    expect(screen.getByText("Chat panel")).toBeInTheDocument()
+    expect(
+      screen.queryByText("No sessions in this workspace yet. Use the plus button in the top bar to create one.")
+    ).not.toBeInTheDocument()
   })
 
-  it("shows empty and error states", () => {
+  it("shows workspace-level errors", () => {
     render(
       <WorkspaceSessionsView
-        selectedProject={project}
-        selectedWorkspace={{ ...workspace, chats: [] }}
+        selectedWorkspace={workspace}
+        selectedWorkspaceChatId={null}
         createSessionError={"Cannot create"}
-        isCreatingSession
-        deletingSessionId={null}
         deleteSessionError={"Delete failed"}
-        onCreateSession={vi.fn()}
-        onDeleteSession={vi.fn()}
-        onSelectChat={vi.fn()}
+        deleteWorkspaceErrors={{ "workspace-1": "Cannot delete workspace" }}
+        chat={<div>Chat panel</div>}
       />
     )
 
     expect(screen.getByText("Cannot create")).toBeInTheDocument()
-    expect(screen.getByText("No sessions yet. Create your first one.")).toBeInTheDocument()
     expect(screen.getByText("Delete failed")).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "Creating session..." })).toBeDisabled()
+    expect(screen.getByText("Cannot delete workspace")).toBeInTheDocument()
+  })
+
+  it("shows empty state when no sessions are available", () => {
+    render(
+      <WorkspaceSessionsView
+        selectedWorkspace={{ ...workspace, chats: [] }}
+        selectedWorkspaceChatId={null}
+        createSessionError={null}
+        deleteSessionError={null}
+        deleteWorkspaceErrors={{}}
+        chat={<div>Chat panel</div>}
+      />
+    )
+
+    expect(
+      screen.getByText("No sessions in this workspace yet. Use the plus button in the top bar to create one.")
+    ).toBeInTheDocument()
+    expect(screen.queryByText("Chat panel")).not.toBeInTheDocument()
   })
 })
