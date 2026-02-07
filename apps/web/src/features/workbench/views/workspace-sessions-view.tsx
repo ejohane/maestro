@@ -152,7 +152,9 @@ export const WorkspaceSessionsView = ({
       </section>
       <section className="min-h-0 flex-1 overflow-hidden">
         {activeChat ? (
-          <div className="h-full min-h-0 rounded-xl border bg-card/30 p-2">{chat}</div>
+          <div className="flex h-full min-h-0 flex-col rounded-xl border bg-card/30 p-2">
+            {chat}
+          </div>
         ) : (
           <div className="flex h-full min-h-[340px] items-center justify-center rounded-xl border border-dashed px-6 py-8 text-sm text-muted-foreground">
             No sessions in this workspace yet. Create one to start chatting.

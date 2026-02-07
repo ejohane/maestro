@@ -115,9 +115,16 @@ export const ChatView = ({
   onRetryMessage,
   onRestoreCheckpoint,
 }: ChatViewProps) => {
+  const isInitialSessionView = !isTranscriptLoading && messages.length === 0
+
   return (
-    <Conversation className="chat-session min-h-[620px] flex-1">
-      <ConversationContent className="chat-session-content gap-6">
+    <Conversation className="chat-session min-h-0 flex-1">
+      <ConversationContent
+        className={cn(
+          "chat-session-content gap-6",
+          !isInitialSessionView && "chat-session-content-pinned"
+        )}
+      >
         {isTranscriptLoading ? (
           <div className="flex h-full min-h-[320px] items-center justify-center">
             <div className="grid w-full max-w-lg gap-3 px-4 text-sm text-muted-foreground">
@@ -418,8 +425,18 @@ export const ChatView = ({
           </ConversationEmptyState>
         )}
       </ConversationContent>
-      <ConversationScrollButton className="chat-session-scroll-button" />
-      <div className="chat-session-composer">
+      <ConversationScrollButton
+        className={cn(
+          "chat-session-scroll-button",
+          !isInitialSessionView && "chat-session-scroll-button-pinned"
+        )}
+      />
+      <div
+        className={cn(
+          "chat-session-composer",
+          !isInitialSessionView && "chat-session-composer-pinned"
+        )}
+      >
         <PromptInput className="chat-session-prompt" multiple onSubmit={onPromptSubmit}>
           <PromptInputAttachmentsPreview />
           <PromptInputTextarea
