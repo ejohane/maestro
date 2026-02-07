@@ -178,7 +178,7 @@ const mergeMessagePart = (
     : "";
   if (incoming.type === "text" || incoming.type === "reasoning") {
     let nextText = existingText;
-    if (incomingText && incomingText.startsWith(existingText)) {
+    if (incomingText && existingText && incomingText.startsWith(existingText)) {
       nextText = incomingText;
     } else if (typeof delta === "string") {
       nextText = existingText + delta;
