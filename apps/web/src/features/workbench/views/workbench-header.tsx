@@ -165,23 +165,26 @@ export const WorkbenchHeader = ({
           <form onSubmit={onCreateSession}>
             <Button
               type="submit"
-              size="icon-sm"
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7"
               aria-label="Create session"
               title="Create session"
               disabled={isCreatingSession}
             >
-              <Plus className="size-3.5" />
+              <Plus className="size-4" />
             </Button>
           </form>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button
                 type="button"
-                variant="outline"
-                size="icon-sm"
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7"
                 aria-label="Workspace options"
               >
-                <Ellipsis className="size-3.5" />
+                <Ellipsis className="size-4" />
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-64">
