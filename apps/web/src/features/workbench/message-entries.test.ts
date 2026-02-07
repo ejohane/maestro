@@ -4,6 +4,7 @@ import type { StructuredMessagePart } from "../../lib/messages"
 import {
   clampPercent,
   extractUsageFromMetadata,
+  getChainOfThoughtEntry,
   getCheckpointMarkers,
   getMessageBranches,
   getPlanEntries,
@@ -239,6 +240,82 @@ describe("message-entries utilities", () => {
     expect(plans[0]?.steps).toHaveLength(2)
     expect(tasks[0]?.items).toHaveLength(1)
     expect(queues[0]?.totalCount).toBe(4)
+  })
+
+  it("builds chain-of-thought steps from step markers, reasoning, and tools", () => {
+    const entry = getChainOfThoughtEntry(
+      [
+        {
+          id: "step-start-1",
+          type: "step-start",
+          snapshot: "Inspect code",
+        } as unknown as StructuredMessagePart,
+        {
+          id: "reasoning-1",
+          type: "reasoning",
+          text: "Looking at call sites.",
+          time: { start: 1000, end: 1800 },
+        } as unknown as StructuredMessagePart,
+        {
+          id: "tool-1",
+          type: "tool",
+          tool: "grep",
+          callID: "call-1",
+          state: {
+            status: "completed",
+            time: { start: 1800, end: 2600 },
+          },
+        } as unknown as StructuredMessagePart,
+        {
+          id: "step-finish-1",
+          type: "step-finish",
+          reason: "Collected enough evidence.",
+        } as unknown as StructuredMessagePart,
+      ],
+      "m-thought",
+      false
+    )
+
+    expect(entry).not.toBeNull()
+    expect(entry?.durationSeconds).toBe(2)
+    expect(entry?.steps).toHaveLength(1)
+    expect(entry?.steps[0]).toMatchObject({
+      label: "Inspect code",
+      summary: "Collected enough evidence.",
+      reasoning: "Looking at call sites.",
+      status: "complete",
+    })
+    expect(entry?.steps[0]?.tools[0]).toMatchObject({
+      name: "grep",
+      callId: "call-1",
+      status: "completed",
+    })
+  })
+
+  it("keeps the latest implicit thought step active while streaming", () => {
+    const entry = getChainOfThoughtEntry(
+      [
+        {
+          id: "reasoning-stream",
+          type: "reasoning",
+          text: "Drafting a patch plan.",
+        } as unknown as StructuredMessagePart,
+        {
+          id: "tool-stream",
+          type: "tool",
+          name: "bash",
+          callId: "call-stream",
+          status: "running",
+        } as unknown as StructuredMessagePart,
+      ],
+      "m-stream",
+      true
+    )
+
+    expect(entry).not.toBeNull()
+    expect(entry?.steps).toHaveLength(1)
+    expect(entry?.steps[0]?.status).toBe("active")
+    expect(entry?.steps[0]?.label).toBe("Reasoning")
   })
 
   it("parses and deduplicates message branches", () => {

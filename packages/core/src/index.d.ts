@@ -52,6 +52,11 @@ export type TextPart = {
 export type ReasoningPart = {
     type: "reasoning";
     text: string;
+    metadata?: Record<string, unknown>;
+    time?: {
+        start: number;
+        end?: number;
+    };
 };
 export type ToolCallPart = {
     type: "tool";
@@ -61,12 +66,75 @@ export type ToolCallPart = {
     status?: "pending" | "running" | "completed" | "error";
     approval?: ToolApproval;
 };
+export type ToolStatePending = {
+    status: "pending";
+    input?: Record<string, unknown>;
+    raw?: string;
+};
+export type ToolStateRunning = {
+    status: "running";
+    input?: Record<string, unknown>;
+    title?: string;
+    metadata?: Record<string, unknown>;
+    time?: {
+        start: number;
+    };
+};
+export type ToolStateCompleted = {
+    status: "completed";
+    input?: Record<string, unknown>;
+    output?: string;
+    title?: string;
+    metadata?: Record<string, unknown>;
+    time?: {
+        start: number;
+        end?: number;
+        compacted?: number;
+    };
+};
+export type ToolStateError = {
+    status: "error";
+    input?: Record<string, unknown>;
+    error?: string;
+    metadata?: Record<string, unknown>;
+    time?: {
+        start: number;
+        end?: number;
+    };
+};
+export type OpencodeToolState = ToolStatePending | ToolStateRunning | ToolStateCompleted | ToolStateError;
+export type OpencodeToolPart = {
+    type: "tool";
+    callID: string;
+    tool: string;
+    state: OpencodeToolState;
+    metadata?: Record<string, unknown>;
+};
 export type ToolResultPart = {
     type: "tool_result";
     callId: string;
     name: string;
     output: unknown;
     isError?: boolean;
+};
+export type StepStartPart = {
+    type: "step-start";
+    snapshot?: string;
+};
+export type StepFinishPart = {
+    type: "step-finish";
+    reason: string;
+    snapshot?: string;
+    cost?: number;
+    tokens?: {
+        input?: number;
+        output?: number;
+        reasoning?: number;
+        cache?: {
+            read?: number;
+            write?: number;
+        };
+    };
 };
 export type SourceCitation = {
     id?: string;
@@ -96,7 +164,7 @@ export type DataPart = {
     data: unknown;
     label?: string;
 };
-export type MessagePart = TextPart | ReasoningPart | ToolCallPart | ToolResultPart | SourcesPart | FilePart | DataPart;
+export type MessagePart = TextPart | ReasoningPart | ToolCallPart | OpencodeToolPart | ToolResultPart | StepStartPart | StepFinishPart | SourcesPart | FilePart | DataPart;
 export type Message = {
     id?: string;
     role: MessageRole;

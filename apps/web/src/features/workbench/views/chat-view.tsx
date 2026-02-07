@@ -39,7 +39,7 @@ import {
   PromptInputTools,
   type PromptInputMessage,
 } from "../../../components/ai-elements/prompt-input"
-import { ReasoningSection } from "../../../components/ai-elements/reasoning"
+import { ChainOfThoughtSection } from "../../../components/ai-elements/chain-of-thought"
 import {
   CitationAnchor,
   CitationProvider,
@@ -54,6 +54,7 @@ import { getTextFromParts, type StructuredMessagePart } from "../../../lib/messa
 import { cn } from "../../../lib/utils"
 import { PromptInputAttachmentsPreview } from "../components/prompt-input-attachments-preview"
 import {
+  getChainOfThoughtEntry,
   getCheckpointMarkers,
   getMessageBranches,
   getPlanEntries,
@@ -149,22 +150,14 @@ export const ChatView = ({
                 source: file.source,
               }
             })
-            const reasoningParts = message.parts.filter(
-              (part): part is StructuredMessagePart & { type: "reasoning" } =>
-                part.type === "reasoning"
-            )
-            const reasoningText = reasoningParts
-              .map((part) => part.text)
-              .filter(
-                (text): text is string =>
-                  typeof text === "string" && text.trim().length > 0
-              )
-              .join("\n\n")
             const sources = getSourcesFromParts(message.parts)
             const messageText = getTextFromParts(message.parts) || message.content || ""
             const hasMessageText = Boolean(messageText)
             const messageMarkdown = prepareCitationMarkdown(messageText, sources)
-            const showReasoning = message.role === "assistant" && Boolean(reasoningText)
+            const chainOfThought =
+              message.role === "assistant"
+                ? getChainOfThoughtEntry(message.parts, message.id, message.isStreaming)
+                : null
             const checkpointMarkers = getCheckpointMarkers(message.parts, message.id)
             const planEntries = getPlanEntries(message.parts, message.id)
             const taskEntries = getTaskEntries(message.parts, message.id)
@@ -259,9 +252,9 @@ export const ChatView = ({
                   ) : null}
                   {message.role === "assistant" ? (
                     <>
-                      {showReasoning ? (
-                        <ReasoningSection
-                          text={reasoningText}
+                      {chainOfThought ? (
+                        <ChainOfThoughtSection
+                          entry={chainOfThought}
                           isStreaming={message.isStreaming}
                         />
                       ) : null}

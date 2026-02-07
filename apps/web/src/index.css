@@ -162,6 +162,18 @@
     padding: 0.9rem 1rem;
   }
 
+  .chat-session-thought {
+    background: hsl(0 0% 11%);
+  }
+
+  .chat-session-thought-step:last-child {
+    margin-bottom: 0;
+  }
+
+  .chat-session-thought-step-line {
+    opacity: 0.75;
+  }
+
   .chat-session-message-toolbar {
     margin-top: 0.65rem;
     opacity: 0;
