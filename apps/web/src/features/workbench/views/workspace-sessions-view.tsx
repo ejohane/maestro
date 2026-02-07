@@ -43,11 +43,11 @@ export const WorkspaceSessionsView = ({
           {workspaceDeleteError}
         </div>
       ) : null}
-      <section className="min-h-0 flex-1 overflow-hidden">
+      <section className="flex min-h-0 flex-1 overflow-hidden">
         {activeChat ? (
-          <div className="h-full min-h-0">{chat}</div>
+          <div className="flex min-h-0 flex-1 flex-col">{chat}</div>
         ) : (
-          <div className="flex h-full min-h-[340px] items-center justify-center px-6 py-8 text-sm text-muted-foreground">
+          <div className="flex min-h-[340px] flex-1 items-center justify-center px-6 py-8 text-sm text-muted-foreground">
             No sessions in this workspace yet. Use the plus button in the top bar to create one.
           </div>
         )}
