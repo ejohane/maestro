@@ -161,22 +161,27 @@ export const WorkbenchHeader = ({
         </Breadcrumb>
       </div>
       {showWorkspaceActions ? (
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto flex items-center gap-1.5">
           <form onSubmit={onCreateSession}>
             <Button
               type="submit"
-              size="icon"
+              size="icon-sm"
               aria-label="Create session"
               title="Create session"
               disabled={isCreatingSession}
             >
-              <Plus className="size-4" />
+              <Plus className="size-3.5" />
             </Button>
           </form>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button type="button" variant="outline" size="icon" aria-label="Workspace options">
-                <Ellipsis className="size-4" />
+              <Button
+                type="button"
+                variant="outline"
+                size="icon-sm"
+                aria-label="Workspace options"
+              >
+                <Ellipsis className="size-3.5" />
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-64">
