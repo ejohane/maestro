@@ -25,9 +25,9 @@ export const WorkbenchMain = ({
     case "project":
       return <>{project}</>
     case "workspace":
-      return <>{workspace}</>
+      return <div className="flex min-h-0 flex-1 flex-col overflow-hidden">{workspace}</div>
     case "chat":
-      return <>{chat}</>
+      return <div className="flex min-h-0 flex-1 flex-col overflow-hidden">{chat}</div>
     case "secondary":
       return <>{secondary}</>
     default:
