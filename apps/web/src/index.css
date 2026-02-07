@@ -101,10 +101,6 @@
     gap: 0;
   }
 
-  .chat-session-message > :first-child {
-    display: none;
-  }
-
   .chat-session-message.is-assistant .chat-session-message-content {
     max-width: min(100%, 58rem);
     color: hsl(0 0% 88%);
