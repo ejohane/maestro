@@ -25,6 +25,40 @@ bd close <id>         # Complete work
 bd sync               # Sync with git
 ```
 
+## Local Development Commands
+
+This repo is a Bun + Turbo monorepo. Core workflows:
+
+```bash
+bun install
+bun run build
+bun run lint
+bun run test
+```
+
+### Run the CLI locally (dev/debug)
+
+```bash
+bun run apps/cli/src/index.ts
+bun run apps/cli/src/index.ts -- --help
+bun run --cwd apps/cli cli
+bun run --cwd apps/cli dev
+bun --inspect apps/cli/src/index.ts
+```
+
+### Web UI (local)
+
+```bash
+bun run --cwd apps/web build
+maestro serve
+```
+
+For UI development (web + API server):
+
+```bash
+bun run dev
+```
+
 ## Frontend Visual Verification (Mandatory)
 
 For any frontend/UI work (layout, styling, interaction, rendering behavior) or any task that requires visual confirmation:
