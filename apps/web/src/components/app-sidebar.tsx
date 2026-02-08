@@ -1,13 +1,10 @@
 import * as React from "react"
-import { LifeBuoy, Send, Settings, Workflow } from "lucide-react"
+import { Settings, Workflow } from "lucide-react"
 
 import { NavProjects } from "./nav-projects"
-import { NavSecondary } from "./nav-secondary"
-import { NavUser } from "./nav-user"
 import {
   Sidebar,
   SidebarContent,
-  SidebarFooter,
   SidebarHeader,
   SidebarGroup,
   SidebarGroupContent,
@@ -37,26 +34,6 @@ type Project = {
   icon?: string
   description?: string
   workspaces: Workspace[]
-}
-
-const data = {
-  user: {
-    name: "shadcn",
-    email: "m@example.com",
-    avatar: "/avatars/shadcn.jpg",
-  },
-  navSecondary: [
-    {
-      title: "Support",
-      url: "#",
-      icon: LifeBuoy,
-    },
-    {
-      title: "Feedback",
-      url: "#",
-      icon: Send,
-    },
-  ],
 }
 
 export function AppSidebar({
@@ -124,7 +101,7 @@ export function AppSidebar({
           onCreateWorkspace={onCreateWorkspace}
           activeWorkspaceIds={activeWorkspaceIds}
         />
-        <SidebarGroup>
+        <SidebarGroup className="mt-auto">
           <SidebarGroupContent>
             <SidebarMenu>
               <SidebarMenuItem>
@@ -142,11 +119,7 @@ export function AppSidebar({
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
-        <NavSecondary items={data.navSecondary} className="mt-auto" />
       </SidebarContent>
-      <SidebarFooter>
-        <NavUser user={data.user} />
-      </SidebarFooter>
     </Sidebar>
   )
 }
