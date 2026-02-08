@@ -99,6 +99,9 @@
 
   .chat-session-message {
     gap: 0;
+    margin-inline: auto;
+    width: 100%;
+    max-width: min(100%, 64rem);
   }
 
   .chat-session-message.is-assistant .chat-session-message-content {
