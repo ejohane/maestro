@@ -71,6 +71,41 @@ const buildWorkspacePath = (projectId: string, workspaceId: string) =>
 const buildChatPath = (projectId: string, workspaceId: string, chatId: string) =>
   `${buildWorkspacePath(projectId, workspaceId)}/chats/${encodeRouteSegment(chatId)}`
 
+const getTimestamp = (value?: string) => {
+  if (!value) {
+    return 0
+  }
+  const timestamp = Date.parse(value)
+  return Number.isNaN(timestamp) ? 0 : timestamp
+}
+
+const getPreferredWorkspaceChat = (
+  workspace: Workspace,
+  preferredChatId?: string | null
+) => {
+  if (preferredChatId) {
+    const matchingChat = workspace.chats.find((chat) => chat.id === preferredChatId)
+    if (matchingChat) {
+      return matchingChat
+    }
+  }
+
+  let latestChat = workspace.chats[0] ?? null
+  let latestTimestamp = latestChat
+    ? Math.max(getTimestamp(latestChat.updatedAt), getTimestamp(latestChat.createdAt))
+    : 0
+
+  for (const chat of workspace.chats) {
+    const chatTimestamp = Math.max(getTimestamp(chat.updatedAt), getTimestamp(chat.createdAt))
+    if (!latestChat || chatTimestamp > latestTimestamp) {
+      latestChat = chat
+      latestTimestamp = chatTimestamp
+    }
+  }
+
+  return latestChat
+}
+
 type RouteViewState = {
   view: WorkbenchView
   selectedProjectId: string | null
@@ -269,9 +304,29 @@ export function WorkbenchProvider({ children }: { children: React.ReactNode }) {
 
   const selectWorkspace = React.useCallback(
     (projectId: string, workspaceId: string) => {
+      const selectedProject =
+        projects.find((project) => project.id === projectId) ?? null
+      const selectedWorkspace =
+        selectedProject?.workspaces.find((workspace) => workspace.id === workspaceId) ??
+        null
+      const activeWorkspaceChatId =
+        selectedWorkspace &&
+        selectedProjectId === projectId &&
+        selectedWorkspaceId === workspaceId
+          ? selectedChatId
+          : null
+      const preferredChat = selectedWorkspace
+        ? getPreferredWorkspaceChat(selectedWorkspace, activeWorkspaceChatId)
+        : null
+
+      if (selectedWorkspace && preferredChat) {
+        navigate(buildChatPath(projectId, workspaceId, preferredChat.id))
+        return
+      }
+
       navigate(buildWorkspacePath(projectId, workspaceId))
     },
-    [navigate]
+    [navigate, projects, selectedChatId, selectedProjectId, selectedWorkspaceId]
   )
 
   const selectChat = React.useCallback(
@@ -327,11 +382,11 @@ export function WorkbenchProvider({ children }: { children: React.ReactNode }) {
         project.workspaces[0] ??
         null
       : null
-    const shouldSelectChat = selectedChatId !== null
-    const chat = shouldSelectChat
-      ? workspace?.chats.find((item) => item.id === selectedChatId) ??
-        workspace?.chats[0] ??
-        null
+    const shouldSelectChat = Boolean(
+      workspace && (selectedChatId !== null || selectedWorkspaceId !== null)
+    )
+    const chat = shouldSelectChat && workspace
+      ? getPreferredWorkspaceChat(workspace, selectedChatId)
       : null
     const canonicalPath = chat && workspace
       ? buildChatPath(project.id, workspace.id, chat.id)
