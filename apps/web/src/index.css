@@ -225,7 +225,7 @@
     border-radius: 2.35rem;
     background: hsl(var(--background));
     box-shadow: none;
-    padding: 0.62rem 0.95rem 0.78rem;
+    padding: 0.62rem 0 0.78rem;
   }
 
   .chat-session-composer-pinned {
