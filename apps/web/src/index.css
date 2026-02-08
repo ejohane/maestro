@@ -83,6 +83,13 @@
   .chat-session-content {
     gap: 1.45rem;
     padding: 1.65rem 2rem 0.85rem;
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  .chat-session-content::-webkit-scrollbar {
+    width: 0;
+    height: 0;
   }
 
   .chat-session-content-pinned {
