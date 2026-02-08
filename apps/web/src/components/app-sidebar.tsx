@@ -19,11 +19,15 @@ import {
 type ChatSession = {
   id: string
   name: string
+  createdAt?: string
+  updatedAt?: string
 }
 
 type Workspace = {
   id: string
   name: string
+  createdAt?: string
+  updatedAt?: string
   chats: ChatSession[]
 }
 
@@ -61,12 +65,13 @@ export function AppSidebar({
   isSettingsView,
   selectedProjectId,
   selectedWorkspaceId,
-  selectedChatId,
   onSelectProjects,
   onSelectSettings,
   onSelectProject,
   onSelectWorkspace,
-  onSelectChat,
+  onCreateProject,
+  onCreateWorkspace,
+  activeWorkspaceIds = [],
   ...props
 }: React.ComponentProps<typeof Sidebar> & {
   projects: Project[]
@@ -74,12 +79,13 @@ export function AppSidebar({
   isSettingsView: boolean
   selectedProjectId: string | null
   selectedWorkspaceId: string | null
-  selectedChatId: string | null
   onSelectProjects: () => void
   onSelectSettings: () => void
   onSelectProject: (projectId: string) => void
   onSelectWorkspace: (projectId: string, workspaceId: string) => void
-  onSelectChat: (projectId: string, workspaceId: string, chatId: string) => void
+  onCreateProject: () => void
+  onCreateWorkspace: (projectId: string) => void
+  activeWorkspaceIds?: string[]
 }) {
   return (
     <Sidebar variant="inset" {...props}>
@@ -112,10 +118,11 @@ export function AppSidebar({
           isProjectsView={isProjectsView}
           selectedProjectId={selectedProjectId}
           selectedWorkspaceId={selectedWorkspaceId}
-          selectedChatId={selectedChatId}
           onSelectProject={onSelectProject}
           onSelectWorkspace={onSelectWorkspace}
-          onSelectChat={onSelectChat}
+          onCreateProject={onCreateProject}
+          onCreateWorkspace={onCreateWorkspace}
+          activeWorkspaceIds={activeWorkspaceIds}
         />
         <SidebarGroup>
           <SidebarGroupContent>

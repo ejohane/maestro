@@ -40,8 +40,7 @@ const WorkbenchShell = () => {
   })
   const pullRequestsController = usePullRequestsController()
 
-  const { projects, isLoading, error, selectedProjectId, selectedWorkspaceId, selectedChatId } =
-    state
+  const { projects, isLoading, error, selectedProjectId, selectedWorkspaceId } = state
   const {
     selectedProject,
     selectedWorkspace,
@@ -229,6 +228,43 @@ const WorkbenchShell = () => {
     />
   )
 
+  const focusInput = React.useCallback((selector: string) => {
+    if (typeof window === "undefined" || typeof document === "undefined") {
+      return
+    }
+
+    const focusTarget = () => {
+      const input = document.querySelector<HTMLInputElement>(selector)
+      input?.focus()
+      input?.select()
+    }
+
+    window.setTimeout(focusTarget, 0)
+    window.setTimeout(focusTarget, 120)
+  }, [])
+
+  const onSidebarCreateProject = React.useCallback(() => {
+    actions.selectProjectsView()
+    focusInput('input[placeholder="e.g. Marketing site"]')
+  }, [actions.selectProjectsView, focusInput])
+
+  const onSidebarCreateWorkspace = React.useCallback(
+    (projectId: string) => {
+      actions.selectProject(projectId)
+      focusInput('input[placeholder="New workspace name"]')
+    },
+    [actions.selectProject, focusInput]
+  )
+
+  const activeWorkspaceIds = React.useMemo(() => {
+    if (!selectedWorkspaceId) {
+      return [] as string[]
+    }
+    if (chat.isAwaitingFirstToken || chat.isChatStreaming) {
+      return [selectedWorkspaceId]
+    }
+    return [] as string[]
+  }, [chat.isAwaitingFirstToken, chat.isChatStreaming, selectedWorkspaceId])
   return (
     <WorkbenchLayout
       sidebar={
@@ -238,12 +274,13 @@ const WorkbenchShell = () => {
           isSettingsView={isSettingsView}
           selectedProjectId={selectedProjectId}
           selectedWorkspaceId={selectedWorkspaceId}
-          selectedChatId={selectedChatId}
           onSelectProjects={actions.selectProjectsView}
           onSelectSettings={actions.selectSettingsView}
           onSelectProject={actions.selectProject}
           onSelectWorkspace={actions.selectWorkspace}
-          onSelectChat={actions.selectChat}
+          onCreateProject={onSidebarCreateProject}
+          onCreateWorkspace={onSidebarCreateWorkspace}
+          activeWorkspaceIds={activeWorkspaceIds}
         />
       }
       header={
