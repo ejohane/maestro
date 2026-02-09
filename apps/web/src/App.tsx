@@ -53,6 +53,9 @@ const WorkbenchShell = () => {
     isChatView,
   } = meta
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = React.useState(false)
+  const [commandPaletteInitialView, setCommandPaletteInitialView] = React.useState<
+    "commands" | "create-project"
+  >("commands")
   const [commandPaletteShortcutLabel, setCommandPaletteShortcutLabel] =
     React.useState("⌘K")
   const chat = useChatController()
@@ -149,6 +152,14 @@ const WorkbenchShell = () => {
     setCommandPaletteShortcutLabel(isAppleDevice ? "⌘K" : "Ctrl K")
   }, [])
 
+  const openCommandPalette = React.useCallback(
+    (view: "commands" | "create-project" = "commands") => {
+      setCommandPaletteInitialView(view)
+      setIsCommandPaletteOpen(true)
+    },
+    []
+  )
+
   React.useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented) {
@@ -164,6 +175,7 @@ const WorkbenchShell = () => {
       }
 
       event.preventDefault()
+      setCommandPaletteInitialView("commands")
       setIsCommandPaletteOpen((isOpen) => !isOpen)
     }
 
@@ -172,8 +184,8 @@ const WorkbenchShell = () => {
   }, [])
 
   const onOpenCommandPalette = React.useCallback(() => {
-    setIsCommandPaletteOpen(true)
-  }, [])
+    openCommandPalette("commands")
+  }, [openCommandPalette])
 
   const {
     viewLabel,
@@ -246,9 +258,8 @@ const WorkbenchShell = () => {
   }, [])
 
   const onSidebarCreateProject = React.useCallback(() => {
-    actions.selectProjectsView()
-    focusInput('input[placeholder="e.g. Marketing site"]')
-  }, [actions.selectProjectsView, focusInput])
+    openCommandPalette("create-project")
+  }, [openCommandPalette])
 
   const onSidebarCreateWorkspace = React.useCallback(
     (projectId: string) => {
@@ -435,6 +446,7 @@ const WorkbenchShell = () => {
       <WorkbenchCommandPalette
         open={isCommandPaletteOpen}
         onOpenChange={setIsCommandPaletteOpen}
+        initialView={commandPaletteInitialView}
         projects={projects}
         selectedProject={selectedProject}
         selectedWorkspace={selectedWorkspace}

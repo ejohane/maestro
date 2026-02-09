@@ -41,6 +41,7 @@ type WorkbenchCommandPaletteProps = {
   onReloadProjects: () => Promise<void>
   commandProviders?: CommandPaletteCommandProvider[]
   searchProviders?: CommandPaletteSearchProvider[]
+  initialView?: "commands" | "create-project"
 }
 
 type CommandListEntry = {
@@ -106,6 +107,7 @@ export const WorkbenchCommandPalette = ({
   onReloadProjects,
   commandProviders = [],
   searchProviders = [],
+  initialView = COMMANDS_VIEW,
 }: WorkbenchCommandPaletteProps) => {
   const [activeView, setActiveView] = React.useState(COMMANDS_VIEW)
   const [query, setQuery] = React.useState("")
@@ -234,12 +236,17 @@ export const WorkbenchCommandPalette = ({
       setCreateProjectError(null)
       return
     }
-    if (activeView === CREATE_PROJECT_VIEW) {
-      const timeoutId = window.setTimeout(() => {
-        projectNameInputRef.current?.focus()
-      }, 30)
-      return () => window.clearTimeout(timeoutId)
+    setActiveView(initialView)
+  }, [initialView, open])
+
+  React.useEffect(() => {
+    if (!open || activeView !== CREATE_PROJECT_VIEW) {
+      return
     }
+    const timeoutId = window.setTimeout(() => {
+      projectNameInputRef.current?.focus()
+    }, 30)
+    return () => window.clearTimeout(timeoutId)
   }, [activeView, open])
 
   const onProjectFormChange = (field: keyof ProjectFormState) => {

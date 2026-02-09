@@ -53,6 +53,14 @@ afterEach(() => {
 })
 
 describe("WorkbenchCommandPalette", () => {
+  it("opens directly in create-project view when requested", () => {
+    const props = createBaseProps()
+
+    render(<WorkbenchCommandPalette {...props} initialView="create-project" />)
+
+    expect(screen.getByPlaceholderText("e.g. Marketing site")).toBeInTheDocument()
+  })
+
   it("creates a project from within the command palette", async () => {
     const props = createBaseProps()
     const fetchMock = vi.fn().mockResolvedValue({
