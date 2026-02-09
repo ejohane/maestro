@@ -1,5 +1,5 @@
 import * as React from "react"
-import { Ellipsis, History, Plus, Trash2 } from "lucide-react"
+import { Ellipsis, History, Plus, Search, Trash2 } from "lucide-react"
 
 import {
   Breadcrumb,
@@ -23,6 +23,7 @@ import { SidebarTrigger } from "../../../components/ui/sidebar"
 import type { ChatSession, Project, Workspace } from "../types"
 
 type WorkbenchHeaderProps = {
+  commandPaletteShortcutLabel: string
   isSettingsView: boolean
   isLoading: boolean
   selectedProject: Project | null
@@ -36,12 +37,14 @@ type WorkbenchHeaderProps = {
   onSelectProject: (projectId: string) => void
   onSelectWorkspace: (projectId: string, workspaceId: string) => void
   onCreateSession: (event: React.FormEvent<HTMLFormElement>) => void
+  onOpenCommandPalette: () => void
   onSelectWorkspaceChat: (chatId: string) => void
   onDeleteSession: (sessionId: string) => void
   onDeleteWorkspace: (workspaceId: string, workspaceName?: string) => void
 }
 
 export const WorkbenchHeader = ({
+  commandPaletteShortcutLabel,
   isSettingsView,
   isLoading,
   selectedProject,
@@ -55,6 +58,7 @@ export const WorkbenchHeader = ({
   onSelectProject,
   onSelectWorkspace,
   onCreateSession,
+  onOpenCommandPalette,
   onSelectWorkspaceChat,
   onDeleteSession,
   onDeleteWorkspace,
@@ -160,84 +164,103 @@ export const WorkbenchHeader = ({
           </BreadcrumbList>
         </Breadcrumb>
       </div>
-      {showWorkspaceActions ? (
-        <div className="ml-auto flex items-center gap-1.5">
-          <form onSubmit={onCreateSession}>
-            <Button
-              type="submit"
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7"
-              aria-label="Create session"
-              title="Create session"
-              disabled={isCreatingSession}
-            >
-              <Plus className="size-4" />
-            </Button>
-          </form>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
+      <div className="ml-auto flex items-center gap-1.5">
+        <Button
+          type="button"
+          variant="outline"
+          size="xs"
+          className="h-8 gap-2 text-muted-foreground hover:text-foreground"
+          aria-label="Open command palette"
+          title={`Open command palette (${commandPaletteShortcutLabel})`}
+          onClick={onOpenCommandPalette}
+        >
+          <Search className="size-3.5" />
+          <span className="hidden sm:inline">Command</span>
+          <span className="hidden rounded border border-border bg-muted px-1.5 py-0.5 text-[10px] font-medium leading-none tracking-wide text-muted-foreground sm:inline">
+            {commandPaletteShortcutLabel}
+          </span>
+        </Button>
+        {showWorkspaceActions ? (
+          <>
+            <form onSubmit={onCreateSession}>
               <Button
-                type="button"
+                type="submit"
                 variant="ghost"
                 size="icon"
                 className="h-7 w-7"
-                aria-label="Workspace options"
+                aria-label="Create session"
+                title="Create session"
+                disabled={isCreatingSession}
               >
-                <Ellipsis className="size-4" />
+                <Plus className="size-4" />
               </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-64">
-              <DropdownMenuLabel>Workspace options</DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              <DropdownMenuLabel className="px-2 py-1 text-xs text-muted-foreground">
-                Previous sessions
-              </DropdownMenuLabel>
-              {previousWorkspaceChats.length ? (
-                previousWorkspaceChats.map((chatEntry) => (
-                  <DropdownMenuItem
-                    key={chatEntry.id}
-                    onSelect={() => onSelectWorkspaceChat(chatEntry.id)}
-                    className="gap-3"
-                  >
-                    <History className="size-4" />
-                    <span className="truncate">{chatEntry.name}</span>
-                  </DropdownMenuItem>
-                ))
-              ) : (
-                <DropdownMenuItem disabled>No previous sessions</DropdownMenuItem>
-              )}
-              <DropdownMenuSeparator />
-              <DropdownMenuItem
-                disabled={!activeWorkspaceChat || isDeletingActiveSession}
-                onSelect={() => {
-                  if (!activeWorkspaceChat) {
-                    return
-                  }
-                  onDeleteSession(activeWorkspaceChat.id)
-                }}
-              >
-                <Trash2 className="size-4" />
-                {isDeletingActiveSession ? "Deleting active session..." : "Delete active session"}
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem
-                disabled={!selectedWorkspace || isDeletingWorkspace}
-                onSelect={() => {
-                  if (!selectedWorkspace) {
-                    return
-                  }
-                  onDeleteWorkspace(selectedWorkspace.id, selectedWorkspace.name)
-                }}
-                className="text-destructive focus:text-destructive"
-              >
-                <Trash2 className="size-4" />
-                {isDeletingWorkspace ? "Deleting workspace..." : "Delete workspace"}
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
-      ) : null}
+            </form>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7"
+                  aria-label="Workspace options"
+                >
+                  <Ellipsis className="size-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-64">
+                <DropdownMenuLabel>Workspace options</DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <DropdownMenuLabel className="px-2 py-1 text-xs text-muted-foreground">
+                  Previous sessions
+                </DropdownMenuLabel>
+                {previousWorkspaceChats.length ? (
+                  previousWorkspaceChats.map((chatEntry) => (
+                    <DropdownMenuItem
+                      key={chatEntry.id}
+                      onSelect={() => onSelectWorkspaceChat(chatEntry.id)}
+                      className="gap-3"
+                    >
+                      <History className="size-4" />
+                      <span className="truncate">{chatEntry.name}</span>
+                    </DropdownMenuItem>
+                  ))
+                ) : (
+                  <DropdownMenuItem disabled>No previous sessions</DropdownMenuItem>
+                )}
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  disabled={!activeWorkspaceChat || isDeletingActiveSession}
+                  onSelect={() => {
+                    if (!activeWorkspaceChat) {
+                      return
+                    }
+                    onDeleteSession(activeWorkspaceChat.id)
+                  }}
+                >
+                  <Trash2 className="size-4" />
+                  {isDeletingActiveSession
+                    ? "Deleting active session..."
+                    : "Delete active session"}
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  disabled={!selectedWorkspace || isDeletingWorkspace}
+                  onSelect={() => {
+                    if (!selectedWorkspace) {
+                      return
+                    }
+                    onDeleteWorkspace(selectedWorkspace.id, selectedWorkspace.name)
+                  }}
+                  className="text-destructive focus:text-destructive"
+                >
+                  <Trash2 className="size-4" />
+                  {isDeletingWorkspace ? "Deleting workspace..." : "Delete workspace"}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </>
+        ) : null}
+      </div>
     </header>
   )
 }

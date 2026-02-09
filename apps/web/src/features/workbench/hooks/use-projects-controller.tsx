@@ -1,11 +1,12 @@
 import * as React from "react"
 
+import { createProject, selectDirectory } from "../api/projects"
+import { createWorkspace } from "../api/workspaces"
+import { createDefaultProjectFormState } from "../project-form"
 import { useWorkbench } from "../workbench-context"
 import type {
-  ApiProject,
   ApiSession,
   ChatSession,
-  CreateConversationResponse,
   ProjectFormState,
   SessionFormState,
   SettingsFormState,
@@ -64,13 +65,9 @@ export const useProjectsController = (settings: SettingsContext): ProjectsContro
   const { selectedWorkspaceId, selectedChatId } = workbenchState
   const { selectedProject, selectedWorkspace, selectedChat } = meta
 
-  const [projectForm, setProjectForm] = React.useState<ProjectFormState>({
-    name: "",
-    repoPath: "",
-    defaultBranch: "main",
-    gitProvider: "",
-    repoUrl: "",
-  })
+  const [projectForm, setProjectForm] = React.useState<ProjectFormState>(
+    createDefaultProjectFormState()
+  )
   const [isCreatingProject, setIsCreatingProject] = React.useState(false)
   const [isSelectingDirectory, setIsSelectingDirectory] = React.useState(false)
   const [createProjectError, setCreateProjectError] = React.useState<string | null>(null)
@@ -170,26 +167,11 @@ export const useProjectsController = (settings: SettingsContext): ProjectsContro
     setIsSelectingDirectory(true)
     setCreateProjectError(null)
     try {
-      const response = await fetch("/api/fs/select-directory", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ startPath: projectForm.repoPath || undefined }),
+      const path = await selectDirectory({
+        startPath: projectForm.repoPath.trim() || undefined,
       })
-      if (!response.ok) {
-        let message = "Failed to select folder."
-        try {
-          const payload = (await response.json()) as { error?: string }
-          if (payload.error) {
-            message = payload.error
-          }
-        } catch {
-          // Ignore parsing errors
-        }
-        throw new Error(message)
-      }
-      const payload = (await response.json()) as { path?: string }
-      if (payload.path) {
-        setProjectForm((prev) => ({ ...prev, repoPath: payload.path ?? "" }))
+      if (path) {
+        setProjectForm((prev) => ({ ...prev, repoPath: path }))
       }
     } catch (err) {
       setCreateProjectError(
@@ -213,37 +195,14 @@ export const useProjectsController = (settings: SettingsContext): ProjectsContro
     setIsCreatingProject(true)
     setCreateProjectError(null)
     try {
-      const response = await fetch("/api/projects", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name,
-          defaultBranch,
-          repoPath: repoPath || undefined,
-          gitProvider: projectForm.gitProvider || undefined,
-          repoUrl: projectForm.repoUrl.trim() || undefined,
-        }),
-      })
-      if (!response.ok) {
-        let message = "Failed to create project."
-        try {
-          const payload = (await response.json()) as { error?: string }
-          if (payload.error) {
-            message = payload.error
-          }
-        } catch {
-          // Ignore parsing errors
-        }
-        throw new Error(message)
-      }
-      const createdProject = (await response.json()) as ApiProject
-      setProjectForm({
-        name: "",
-        repoPath: "",
+      const createdProject = await createProject({
+        name,
         defaultBranch,
-        gitProvider: "",
-        repoUrl: "",
+        repoPath: repoPath || undefined,
+        gitProvider: projectForm.gitProvider || undefined,
+        repoUrl: projectForm.repoUrl.trim() || undefined,
       })
+      setProjectForm({ ...createDefaultProjectFormState(), defaultBranch })
       actions.selectProject(createdProject.id)
       await actions.reloadProjects()
     } catch (err) {
@@ -264,27 +223,10 @@ export const useProjectsController = (settings: SettingsContext): ProjectsContro
     setIsCreatingWorkspace(true)
     setCreateWorkspaceError(null)
     try {
-      const response = await fetch("/api/conversations", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          projectId: selectedProject.id,
-          title: title || undefined,
-        }),
+      const payload = await createWorkspace({
+        projectId: selectedProject.id,
+        title: title || undefined,
       })
-      if (!response.ok) {
-        let message = "Failed to create workspace."
-        try {
-          const payload = (await response.json()) as { error?: string }
-          if (payload.error) {
-            message = payload.error
-          }
-        } catch {
-          // Ignore parsing errors
-        }
-        throw new Error(message)
-      }
-      const payload = (await response.json()) as CreateConversationResponse
       setWorkspaceForm({ title: "" })
       actions.selectChat(payload.project.id, payload.conversation.id, payload.session.id)
       await actions.reloadProjects()
