@@ -527,6 +527,34 @@ const normalizeModelProviders = (value: unknown): ModelProvider[] | undefined =>
     .filter(Boolean) as ModelProvider[];
 };
 
+const ensureStaticModel = (
+  providers: ModelProvider[],
+  providerId: string,
+  modelId: string
+): { providers: ModelProvider[]; updated: boolean } => {
+  const providerIndex = providers.findIndex((provider) => provider.id === providerId);
+  if (providerIndex === -1) {
+    return { providers, updated: false };
+  }
+  const provider = providers[providerIndex];
+  if (provider.models.some((model) => model.id === modelId)) {
+    return { providers, updated: false };
+  }
+  const staticProvider = STATIC_MODEL_PROVIDERS.find(
+    (item) => item.id === providerId
+  );
+  const staticModel = staticProvider?.models.find((model) => model.id === modelId);
+  if (!staticModel) {
+    return { providers, updated: false };
+  }
+  const nextProviders = [...providers];
+  nextProviders[providerIndex] = {
+    ...provider,
+    models: [...provider.models, staticModel],
+  };
+  return { providers: nextProviders, updated: true };
+};
+
 const resolveDefaultModelSelection = (
   providers: ModelProvider[],
   defaultProvider?: string,
@@ -549,6 +577,12 @@ const resolveSettingsModel = async (repoRoot: string): Promise<string | undefine
     modelProviders = STATIC_MODEL_PROVIDERS;
     defaultProvider = defaultProvider ?? STATIC_DEFAULT_PROVIDER;
     defaultModel = defaultModel ?? STATIC_DEFAULT_MODEL;
+  } else {
+    modelProviders = ensureStaticModel(
+      modelProviders,
+      "openai",
+      "gpt-5.3-codex"
+    ).providers;
   }
   const resolved = resolveDefaultModelSelection(
     modelProviders ?? [],
@@ -963,6 +997,19 @@ const handleApi = async (req: IncomingMessage, res: ServerResponse, repoRoot: st
         defaultProvider,
         defaultModel
       });
+    } else if (modelProviders) {
+      const ensured = ensureStaticModel(
+        modelProviders,
+        "openai",
+        "gpt-5.3-codex"
+      );
+      if (ensured.updated) {
+        modelProviders = ensured.providers;
+        await writeSettings(repoRoot, {
+          ...settings,
+          modelProviders
+        });
+      }
     }
     const resolved = resolveDefaultModelSelection(
       modelProviders ?? [],
