@@ -2,6 +2,7 @@ import * as React from "react"
 
 import { useTheme } from "./hooks/use-theme"
 import { ChatViewSection } from "./features/workbench/components/chat-view-section"
+import { WorkbenchCommandPalette } from "./features/workbench/components/workbench-command-palette"
 import { WorkbenchContent } from "./features/workbench/components/workbench-content"
 import { WorkbenchHeaderSection } from "./features/workbench/components/workbench-header-section"
 import { WorkbenchLayout } from "./features/workbench/components/workbench-layout"
@@ -51,6 +52,9 @@ const WorkbenchShell = () => {
     isWorkspaceView,
     isChatView,
   } = meta
+  const [isCommandPaletteOpen, setIsCommandPaletteOpen] = React.useState(false)
+  const [commandPaletteShortcutLabel, setCommandPaletteShortcutLabel] =
+    React.useState("⌘K")
   const chat = useChatController()
   const {
     projectForm,
@@ -136,6 +140,41 @@ const WorkbenchShell = () => {
   const projectIconValue = selectedProject?.icon?.trim() ?? ""
   const nextThemeLabel = theme === "dark" ? "Light" : "Dark"
 
+  React.useEffect(() => {
+    if (typeof navigator === "undefined") {
+      return
+    }
+
+    const isAppleDevice = /Mac|iPod|iPhone|iPad/.test(navigator.platform)
+    setCommandPaletteShortcutLabel(isAppleDevice ? "⌘K" : "Ctrl K")
+  }, [])
+
+  React.useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) {
+        return
+      }
+
+      if (event.key.toLowerCase() !== "k") {
+        return
+      }
+
+      if (!event.metaKey && !event.ctrlKey) {
+        return
+      }
+
+      event.preventDefault()
+      setIsCommandPaletteOpen((isOpen) => !isOpen)
+    }
+
+    window.addEventListener("keydown", handleKeyDown)
+    return () => window.removeEventListener("keydown", handleKeyDown)
+  }, [])
+
+  const onOpenCommandPalette = React.useCallback(() => {
+    setIsCommandPaletteOpen(true)
+  }, [])
+
   const {
     viewLabel,
     viewTitle,
@@ -219,6 +258,16 @@ const WorkbenchShell = () => {
     [actions.selectProject, focusInput]
   )
 
+  const onSelectWorkspaceChat = React.useCallback(
+    (chatId: string) => {
+      if (!selectedProject || !selectedWorkspace) {
+        return
+      }
+      actions.selectChat(selectedProject.id, selectedWorkspace.id, chatId)
+    },
+    [actions, selectedProject, selectedWorkspace]
+  )
+
   const activeWorkspaceIds = React.useMemo(() => {
     if (!selectedWorkspaceId) {
       return [] as string[]
@@ -229,162 +278,175 @@ const WorkbenchShell = () => {
     return [] as string[]
   }, [chat.isAwaitingFirstToken, chat.isChatStreaming, selectedWorkspaceId])
   return (
-    <WorkbenchLayout
-      sidebar={
-        <WorkbenchSidebarSection
-          projects={projects}
-          isProjectsView={isProjectsView}
-          isSettingsView={isSettingsView}
-          selectedProjectId={selectedProjectId}
-          selectedWorkspaceId={selectedWorkspaceId}
-          onSelectProjects={actions.selectProjectsView}
-          onSelectSettings={actions.selectSettingsView}
-          onSelectProject={actions.selectProject}
-          onSelectWorkspace={actions.selectWorkspace}
-          onCreateProject={onSidebarCreateProject}
-          onCreateWorkspace={onSidebarCreateWorkspace}
-          activeWorkspaceIds={activeWorkspaceIds}
-        />
-      }
-      header={
-        <WorkbenchHeaderSection
-          isSettingsView={isSettingsView}
-          isLoading={isLoading}
-          selectedProject={selectedProject}
-          selectedWorkspace={selectedWorkspace}
-          selectedChat={selectedChat}
-          workspaceActiveChatId={selectedChat?.id ?? null}
-          isCreatingSession={isCreatingSession}
-          deletingSessionId={deletingSessionId}
-          deletingWorkspace={deletingWorkspace}
-          onSelectProjectsView={actions.selectProjectsView}
-          onSelectProject={actions.selectProject}
-          onSelectWorkspace={actions.selectWorkspace}
-          onCreateSession={(event) => void onCreateSession(event)}
-          onSelectWorkspaceChat={(chatId) => {
-            if (!selectedProject || !selectedWorkspace) {
-              return
-            }
-            actions.selectChat(selectedProject.id, selectedWorkspace.id, chatId)
-          }}
-          onDeleteSession={(sessionId) => void onDeleteSession(sessionId)}
-          onDeleteWorkspace={(workspaceId, workspaceName) =>
-            void onConfirmDeleteWorkspace(workspaceId, workspaceName)
-          }
-        />
-      }
-    >
-      <WorkbenchContent
-        variant={contentVariant}
-        settings={
-          <SettingsViewSection
-            settings={settings}
-            theme={theme}
-            nextThemeLabel={nextThemeLabel}
-            onToggleTheme={toggleTheme}
+    <>
+      <WorkbenchLayout
+        sidebar={
+          <WorkbenchSidebarSection
+            projects={projects}
+            isProjectsView={isProjectsView}
+            isSettingsView={isSettingsView}
+            selectedProjectId={selectedProjectId}
+            selectedWorkspaceId={selectedWorkspaceId}
+            onSelectProjects={actions.selectProjectsView}
+            onSelectSettings={actions.selectSettingsView}
+            onSelectProject={actions.selectProject}
+            onSelectWorkspace={actions.selectWorkspace}
+            onCreateProject={onSidebarCreateProject}
+            onCreateWorkspace={onSidebarCreateWorkspace}
+            activeWorkspaceIds={activeWorkspaceIds}
           />
         }
-      >
-        {!isChatView ? (
-          <WorkbenchOverview
-            isProjectView={isProjectView}
-            isWorkspaceView={isWorkspaceView}
+        header={
+          <WorkbenchHeaderSection
+            commandPaletteShortcutLabel={commandPaletteShortcutLabel}
+            isSettingsView={isSettingsView}
+            isLoading={isLoading}
             selectedProject={selectedProject}
             selectedWorkspace={selectedWorkspace}
-            projectIconValue={projectIconValue}
-            viewLabel={viewLabel}
-            viewTitle={viewTitle}
-            viewDescription={viewDescription}
-            projectRepoLabel={projectRepoLabel}
-            projectRepoHref={projectRepoHref}
+            selectedChat={selectedChat}
+            workspaceActiveChatId={selectedChat?.id ?? null}
+            isCreatingSession={isCreatingSession}
+            deletingSessionId={deletingSessionId}
             deletingWorkspace={deletingWorkspace}
-            deleteWorkspaceErrors={deleteWorkspaceErrors}
-            recentSessionsLimit={recentSessionsLimit}
-            recentSessionsForView={recentSessionsForView}
-            formatDateTime={formatDateTime}
+            onSelectProjectsView={actions.selectProjectsView}
+            onSelectProject={actions.selectProject}
+            onSelectWorkspace={actions.selectWorkspace}
+            onCreateSession={(event) => void onCreateSession(event)}
+            onOpenCommandPalette={onOpenCommandPalette}
+            onSelectWorkspaceChat={onSelectWorkspaceChat}
+            onDeleteSession={(sessionId) => void onDeleteSession(sessionId)}
             onDeleteWorkspace={(workspaceId, workspaceName) =>
               void onConfirmDeleteWorkspace(workspaceId, workspaceName)
             }
-            onSelectChat={actions.selectChat}
           />
-        ) : null}
-        <WorkbenchMain
-          view={mainView}
-          projects={
-            <ProjectsViewSection
-              data={{
-                projectForm,
-                createProjectError,
-                isCreatingProject,
-                isSelectingDirectory,
-                allWorkspaces,
-                projects,
-                isLoading,
-                error,
-                sortedPullRequests,
-                hasRepoProjects,
-                isLoadingPullRequests,
-                pullRequestsError,
-              }}
-              formatting={{
-                formatDate,
-                formatDateTime,
-              }}
-              actions={{
-                onCreateProject: (event) => void onCreateProject(event),
-                onProjectFormChange,
-                onSelectDirectory: () => void onSelectDirectory(),
-                onSelectWorkspace: actions.selectWorkspace,
-                onSelectProject: actions.selectProject,
-              }}
+        }
+      >
+        <WorkbenchContent
+          variant={contentVariant}
+          settings={
+            <SettingsViewSection
+              settings={settings}
+              theme={theme}
+              nextThemeLabel={nextThemeLabel}
+              onToggleTheme={toggleTheme}
             />
           }
-          project={
-            <ProjectWorkspacesSection
-              selectedProject={selectedProject}
-              projectPullRequests={projectPullRequests}
-              isLoadingPullRequests={isLoadingPullRequests}
-              pullRequestsError={pullRequestsError}
-              workspaceTitle={workspaceForm.title}
-              isCreatingWorkspace={isCreatingWorkspace}
-              createWorkspaceError={createWorkspaceError}
-              mergedPullRequests={mergedPullRequests}
-              mergingPullRequests={mergingPullRequests}
-              mergePullRequestErrors={mergePullRequestErrors}
-              deletingMergeWorkspace={deletingMergeWorkspace}
-              deleteMergeWorkspaceErrors={deleteMergeWorkspaceErrors}
-              deletingWorkspace={deletingWorkspace}
-              deleteWorkspaceErrors={deleteWorkspaceErrors}
-              formatDateTime={formatDateTime}
-              onSelectWorkspace={actions.selectWorkspace}
-              onCreateWorkspace={(event) => void onCreateWorkspace(event)}
-              onWorkspaceTitleChange={onWorkspaceFormChange}
-              onMergePullRequest={(item) => void onMergePullRequest(item)}
-              onDeleteMergedWorkspace={(pullRequestKey, workspaceId, workspaceName) =>
-                void onDeleteMergedWorkspace(pullRequestKey, workspaceId, workspaceName)
-              }
-              onDeleteWorkspace={onDeleteWorkspace}
-              getPullRequestKey={getPullRequestKey}
-            />
-          }
-          workspace={
-            <WorkspaceSessionsSection
+        >
+          {!isChatView ? (
+            <WorkbenchOverview
+              isProjectView={isProjectView}
+              isWorkspaceView={isWorkspaceView}
               selectedProject={selectedProject}
               selectedWorkspace={selectedWorkspace}
-              createSessionError={createSessionError}
-              isCreatingSession={isCreatingSession}
-              deletingSessionId={deletingSessionId}
-              deleteSessionError={deleteSessionError}
-              onCreateSession={(event) => void onCreateSession(event)}
-              onDeleteSession={(sessionId) => void onDeleteSession(sessionId)}
+              projectIconValue={projectIconValue}
+              viewLabel={viewLabel}
+              viewTitle={viewTitle}
+              viewDescription={viewDescription}
+              projectRepoLabel={projectRepoLabel}
+              projectRepoHref={projectRepoHref}
+              deletingWorkspace={deletingWorkspace}
+              deleteWorkspaceErrors={deleteWorkspaceErrors}
+              recentSessionsLimit={recentSessionsLimit}
+              recentSessionsForView={recentSessionsForView}
+              formatDateTime={formatDateTime}
+              onDeleteWorkspace={(workspaceId, workspaceName) =>
+                void onConfirmDeleteWorkspace(workspaceId, workspaceName)
+              }
               onSelectChat={actions.selectChat}
             />
-          }
-          chat={chatView}
-          secondary={<SecondaryItemsView title={secondaryTitle} items={secondaryItems} />}
-        />
-      </WorkbenchContent>
-    </WorkbenchLayout>
+          ) : null}
+          <WorkbenchMain
+            view={mainView}
+            projects={
+              <ProjectsViewSection
+                data={{
+                  projectForm,
+                  createProjectError,
+                  isCreatingProject,
+                  isSelectingDirectory,
+                  allWorkspaces,
+                  projects,
+                  isLoading,
+                  error,
+                  sortedPullRequests,
+                  hasRepoProjects,
+                  isLoadingPullRequests,
+                  pullRequestsError,
+                }}
+                formatting={{
+                  formatDate,
+                  formatDateTime,
+                }}
+                actions={{
+                  onCreateProject: (event) => void onCreateProject(event),
+                  onProjectFormChange,
+                  onSelectDirectory: () => void onSelectDirectory(),
+                  onSelectWorkspace: actions.selectWorkspace,
+                  onSelectProject: actions.selectProject,
+                }}
+              />
+            }
+            project={
+              <ProjectWorkspacesSection
+                selectedProject={selectedProject}
+                projectPullRequests={projectPullRequests}
+                isLoadingPullRequests={isLoadingPullRequests}
+                pullRequestsError={pullRequestsError}
+                workspaceTitle={workspaceForm.title}
+                isCreatingWorkspace={isCreatingWorkspace}
+                createWorkspaceError={createWorkspaceError}
+                mergedPullRequests={mergedPullRequests}
+                mergingPullRequests={mergingPullRequests}
+                mergePullRequestErrors={mergePullRequestErrors}
+                deletingMergeWorkspace={deletingMergeWorkspace}
+                deleteMergeWorkspaceErrors={deleteMergeWorkspaceErrors}
+                deletingWorkspace={deletingWorkspace}
+                deleteWorkspaceErrors={deleteWorkspaceErrors}
+                formatDateTime={formatDateTime}
+                onSelectWorkspace={actions.selectWorkspace}
+                onCreateWorkspace={(event) => void onCreateWorkspace(event)}
+                onWorkspaceTitleChange={onWorkspaceFormChange}
+                onMergePullRequest={(item) => void onMergePullRequest(item)}
+                onDeleteMergedWorkspace={(pullRequestKey, workspaceId, workspaceName) =>
+                  void onDeleteMergedWorkspace(pullRequestKey, workspaceId, workspaceName)
+                }
+                onDeleteWorkspace={onDeleteWorkspace}
+                getPullRequestKey={getPullRequestKey}
+              />
+            }
+            workspace={
+              <WorkspaceSessionsSection
+                selectedProject={selectedProject}
+                selectedWorkspace={selectedWorkspace}
+                createSessionError={createSessionError}
+                isCreatingSession={isCreatingSession}
+                deletingSessionId={deletingSessionId}
+                deleteSessionError={deleteSessionError}
+                onCreateSession={(event) => void onCreateSession(event)}
+                onDeleteSession={(sessionId) => void onDeleteSession(sessionId)}
+                onSelectChat={actions.selectChat}
+              />
+            }
+            chat={chatView}
+            secondary={<SecondaryItemsView title={secondaryTitle} items={secondaryItems} />}
+          />
+        </WorkbenchContent>
+      </WorkbenchLayout>
+      <WorkbenchCommandPalette
+        open={isCommandPaletteOpen}
+        onOpenChange={setIsCommandPaletteOpen}
+        projects={projects}
+        selectedProject={selectedProject}
+        selectedWorkspace={selectedWorkspace}
+        selectedChat={selectedChat}
+        shortcutLabel={commandPaletteShortcutLabel}
+        onSelectProjectsView={actions.selectProjectsView}
+        onSelectSettingsView={actions.selectSettingsView}
+        onSelectProject={actions.selectProject}
+        onSelectWorkspace={actions.selectWorkspace}
+        onSelectChat={actions.selectChat}
+      />
+    </>
   )
 }
 

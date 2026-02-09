@@ -34,6 +34,7 @@ const baseActions = () => ({
   onSelectProject: vi.fn(),
   onSelectWorkspace: vi.fn(),
   onCreateSession: vi.fn((event) => event.preventDefault()),
+  onOpenCommandPalette: vi.fn(),
   onSelectWorkspaceChat: vi.fn(),
   onDeleteSession: vi.fn(),
   onDeleteWorkspace: vi.fn(),
@@ -46,6 +47,7 @@ describe("WorkbenchHeader", () => {
     render(
       <SidebarProvider>
         <WorkbenchHeader
+          commandPaletteShortcutLabel="⌘K"
           isSettingsView
           isLoading={false}
           selectedProject={null}
@@ -59,6 +61,7 @@ describe("WorkbenchHeader", () => {
           onSelectProject={actions.onSelectProject}
           onSelectWorkspace={actions.onSelectWorkspace}
           onCreateSession={actions.onCreateSession}
+          onOpenCommandPalette={actions.onOpenCommandPalette}
           onSelectWorkspaceChat={actions.onSelectWorkspaceChat}
           onDeleteSession={actions.onDeleteSession}
           onDeleteWorkspace={actions.onDeleteWorkspace}
@@ -76,6 +79,7 @@ describe("WorkbenchHeader", () => {
     render(
       <SidebarProvider>
         <WorkbenchHeader
+          commandPaletteShortcutLabel="⌘K"
           isSettingsView={false}
           isLoading={false}
           selectedProject={project}
@@ -89,6 +93,7 @@ describe("WorkbenchHeader", () => {
           onSelectProject={actions.onSelectProject}
           onSelectWorkspace={actions.onSelectWorkspace}
           onCreateSession={actions.onCreateSession}
+          onOpenCommandPalette={actions.onOpenCommandPalette}
           onSelectWorkspaceChat={actions.onSelectWorkspaceChat}
           onDeleteSession={actions.onDeleteSession}
           onDeleteWorkspace={actions.onDeleteWorkspace}
@@ -111,6 +116,7 @@ describe("WorkbenchHeader", () => {
     render(
       <SidebarProvider>
         <WorkbenchHeader
+          commandPaletteShortcutLabel="⌘K"
           isSettingsView={false}
           isLoading={false}
           selectedProject={project}
@@ -124,6 +130,7 @@ describe("WorkbenchHeader", () => {
           onSelectProject={actions.onSelectProject}
           onSelectWorkspace={actions.onSelectWorkspace}
           onCreateSession={actions.onCreateSession}
+          onOpenCommandPalette={actions.onOpenCommandPalette}
           onSelectWorkspaceChat={actions.onSelectWorkspaceChat}
           onDeleteSession={actions.onDeleteSession}
           onDeleteWorkspace={actions.onDeleteWorkspace}
@@ -133,6 +140,8 @@ describe("WorkbenchHeader", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Create session" }))
     expect(actions.onCreateSession).toHaveBeenCalled()
+    fireEvent.click(screen.getByRole("button", { name: "Open command palette" }))
+    expect(actions.onOpenCommandPalette).toHaveBeenCalledTimes(1)
 
     fireEvent.pointerDown(screen.getByRole("button", { name: "Workspace options" }), {
       button: 0,
