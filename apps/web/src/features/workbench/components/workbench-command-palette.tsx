@@ -27,9 +27,10 @@ import type {
 import { createDefaultProjectFormState } from "../project-form"
 import type { ChatSession, Project, ProjectFormState, Workspace } from "../types"
 
-type CommandPaletteView = "commands" | "create-project" | "create-workspace"
+type CommandPaletteView = "commands" | "search" | "create-project" | "create-workspace"
 
 const COMMANDS_VIEW: CommandPaletteView = "commands"
+const SEARCH_VIEW: CommandPaletteView = "search"
 const CREATE_PROJECT_VIEW: CommandPaletteView = "create-project"
 const CREATE_WORKSPACE_VIEW: CommandPaletteView = "create-workspace"
 
@@ -169,6 +170,7 @@ export const WorkbenchCommandPalette = ({
   const [createProjectError, setCreateProjectError] = React.useState<string | null>(null)
   const [isCreatingWorkspace, setIsCreatingWorkspace] = React.useState(false)
   const [createWorkspaceError, setCreateWorkspaceError] = React.useState<string | null>(null)
+  const searchInputRef = React.useRef<HTMLInputElement | null>(null)
   const projectNameInputRef = React.useRef<HTMLInputElement | null>(null)
   const workspaceNameInputRef = React.useRef<HTMLInputElement | null>(null)
 
@@ -198,6 +200,11 @@ export const WorkbenchCommandPalette = ({
     setQuery("")
   }, [])
 
+  const openSearch = React.useCallback(() => {
+    setActiveView(SEARCH_VIEW)
+    setQuery("")
+  }, [])
+
   const openCreateWorkspace = React.useCallback(
     (projectId?: string) => {
       setActiveView(CREATE_WORKSPACE_VIEW)
@@ -221,6 +228,7 @@ export const WorkbenchCommandPalette = ({
   const commandActions = React.useMemo<CommandPaletteActions>(
     () => ({
       closePalette,
+      openSearch,
       selectProjectsView: () => {
         onSelectProjectsView()
         closePalette()
@@ -246,6 +254,7 @@ export const WorkbenchCommandPalette = ({
     }),
     [
       closePalette,
+      openSearch,
       onSelectProjectsView,
       onSelectSettingsView,
       onSelectProject,
@@ -274,8 +283,12 @@ export const WorkbenchCommandPalette = ({
   }, [allCommandProviders, commandContext])
 
   const searchGroups = React.useMemo(() => {
+    if (activeView !== SEARCH_VIEW) {
+      return [] as CommandGroupEntry[]
+    }
+
     const trimmedQuery = query.trim()
-    if (trimmedQuery.length < 2) {
+    if (trimmedQuery.length < 1) {
       return [] as CommandGroupEntry[]
     }
 
@@ -295,7 +308,7 @@ export const WorkbenchCommandPalette = ({
     }))
 
     return groupEntries(searchEntries)
-  }, [allSearchProviders, commandContext, query])
+  }, [activeView, allSearchProviders, commandContext, query])
 
   React.useEffect(() => {
     if (!open) {
@@ -336,7 +349,13 @@ export const WorkbenchCommandPalette = ({
         projectNameInputRef.current?.focus()
         return
       }
-      workspaceNameInputRef.current?.focus()
+
+      if (activeView === CREATE_WORKSPACE_VIEW) {
+        workspaceNameInputRef.current?.focus()
+        return
+      }
+
+      searchInputRef.current?.focus()
     }, 30)
 
     return () => window.clearTimeout(timeoutId)
@@ -462,13 +481,19 @@ export const WorkbenchCommandPalette = ({
 
   const onBackToCommands = React.useCallback(() => {
     setActiveView(COMMANDS_VIEW)
+    setQuery("")
     setCreateProjectError(null)
     setCreateWorkspaceError(null)
   }, [])
 
-  const visibleGroups = React.useMemo(
-    () => [...searchGroups, ...commandGroups].filter((group) => group.items.length > 0),
-    [searchGroups, commandGroups]
+  const commandGroupsWithItems = React.useMemo(
+    () => commandGroups.filter((group) => group.items.length > 0),
+    [commandGroups]
+  )
+
+  const searchGroupsWithItems = React.useMemo(
+    () => searchGroups.filter((group) => group.items.length > 0),
+    [searchGroups]
   )
 
   const renderCommandItem = (item: CommandListEntry) => {
@@ -669,16 +694,57 @@ export const WorkbenchCommandPalette = ({
     )
   }
 
+  if (activeView === SEARCH_VIEW) {
+    const hasQuery = query.trim().length > 0
+    return (
+      <CommandDialog open={open} onOpenChange={onOpenChange}>
+        <div className="border-b p-2">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-8 gap-1.5 px-2"
+            onClick={onBackToCommands}
+          >
+            <ArrowLeft className="size-4" />
+            Back to commands
+          </Button>
+        </div>
+        <CommandInput
+          ref={searchInputRef}
+          value={query}
+          onValueChange={setQuery}
+          placeholder="Search projects, workspaces, and sessions..."
+        />
+        <CommandList className="max-h-[430px]">
+          <CommandEmpty>
+            {hasQuery
+              ? "No matching projects, workspaces, or sessions."
+              : "Type to search projects, workspaces, and sessions."}
+          </CommandEmpty>
+          {searchGroupsWithItems.map((group, index) => (
+            <React.Fragment key={`${group.heading}-${index}`}>
+              {index > 0 ? <CommandSeparator /> : null}
+              <CommandGroup heading={group.heading}>
+                {group.items.map(renderCommandItem)}
+              </CommandGroup>
+            </React.Fragment>
+          ))}
+        </CommandList>
+      </CommandDialog>
+    )
+  }
+
   return (
     <CommandDialog open={open} onOpenChange={onOpenChange}>
       <CommandInput
         value={query}
         onValueChange={setQuery}
-        placeholder="Type a command or search..."
+        placeholder="Type a command..."
       />
       <CommandList className="max-h-[430px]">
-        <CommandEmpty>No results found.</CommandEmpty>
-        {visibleGroups.map((group, index) => (
+        <CommandEmpty>No commands found.</CommandEmpty>
+        {commandGroupsWithItems.map((group, index) => (
           <React.Fragment key={`${group.heading}-${index}`}>
             {index > 0 ? <CommandSeparator /> : null}
             <CommandGroup heading={group.heading}>

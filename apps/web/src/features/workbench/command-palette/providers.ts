@@ -19,7 +19,7 @@ import type {
 } from "./types"
 
 const MAX_ITEMS_PER_GROUP = 8
-const MAX_SEARCH_RESULTS = 12
+const MAX_SEARCH_RESULTS_PER_PROVIDER = 6
 
 type WorkspaceEntry = {
   projectId: string
@@ -102,10 +102,10 @@ export const coreCommandProvider: CommandPaletteCommandProvider = {
       {
         id: "search-projects-workspaces",
         group: "Suggestions",
-        label: "Search projects and workspaces",
-        value: "search projects workspaces sessions",
+        label: "Search projects, workspaces, and sessions",
+        value: "search projects workspaces sessions chats",
         icon: Search,
-        perform: (actions) => actions.selectProjectsView(),
+        perform: (actions) => actions.openSearch(),
       },
       {
         id: "create-project",
@@ -242,74 +242,65 @@ export const defaultCommandProviders: CommandPaletteCommandProvider[] = [
 
 export const projectSearchProvider: CommandPaletteSearchProvider = {
   id: "core-project-search",
-  search: (query, context) => {
-    const results: CommandPaletteSearchResult[] = []
-    const projectMatches = context.projects
+  search: (query, context) =>
+    context.projects
       .filter((project) =>
         includesQuery(query, project.name, project.repoPath, project.repoUrl)
       )
-      .slice(0, 4)
+      .slice(0, MAX_SEARCH_RESULTS_PER_PROVIDER)
       .map((project) => ({
         id: `search-project-${project.id}`,
-        group: "Search",
-        label: `Project: ${project.name}`,
+        group: "Projects",
+        label: project.name,
         description: project.repoUrl?.trim() || project.repoPath,
         value: `search project ${project.name} ${project.repoPath}`,
         icon: FolderKanban,
         perform: (actions: CommandPaletteActions) => actions.selectProject(project.id),
-      }))
+      })),
+}
 
-    results.push(...projectMatches)
+export const workspaceSearchProvider: CommandPaletteSearchProvider = {
+  id: "core-workspace-search",
+  search: (query, context): CommandPaletteSearchResult[] =>
+    createWorkspaceEntries(context)
+      .filter((workspace) =>
+        includesQuery(query, workspace.workspaceName, workspace.projectName)
+      )
+      .slice(0, MAX_SEARCH_RESULTS_PER_PROVIDER)
+      .map((workspace) => ({
+        id: `search-workspace-${workspace.projectId}-${workspace.workspaceId}`,
+        group: "Workspaces",
+        label: workspace.workspaceName,
+        description: workspace.projectName,
+        value: `search workspace ${workspace.workspaceName} ${workspace.projectName}`,
+        icon: FolderTree,
+        perform: (actions: CommandPaletteActions) =>
+          actions.selectWorkspace(workspace.projectId, workspace.workspaceId),
+      })),
+}
 
-    if (results.length < MAX_SEARCH_RESULTS) {
-      const workspaceMatches = createWorkspaceEntries(context)
-        .filter((workspace) =>
-          includesQuery(query, workspace.workspaceName, workspace.projectName)
-        )
-        .slice(0, 4)
-        .map((workspace) => ({
-          id: `search-workspace-${workspace.workspaceId}`,
-          group: "Search",
-          label: `Workspace: ${workspace.workspaceName}`,
-          description: workspace.projectName,
-          value: `search workspace ${workspace.workspaceName} ${workspace.projectName}`,
-          icon: FolderTree,
-          perform: (actions: CommandPaletteActions) =>
-            actions.selectWorkspace(workspace.projectId, workspace.workspaceId),
-        }))
-
-      results.push(...workspaceMatches)
-    }
-
-    if (results.length < MAX_SEARCH_RESULTS) {
-      const sessionMatches = createSessionEntries(context)
-        .filter((session) =>
-          includesQuery(
-            query,
-            session.chatName,
-            session.workspaceName,
-            session.projectName
-          )
-        )
-        .slice(0, 4)
-        .map((session) => ({
-          id: `search-session-${session.chatId}`,
-          group: "Search",
-          label: `Session: ${session.chatName}`,
-          description: `${session.workspaceName} · ${session.projectName}`,
-          value: `search session ${session.chatName} ${session.workspaceName} ${session.projectName}`,
-          icon: MessageSquareText,
-          perform: (actions: CommandPaletteActions) =>
-            actions.selectChat(session.projectId, session.workspaceId, session.chatId),
-        }))
-
-      results.push(...sessionMatches)
-    }
-
-    return results.slice(0, MAX_SEARCH_RESULTS)
-  },
+export const sessionSearchProvider: CommandPaletteSearchProvider = {
+  id: "core-session-search",
+  search: (query, context): CommandPaletteSearchResult[] =>
+    createSessionEntries(context)
+      .filter((session) =>
+        includesQuery(query, session.chatName, session.workspaceName, session.projectName)
+      )
+      .slice(0, MAX_SEARCH_RESULTS_PER_PROVIDER)
+      .map((session) => ({
+        id: `search-session-${session.projectId}-${session.workspaceId}-${session.chatId}`,
+        group: "Sessions",
+        label: session.chatName,
+        description: `${session.workspaceName} · ${session.projectName}`,
+        value: `search session ${session.chatName} ${session.workspaceName} ${session.projectName}`,
+        icon: MessageSquareText,
+        perform: (actions: CommandPaletteActions) =>
+          actions.selectChat(session.projectId, session.workspaceId, session.chatId),
+      })),
 }
 
 export const defaultSearchProviders: CommandPaletteSearchProvider[] = [
   projectSearchProvider,
+  workspaceSearchProvider,
+  sessionSearchProvider,
 ]

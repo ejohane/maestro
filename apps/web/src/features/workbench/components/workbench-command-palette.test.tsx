@@ -185,12 +185,51 @@ describe("WorkbenchCommandPalette", () => {
     fireEvent.click(screen.getByRole("option", { name: /Open plugin panel/i }))
     expect(pluginCommandRun).toHaveBeenCalledTimes(1)
 
-    fireEvent.change(screen.getByPlaceholderText("Type a command or search..."), {
-      target: { value: "plug" },
-    })
+    fireEvent.click(
+      screen.getByRole("option", {
+        name: /Search projects, workspaces, and sessions/i,
+      })
+    )
+
+    fireEvent.change(
+      screen.getByPlaceholderText("Search projects, workspaces, and sessions..."),
+      {
+        target: { value: "plug" },
+      }
+    )
 
     await waitFor(() => {
       expect(screen.getByRole("option", { name: /Plugin search result/i })).toBeInTheDocument()
+    })
+  })
+
+  it("searches projects, workspaces, and sessions from search mode", async () => {
+    const props = createBaseProps()
+
+    render(<WorkbenchCommandPalette {...props} />)
+
+    fireEvent.click(
+      screen.getByRole("option", {
+        name: /Search projects, workspaces, and sessions/i,
+      })
+    )
+
+    fireEvent.change(
+      screen.getByPlaceholderText("Search projects, workspaces, and sessions..."),
+      {
+        target: { value: "core" },
+      }
+    )
+
+    fireEvent.click(
+      screen.getByRole("option", {
+        name: /Core.*github\.com\/example\/core/i,
+      })
+    )
+
+    await waitFor(() => {
+      expect(props.onSelectProject).toHaveBeenCalledWith("project-1")
+      expect(props.onOpenChange).toHaveBeenCalledWith(false)
     })
   })
 

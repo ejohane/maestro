@@ -13,6 +13,7 @@ export type CommandPaletteContext = {
 
 export type CommandPaletteActions = {
   closePalette: () => void
+  openSearch: () => void
   selectProjectsView: () => void
   selectSettingsView: () => void
   selectProject: (projectId: string) => void
