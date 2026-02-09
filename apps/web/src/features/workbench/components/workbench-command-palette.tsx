@@ -14,6 +14,7 @@ import {
 } from "../../../components/ui/command"
 import { Input } from "../../../components/ui/input"
 import { createProject, selectDirectory } from "../api/projects"
+import { createWorkspace } from "../api/workspaces"
 import {
   defaultCommandProviders,
   defaultSearchProviders,
@@ -25,6 +26,12 @@ import type {
 } from "../command-palette/types"
 import { createDefaultProjectFormState } from "../project-form"
 import type { ChatSession, Project, ProjectFormState, Workspace } from "../types"
+
+type CommandPaletteView = "commands" | "create-project" | "create-workspace"
+
+const COMMANDS_VIEW: CommandPaletteView = "commands"
+const CREATE_PROJECT_VIEW: CommandPaletteView = "create-project"
+const CREATE_WORKSPACE_VIEW: CommandPaletteView = "create-workspace"
 
 type WorkbenchCommandPaletteProps = {
   open: boolean
@@ -41,7 +48,8 @@ type WorkbenchCommandPaletteProps = {
   onReloadProjects: () => Promise<void>
   commandProviders?: CommandPaletteCommandProvider[]
   searchProviders?: CommandPaletteSearchProvider[]
-  initialView?: "commands" | "create-project"
+  initialView?: CommandPaletteView
+  initialWorkspaceProjectId?: string | null
 }
 
 type CommandListEntry = {
@@ -60,8 +68,42 @@ type CommandGroupEntry = {
   items: CommandListEntry[]
 }
 
-const CREATE_PROJECT_VIEW = "create-project"
-const COMMANDS_VIEW = "commands"
+type WorkspacePaletteFormState = {
+  projectId: string
+  title: string
+}
+
+type WorkspaceFormDefaultsInput = {
+  projects: Project[]
+  selectedProject: Project | null
+  preferredProjectId?: string | null
+}
+
+const resolveWorkspaceProjectId = ({
+  projects,
+  selectedProject,
+  preferredProjectId,
+}: WorkspaceFormDefaultsInput) => {
+  if (
+    preferredProjectId &&
+    projects.some((project) => project.id === preferredProjectId)
+  ) {
+    return preferredProjectId
+  }
+
+  if (selectedProject && projects.some((project) => project.id === selectedProject.id)) {
+    return selectedProject.id
+  }
+
+  return projects[0]?.id || ""
+}
+
+const createDefaultWorkspaceFormState = (
+  input: WorkspaceFormDefaultsInput
+): WorkspacePaletteFormState => ({
+  projectId: resolveWorkspaceProjectId(input),
+  title: "",
+})
 
 const groupEntries = (entries: CommandListEntry[]): CommandGroupEntry[] => {
   const groupedEntries = new Map<string, CommandListEntry[]>()
@@ -108,16 +150,27 @@ export const WorkbenchCommandPalette = ({
   commandProviders = [],
   searchProviders = [],
   initialView = COMMANDS_VIEW,
+  initialWorkspaceProjectId = null,
 }: WorkbenchCommandPaletteProps) => {
-  const [activeView, setActiveView] = React.useState(COMMANDS_VIEW)
+  const [activeView, setActiveView] = React.useState<CommandPaletteView>(COMMANDS_VIEW)
   const [query, setQuery] = React.useState("")
   const [projectForm, setProjectForm] = React.useState<ProjectFormState>(
     createDefaultProjectFormState()
   )
+  const [workspaceForm, setWorkspaceForm] = React.useState<WorkspacePaletteFormState>(() =>
+    createDefaultWorkspaceFormState({
+      projects,
+      selectedProject,
+      preferredProjectId: initialWorkspaceProjectId,
+    })
+  )
   const [isCreatingProject, setIsCreatingProject] = React.useState(false)
   const [isSelectingDirectory, setIsSelectingDirectory] = React.useState(false)
   const [createProjectError, setCreateProjectError] = React.useState<string | null>(null)
+  const [isCreatingWorkspace, setIsCreatingWorkspace] = React.useState(false)
+  const [createWorkspaceError, setCreateWorkspaceError] = React.useState<string | null>(null)
   const projectNameInputRef = React.useRef<HTMLInputElement | null>(null)
+  const workspaceNameInputRef = React.useRef<HTMLInputElement | null>(null)
 
   const allCommandProviders = React.useMemo(
     () => [...defaultCommandProviders, ...commandProviders],
@@ -144,6 +197,22 @@ export const WorkbenchCommandPalette = ({
     setCreateProjectError(null)
     setQuery("")
   }, [])
+
+  const openCreateWorkspace = React.useCallback(
+    (projectId?: string) => {
+      setActiveView(CREATE_WORKSPACE_VIEW)
+      setWorkspaceForm(
+        createDefaultWorkspaceFormState({
+          projects,
+          selectedProject,
+          preferredProjectId: projectId ?? null,
+        })
+      )
+      setCreateWorkspaceError(null)
+      setQuery("")
+    },
+    [projects, selectedProject]
+  )
 
   const closePalette = React.useCallback(() => {
     onOpenChange(false)
@@ -173,6 +242,7 @@ export const WorkbenchCommandPalette = ({
         closePalette()
       },
       openCreateProject,
+      openCreateWorkspace,
     }),
     [
       closePalette,
@@ -182,6 +252,7 @@ export const WorkbenchCommandPalette = ({
       onSelectWorkspace,
       onSelectChat,
       openCreateProject,
+      openCreateWorkspace,
     ]
   )
 
@@ -231,21 +302,43 @@ export const WorkbenchCommandPalette = ({
       setActiveView(COMMANDS_VIEW)
       setQuery("")
       setProjectForm(createDefaultProjectFormState())
+      setWorkspaceForm(
+        createDefaultWorkspaceFormState({ projects, selectedProject, preferredProjectId: null })
+      )
       setIsCreatingProject(false)
       setIsSelectingDirectory(false)
       setCreateProjectError(null)
+      setIsCreatingWorkspace(false)
+      setCreateWorkspaceError(null)
       return
     }
+
     setActiveView(initialView)
-  }, [initialView, open])
+    if (initialView === CREATE_WORKSPACE_VIEW) {
+      setWorkspaceForm(
+        createDefaultWorkspaceFormState({
+          projects,
+          selectedProject,
+          preferredProjectId: initialWorkspaceProjectId,
+        })
+      )
+      setCreateWorkspaceError(null)
+    }
+  }, [initialView, initialWorkspaceProjectId, open])
 
   React.useEffect(() => {
-    if (!open || activeView !== CREATE_PROJECT_VIEW) {
+    if (!open || activeView === COMMANDS_VIEW) {
       return
     }
+
     const timeoutId = window.setTimeout(() => {
-      projectNameInputRef.current?.focus()
+      if (activeView === CREATE_PROJECT_VIEW) {
+        projectNameInputRef.current?.focus()
+        return
+      }
+      workspaceNameInputRef.current?.focus()
     }, 30)
+
     return () => window.clearTimeout(timeoutId)
   }, [activeView, open])
 
@@ -254,6 +347,14 @@ export const WorkbenchCommandPalette = ({
       const value = event.target.value
       setProjectForm((prev) => ({ ...prev, [field]: value }))
       setCreateProjectError(null)
+    }
+  }
+
+  const onWorkspaceFormChange = (field: keyof WorkspacePaletteFormState) => {
+    return (event: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+      const value = event.target.value
+      setWorkspaceForm((prev) => ({ ...prev, [field]: value }))
+      setCreateWorkspaceError(null)
     }
   }
 
@@ -315,9 +416,54 @@ export const WorkbenchCommandPalette = ({
     }
   }
 
+  const onCreateWorkspaceFromPalette = async (
+    event: React.FormEvent<HTMLFormElement>
+  ) => {
+    event.preventDefault()
+
+    const projectId = workspaceForm.projectId.trim()
+    if (!projectId) {
+      setCreateWorkspaceError("Select a project.")
+      return
+    }
+
+    if (!projects.some((project) => project.id === projectId)) {
+      setCreateWorkspaceError("Selected project no longer exists. Choose another project.")
+      return
+    }
+
+    setIsCreatingWorkspace(true)
+    setCreateWorkspaceError(null)
+    try {
+      const payload = await createWorkspace({
+        projectId,
+        title: workspaceForm.title.trim() || undefined,
+      })
+      await onReloadProjects()
+      onSelectChat(payload.project.id, payload.conversation.id, payload.session.id)
+      onOpenChange(false)
+      setActiveView(COMMANDS_VIEW)
+      setWorkspaceForm(
+        createDefaultWorkspaceFormState({
+          projects,
+          selectedProject,
+          preferredProjectId: projectId,
+        })
+      )
+      setQuery("")
+    } catch (err) {
+      setCreateWorkspaceError(
+        err instanceof Error ? err.message : "Failed to create workspace."
+      )
+    } finally {
+      setIsCreatingWorkspace(false)
+    }
+  }
+
   const onBackToCommands = React.useCallback(() => {
     setActiveView(COMMANDS_VIEW)
     setCreateProjectError(null)
+    setCreateWorkspaceError(null)
   }, [])
 
   const visibleGroups = React.useMemo(
@@ -439,6 +585,83 @@ export const WorkbenchCommandPalette = ({
             <Button type="submit" disabled={!projectForm.name.trim() || isCreatingProject}>
               <Plus className="size-4" />
               {isCreatingProject ? "Creating project..." : "Create project"}
+            </Button>
+          </div>
+        </form>
+      </CommandDialog>
+    )
+  }
+
+  if (activeView === CREATE_WORKSPACE_VIEW) {
+    const hasProjects = projects.length > 0
+
+    return (
+      <CommandDialog open={open} onOpenChange={onOpenChange}>
+        <div className="border-b p-2">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-8 gap-1.5 px-2"
+            onClick={onBackToCommands}
+          >
+            <ArrowLeft className="size-4" />
+            Back to commands
+          </Button>
+        </div>
+        <form onSubmit={onCreateWorkspaceFromPalette} className="grid gap-3 p-4">
+          <div>
+            <h3 className="text-sm font-semibold text-foreground">Create a new workspace</h3>
+            <p className="text-xs text-muted-foreground">
+              Pick a project and create a workspace without leaving the command palette.
+            </p>
+          </div>
+          <div className="grid gap-2">
+            <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              Project
+            </label>
+            <select
+              value={workspaceForm.projectId}
+              onChange={onWorkspaceFormChange("projectId")}
+              disabled={!hasProjects}
+              className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-base ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 md:text-sm"
+            >
+              {hasProjects ? null : <option value="">No projects available</option>}
+              {projects.map((project) => (
+                <option key={project.id} value={project.id}>
+                  {project.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="grid gap-2">
+            <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              Workspace name
+            </label>
+            <Input
+              ref={workspaceNameInputRef}
+              value={workspaceForm.title}
+              onChange={onWorkspaceFormChange("title")}
+              placeholder="New workspace name (optional)"
+            />
+          </div>
+          {!hasProjects ? (
+            <div className="rounded-md border border-dashed px-3 py-2 text-xs text-muted-foreground">
+              Create a project first, then add a workspace.
+            </div>
+          ) : null}
+          {createWorkspaceError ? (
+            <div className="rounded-md border border-destructive/50 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+              {createWorkspaceError}
+            </div>
+          ) : null}
+          <div className="flex flex-wrap items-center gap-2 pt-1">
+            <Button
+              type="submit"
+              disabled={!workspaceForm.projectId || isCreatingWorkspace || !hasProjects}
+            >
+              <Plus className="size-4" />
+              {isCreatingWorkspace ? "Creating workspace..." : "Create workspace"}
             </Button>
           </div>
         </form>

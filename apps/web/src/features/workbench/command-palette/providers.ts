@@ -85,6 +85,10 @@ const includesQuery = (query: string, ...values: Array<string | undefined>) => {
 export const coreCommandProvider: CommandPaletteCommandProvider = {
   id: "core-navigation",
   getCommands: (context) => {
+    const selectedProject = context.selectedProject
+    const selectedWorkspace = context.selectedWorkspace
+    const selectedChat = context.selectedChat
+
     const commands: CommandPaletteCommand[] = [
       {
         id: "go-home",
@@ -112,6 +116,14 @@ export const coreCommandProvider: CommandPaletteCommandProvider = {
         perform: (actions) => actions.openCreateProject(),
       },
       {
+        id: "create-workspace",
+        group: "Suggestions",
+        label: "Add new workspace",
+        value: "create add workspace new",
+        icon: FolderTree,
+        perform: (actions) => actions.openCreateWorkspace(selectedProject?.id),
+      },
+      {
         id: "open-settings",
         group: "Settings",
         label: "Open Settings",
@@ -129,10 +141,6 @@ export const coreCommandProvider: CommandPaletteCommandProvider = {
         perform: (actions) => actions.selectProjectsView(),
       },
     ]
-
-    const selectedProject = context.selectedProject
-    const selectedWorkspace = context.selectedWorkspace
-    const selectedChat = context.selectedChat
 
     if (selectedProject) {
       commands.push({

@@ -61,6 +61,16 @@ describe("WorkbenchCommandPalette", () => {
     expect(screen.getByPlaceholderText("e.g. Marketing site")).toBeInTheDocument()
   })
 
+  it("opens directly in create-workspace view when requested", () => {
+    const props = createBaseProps()
+
+    render(<WorkbenchCommandPalette {...props} initialView="create-workspace" />)
+
+    expect(
+      screen.getByPlaceholderText("New workspace name (optional)")
+    ).toBeInTheDocument()
+  })
+
   it("creates a project from within the command palette", async () => {
     const props = createBaseProps()
     const fetchMock = vi.fn().mockResolvedValue({
@@ -181,6 +191,46 @@ describe("WorkbenchCommandPalette", () => {
 
     await waitFor(() => {
       expect(screen.getByRole("option", { name: /Plugin search result/i })).toBeInTheDocument()
+    })
+  })
+
+  it("creates a workspace from within the command palette", async () => {
+    const props = createBaseProps()
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        project: { id: "project-1" },
+        conversation: { id: "workspace-new" },
+        session: { id: "chat-new" },
+      }),
+    })
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch)
+
+    render(<WorkbenchCommandPalette {...props} />)
+
+    fireEvent.click(screen.getByRole("option", { name: /Add new workspace/i }))
+    fireEvent.change(screen.getByPlaceholderText("New workspace name (optional)"), {
+      target: { value: "Sprint planning" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Create workspace" }))
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+      expect(props.onReloadProjects).toHaveBeenCalledTimes(1)
+      expect(props.onSelectChat).toHaveBeenCalledWith(
+        "project-1",
+        "workspace-new",
+        "chat-new"
+      )
+      expect(props.onOpenChange).toHaveBeenCalledWith(false)
+    })
+
+    const [url, init] = fetchMock.mock.calls[0] ?? []
+    expect(url).toBe("/api/conversations")
+    expect((init as RequestInit).method).toBe("POST")
+    expect(JSON.parse(String((init as RequestInit).body))).toMatchObject({
+      projectId: "project-1",
+      title: "Sprint planning",
     })
   })
 })

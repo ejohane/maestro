@@ -19,6 +19,7 @@ export type CommandPaletteActions = {
   selectWorkspace: (projectId: string, workspaceId: string) => void
   selectChat: (projectId: string, workspaceId: string, chatId: string) => void
   openCreateProject: () => void
+  openCreateWorkspace: (projectId?: string) => void
 }
 
 export type CommandPaletteCommand = {

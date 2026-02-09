@@ -1,12 +1,12 @@
 import * as React from "react"
 
 import { createProject, selectDirectory } from "../api/projects"
+import { createWorkspace } from "../api/workspaces"
 import { createDefaultProjectFormState } from "../project-form"
 import { useWorkbench } from "../workbench-context"
 import type {
   ApiSession,
   ChatSession,
-  CreateConversationResponse,
   ProjectFormState,
   SessionFormState,
   SettingsFormState,
@@ -223,27 +223,10 @@ export const useProjectsController = (settings: SettingsContext): ProjectsContro
     setIsCreatingWorkspace(true)
     setCreateWorkspaceError(null)
     try {
-      const response = await fetch("/api/conversations", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          projectId: selectedProject.id,
-          title: title || undefined,
-        }),
+      const payload = await createWorkspace({
+        projectId: selectedProject.id,
+        title: title || undefined,
       })
-      if (!response.ok) {
-        let message = "Failed to create workspace."
-        try {
-          const payload = (await response.json()) as { error?: string }
-          if (payload.error) {
-            message = payload.error
-          }
-        } catch {
-          // Ignore parsing errors
-        }
-        throw new Error(message)
-      }
-      const payload = (await response.json()) as CreateConversationResponse
       setWorkspaceForm({ title: "" })
       actions.selectChat(payload.project.id, payload.conversation.id, payload.session.id)
       await actions.reloadProjects()

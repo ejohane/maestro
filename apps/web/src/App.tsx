@@ -54,8 +54,10 @@ const WorkbenchShell = () => {
   } = meta
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = React.useState(false)
   const [commandPaletteInitialView, setCommandPaletteInitialView] = React.useState<
-    "commands" | "create-project"
+    "commands" | "create-project" | "create-workspace"
   >("commands")
+  const [commandPaletteInitialWorkspaceProjectId, setCommandPaletteInitialWorkspaceProjectId] =
+    React.useState<string | null>(null)
   const [commandPaletteShortcutLabel, setCommandPaletteShortcutLabel] =
     React.useState("⌘K")
   const chat = useChatController()
@@ -153,8 +155,12 @@ const WorkbenchShell = () => {
   }, [])
 
   const openCommandPalette = React.useCallback(
-    (view: "commands" | "create-project" = "commands") => {
+    (
+      view: "commands" | "create-project" | "create-workspace" = "commands",
+      workspaceProjectId: string | null = null
+    ) => {
       setCommandPaletteInitialView(view)
+      setCommandPaletteInitialWorkspaceProjectId(workspaceProjectId)
       setIsCommandPaletteOpen(true)
     },
     []
@@ -176,6 +182,7 @@ const WorkbenchShell = () => {
 
       event.preventDefault()
       setCommandPaletteInitialView("commands")
+      setCommandPaletteInitialWorkspaceProjectId(null)
       setIsCommandPaletteOpen((isOpen) => !isOpen)
     }
 
@@ -242,31 +249,15 @@ const WorkbenchShell = () => {
     />
   )
 
-  const focusInput = React.useCallback((selector: string) => {
-    if (typeof window === "undefined" || typeof document === "undefined") {
-      return
-    }
-
-    const focusTarget = () => {
-      const input = document.querySelector<HTMLInputElement>(selector)
-      input?.focus()
-      input?.select()
-    }
-
-    window.setTimeout(focusTarget, 0)
-    window.setTimeout(focusTarget, 120)
-  }, [])
-
   const onSidebarCreateProject = React.useCallback(() => {
     openCommandPalette("create-project")
   }, [openCommandPalette])
 
   const onSidebarCreateWorkspace = React.useCallback(
     (projectId: string) => {
-      actions.selectProject(projectId)
-      focusInput('input[placeholder="New workspace name"]')
+      openCommandPalette("create-workspace", projectId)
     },
-    [actions.selectProject, focusInput]
+    [openCommandPalette]
   )
 
   const onSelectWorkspaceChat = React.useCallback(
@@ -447,6 +438,7 @@ const WorkbenchShell = () => {
         open={isCommandPaletteOpen}
         onOpenChange={setIsCommandPaletteOpen}
         initialView={commandPaletteInitialView}
+        initialWorkspaceProjectId={commandPaletteInitialWorkspaceProjectId}
         projects={projects}
         selectedProject={selectedProject}
         selectedWorkspace={selectedWorkspace}
