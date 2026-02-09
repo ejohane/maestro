@@ -439,7 +439,6 @@ const WorkbenchShell = () => {
         selectedProject={selectedProject}
         selectedWorkspace={selectedWorkspace}
         selectedChat={selectedChat}
-        shortcutLabel={commandPaletteShortcutLabel}
         onSelectProjectsView={actions.selectProjectsView}
         onSelectSettingsView={actions.selectSettingsView}
         onSelectProject={actions.selectProject}

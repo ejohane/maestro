@@ -4,8 +4,9 @@ import {
   FolderTree,
   Home,
   MessageSquareText,
+  Search,
   Settings2,
-  Sparkles,
+  Wrench,
 } from "lucide-react"
 
 import {
@@ -15,6 +16,7 @@ import {
   CommandInput,
   CommandItem,
   CommandList,
+  CommandSeparator,
   CommandShortcut,
 } from "../../../components/ui/command"
 import type { ChatSession, Project, Workspace } from "../types"
@@ -34,7 +36,6 @@ type WorkbenchCommandPaletteProps = {
   selectedProject: Project | null
   selectedWorkspace: Workspace | null
   selectedChat: ChatSession | null
-  shortcutLabel: string
   onSelectProjectsView: () => void
   onSelectSettingsView: () => void
   onSelectProject: (projectId: string) => void
@@ -60,7 +61,6 @@ export const WorkbenchCommandPalette = ({
   selectedProject,
   selectedWorkspace,
   selectedChat,
-  shortcutLabel,
   onSelectProjectsView,
   onSelectSettingsView,
   onSelectProject,
@@ -99,40 +99,32 @@ export const WorkbenchCommandPalette = ({
 
   return (
     <CommandDialog open={open} onOpenChange={onOpenChange}>
-      <div className="border-b bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
-        Jump anywhere in the workbench.
-      </div>
-      <CommandInput
-        placeholder="Search commands, projects, workspaces, or sessions..."
-        className="text-sm"
-      />
-      <CommandList className="max-h-[420px]">
-        <CommandEmpty>No matching commands.</CommandEmpty>
-        <CommandGroup heading="Quick Actions">
+      <CommandInput placeholder="Type a command or search..." />
+      <CommandList>
+        <CommandEmpty>No results found.</CommandEmpty>
+        <CommandGroup heading="Suggestions">
           <CommandItem
             value="home projects overview"
             onSelect={() => runCommand(onSelectProjectsView)}
           >
-            <Home className="size-4 text-muted-foreground" />
+            <Home />
             <span>Go to Home</span>
-            <CommandShortcut>↵</CommandShortcut>
+            <CommandShortcut>⌘1</CommandShortcut>
           </CommandItem>
           <CommandItem
-            value="settings preferences"
-            onSelect={() => runCommand(onSelectSettingsView)}
+            value="search projects workspaces sessions"
+            onSelect={() => runCommand(onSelectProjectsView)}
           >
-            <Settings2 className="size-4 text-muted-foreground" />
-            <span>Open Settings</span>
-            <CommandShortcut>↵</CommandShortcut>
+            <Search />
+            <span>Search projects and workspaces</span>
           </CommandItem>
           {selectedProject ? (
             <CommandItem
               value={`open project ${selectedProject.name}`}
               onSelect={() => runCommand(() => onSelectProject(selectedProject.id))}
             >
-              <FolderKanban className="size-4 text-muted-foreground" />
+              <FolderKanban />
               <span className="truncate">Open project: {selectedProject.name}</span>
-              <CommandShortcut>↵</CommandShortcut>
             </CommandItem>
           ) : null}
           {selectedProject && selectedWorkspace ? (
@@ -144,9 +136,8 @@ export const WorkbenchCommandPalette = ({
                 )
               }
             >
-              <FolderTree className="size-4 text-muted-foreground" />
+              <FolderTree />
               <span className="truncate">Open workspace: {selectedWorkspace.name}</span>
-              <CommandShortcut>↵</CommandShortcut>
             </CommandItem>
           ) : null}
           {selectedProject && selectedWorkspace && selectedChat ? (
@@ -158,21 +149,40 @@ export const WorkbenchCommandPalette = ({
                 )
               }
             >
-              <MessageSquareText className="size-4 text-muted-foreground" />
+              <MessageSquareText />
               <span className="truncate">Resume chat: {selectedChat.name}</span>
-              <CommandShortcut>↵</CommandShortcut>
             </CommandItem>
           ) : null}
         </CommandGroup>
+        <CommandSeparator />
+        <CommandGroup heading="Settings">
+          <CommandItem
+            value="settings preferences"
+            onSelect={() => runCommand(onSelectSettingsView)}
+          >
+            <Settings2 />
+            <span>Open Settings</span>
+            <CommandShortcut>⌘,</CommandShortcut>
+          </CommandItem>
+          <CommandItem
+            value="workspace tools sessions"
+            onSelect={() => runCommand(onSelectProjectsView)}
+          >
+            <Wrench />
+            <span>Workspace tools</span>
+          </CommandItem>
+        </CommandGroup>
         {projects.length ? (
-          <CommandGroup heading="Projects">
+          <>
+            <CommandSeparator />
+            <CommandGroup heading="Projects">
             {projects.slice(0, MAX_ITEMS_PER_GROUP).map((project) => (
               <CommandItem
                 key={project.id}
                 value={`project ${project.name} ${project.repoPath}`}
                 onSelect={() => runCommand(() => onSelectProject(project.id))}
               >
-                <FolderKanban className="size-4 text-muted-foreground" />
+                <FolderKanban />
                 <div className="min-w-0 flex-1">
                   <div className="truncate">{project.name}</div>
                   <div className="truncate text-xs text-muted-foreground">
@@ -181,10 +191,13 @@ export const WorkbenchCommandPalette = ({
                 </div>
               </CommandItem>
             ))}
-          </CommandGroup>
+            </CommandGroup>
+          </>
         ) : null}
         {workspaceEntries.length ? (
-          <CommandGroup heading="Workspaces">
+          <>
+            <CommandSeparator />
+            <CommandGroup heading="Workspaces">
             {workspaceEntries.map((workspace) => (
               <CommandItem
                 key={workspace.workspaceId}
@@ -195,7 +208,7 @@ export const WorkbenchCommandPalette = ({
                   )
                 }
               >
-                <FolderTree className="size-4 text-muted-foreground" />
+                <FolderTree />
                 <div className="min-w-0 flex-1">
                   <div className="truncate">{workspace.workspaceName}</div>
                   <div className="truncate text-xs text-muted-foreground">
@@ -204,10 +217,13 @@ export const WorkbenchCommandPalette = ({
                 </div>
               </CommandItem>
             ))}
-          </CommandGroup>
+            </CommandGroup>
+          </>
         ) : null}
         {selectedProject && selectedWorkspace && activeWorkspaceChats.length ? (
-          <CommandGroup heading="Sessions">
+          <>
+            <CommandSeparator />
+            <CommandGroup heading="Sessions">
             {activeWorkspaceChats.map((chat) => (
               <CommandItem
                 key={chat.id}
@@ -218,7 +234,7 @@ export const WorkbenchCommandPalette = ({
                   )
                 }
               >
-                <Sparkles className="size-4 text-muted-foreground" />
+                <MessageSquareText />
                 <div className="min-w-0 flex-1">
                   <div className="truncate">{chat.name}</div>
                   <div className="truncate text-xs text-muted-foreground">
@@ -227,13 +243,10 @@ export const WorkbenchCommandPalette = ({
                 </div>
               </CommandItem>
             ))}
-          </CommandGroup>
+            </CommandGroup>
+          </>
         ) : null}
       </CommandList>
-      <div className="flex items-center justify-between border-t bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
-        <span>Use arrows to navigate and Enter to run.</span>
-        <span>{shortcutLabel} to toggle</span>
-      </div>
     </CommandDialog>
   )
 }
