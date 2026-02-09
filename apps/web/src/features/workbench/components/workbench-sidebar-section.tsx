@@ -7,12 +7,13 @@ type WorkbenchSidebarSectionProps = {
   isSettingsView: boolean
   selectedProjectId: string | null
   selectedWorkspaceId: string | null
-  selectedChatId: string | null
   onSelectProjects: () => void
   onSelectSettings: () => void
   onSelectProject: (projectId: string) => void
   onSelectWorkspace: (projectId: string, workspaceId: string) => void
-  onSelectChat: (projectId: string, workspaceId: string, chatId: string) => void
+  onCreateProject: () => void
+  onCreateWorkspace: (projectId: string) => void
+  activeWorkspaceIds: string[]
 }
 
 export const WorkbenchSidebarSection = ({
@@ -21,12 +22,13 @@ export const WorkbenchSidebarSection = ({
   isSettingsView,
   selectedProjectId,
   selectedWorkspaceId,
-  selectedChatId,
   onSelectProjects,
   onSelectSettings,
   onSelectProject,
   onSelectWorkspace,
-  onSelectChat,
+  onCreateProject,
+  onCreateWorkspace,
+  activeWorkspaceIds,
 }: WorkbenchSidebarSectionProps) => {
   return (
     <AppSidebar
@@ -35,12 +37,13 @@ export const WorkbenchSidebarSection = ({
       isSettingsView={isSettingsView}
       selectedProjectId={selectedProjectId}
       selectedWorkspaceId={selectedWorkspaceId}
-      selectedChatId={selectedChatId}
       onSelectProjects={onSelectProjects}
       onSelectSettings={onSelectSettings}
       onSelectProject={onSelectProject}
       onSelectWorkspace={onSelectWorkspace}
-      onSelectChat={onSelectChat}
+      onCreateProject={onCreateProject}
+      onCreateWorkspace={onCreateWorkspace}
+      activeWorkspaceIds={activeWorkspaceIds}
     />
   )
 }

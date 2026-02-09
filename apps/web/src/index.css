@@ -83,6 +83,13 @@
   .chat-session-content {
     gap: 1.45rem;
     padding: 1.65rem 2rem 0.85rem;
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  .chat-session-content::-webkit-scrollbar {
+    width: 0;
+    height: 0;
   }
 
   .chat-session-content-pinned {
@@ -99,6 +106,9 @@
 
   .chat-session-message {
     gap: 0;
+    margin-inline: auto;
+    width: 100%;
+    max-width: min(100%, 64rem);
   }
 
   .chat-session-message.is-assistant .chat-session-message-content {
@@ -222,7 +232,7 @@
     border-radius: 2.35rem;
     background: hsl(var(--background));
     box-shadow: none;
-    padding: 0.62rem 0.95rem 0.78rem;
+    padding: 0.62rem 0 0.78rem;
   }
 
   .chat-session-composer-pinned {

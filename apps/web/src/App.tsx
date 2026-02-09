@@ -40,8 +40,7 @@ const WorkbenchShell = () => {
   })
   const pullRequestsController = usePullRequestsController()
 
-  const { projects, isLoading, error, selectedProjectId, selectedWorkspaceId, selectedChatId } =
-    state
+  const { projects, isLoading, error, selectedProjectId, selectedWorkspaceId } = state
   const {
     selectedProject,
     selectedWorkspace,
@@ -52,10 +51,7 @@ const WorkbenchShell = () => {
     isWorkspaceView,
     isChatView,
   } = meta
-  const [workspaceActiveChatId, setWorkspaceActiveChatId] = React.useState<string | null>(
-    null
-  )
-  const chat = useChatController({ workspaceSessionId: workspaceActiveChatId })
+  const chat = useChatController()
   const {
     projectForm,
     isCreatingProject,
@@ -139,41 +135,7 @@ const WorkbenchShell = () => {
   const hasRepoProjects = React.useMemo(() => hasProjectsWithRepos(projects), [projects])
   const projectIconValue = selectedProject?.icon?.trim() ?? ""
   const nextThemeLabel = theme === "dark" ? "Light" : "Dark"
-  const activeWorkspaceChatId = selectedChat?.id ?? workspaceActiveChatId
 
-  React.useEffect(() => {
-    if (!isWorkspaceView) {
-      setWorkspaceActiveChatId(null)
-      return
-    }
-
-    const workspaceChats = selectedWorkspace?.chats ?? []
-    if (!workspaceChats.length) {
-      setWorkspaceActiveChatId(null)
-      return
-    }
-
-    setWorkspaceActiveChatId((current) => {
-      if (current && workspaceChats.some((chatEntry) => chatEntry.id === current)) {
-        return current
-      }
-      return workspaceChats[0].id
-    })
-  }, [isWorkspaceView, selectedWorkspace?.id, selectedWorkspace?.chats])
-
-  const onSelectWorkspaceChat = React.useCallback(
-    (chatId: string) => {
-      if (!selectedProject || !selectedWorkspace) {
-        return
-      }
-      if (isChatView) {
-        actions.selectChat(selectedProject.id, selectedWorkspace.id, chatId)
-        return
-      }
-      setWorkspaceActiveChatId(chatId)
-    },
-    [actions, isChatView, selectedProject, selectedWorkspace]
-  )
   const {
     viewLabel,
     viewTitle,
@@ -229,6 +191,43 @@ const WorkbenchShell = () => {
     />
   )
 
+  const focusInput = React.useCallback((selector: string) => {
+    if (typeof window === "undefined" || typeof document === "undefined") {
+      return
+    }
+
+    const focusTarget = () => {
+      const input = document.querySelector<HTMLInputElement>(selector)
+      input?.focus()
+      input?.select()
+    }
+
+    window.setTimeout(focusTarget, 0)
+    window.setTimeout(focusTarget, 120)
+  }, [])
+
+  const onSidebarCreateProject = React.useCallback(() => {
+    actions.selectProjectsView()
+    focusInput('input[placeholder="e.g. Marketing site"]')
+  }, [actions.selectProjectsView, focusInput])
+
+  const onSidebarCreateWorkspace = React.useCallback(
+    (projectId: string) => {
+      actions.selectProject(projectId)
+      focusInput('input[placeholder="New workspace name"]')
+    },
+    [actions.selectProject, focusInput]
+  )
+
+  const activeWorkspaceIds = React.useMemo(() => {
+    if (!selectedWorkspaceId) {
+      return [] as string[]
+    }
+    if (chat.isAwaitingFirstToken || chat.isChatStreaming) {
+      return [selectedWorkspaceId]
+    }
+    return [] as string[]
+  }, [chat.isAwaitingFirstToken, chat.isChatStreaming, selectedWorkspaceId])
   return (
     <WorkbenchLayout
       sidebar={
@@ -238,12 +237,13 @@ const WorkbenchShell = () => {
           isSettingsView={isSettingsView}
           selectedProjectId={selectedProjectId}
           selectedWorkspaceId={selectedWorkspaceId}
-          selectedChatId={selectedChatId}
           onSelectProjects={actions.selectProjectsView}
           onSelectSettings={actions.selectSettingsView}
           onSelectProject={actions.selectProject}
           onSelectWorkspace={actions.selectWorkspace}
-          onSelectChat={actions.selectChat}
+          onCreateProject={onSidebarCreateProject}
+          onCreateWorkspace={onSidebarCreateWorkspace}
+          activeWorkspaceIds={activeWorkspaceIds}
         />
       }
       header={
@@ -253,7 +253,7 @@ const WorkbenchShell = () => {
           selectedProject={selectedProject}
           selectedWorkspace={selectedWorkspace}
           selectedChat={selectedChat}
-          workspaceActiveChatId={activeWorkspaceChatId}
+          workspaceActiveChatId={selectedChat?.id ?? null}
           isCreatingSession={isCreatingSession}
           deletingSessionId={deletingSessionId}
           deletingWorkspace={deletingWorkspace}
@@ -261,7 +261,12 @@ const WorkbenchShell = () => {
           onSelectProject={actions.selectProject}
           onSelectWorkspace={actions.selectWorkspace}
           onCreateSession={(event) => void onCreateSession(event)}
-          onSelectWorkspaceChat={onSelectWorkspaceChat}
+          onSelectWorkspaceChat={(chatId) => {
+            if (!selectedProject || !selectedWorkspace) {
+              return
+            }
+            actions.selectChat(selectedProject.id, selectedWorkspace.id, chatId)
+          }}
           onDeleteSession={(sessionId) => void onDeleteSession(sessionId)}
           onDeleteWorkspace={(workspaceId, workspaceName) =>
             void onConfirmDeleteWorkspace(workspaceId, workspaceName)
@@ -280,7 +285,7 @@ const WorkbenchShell = () => {
           />
         }
       >
-        {!isChatView && !isWorkspaceView ? (
+        {!isChatView ? (
           <WorkbenchOverview
             isProjectView={isProjectView}
             isWorkspaceView={isWorkspaceView}
@@ -364,12 +369,15 @@ const WorkbenchShell = () => {
           }
           workspace={
             <WorkspaceSessionsSection
+              selectedProject={selectedProject}
               selectedWorkspace={selectedWorkspace}
-              selectedWorkspaceChatId={activeWorkspaceChatId}
               createSessionError={createSessionError}
+              isCreatingSession={isCreatingSession}
+              deletingSessionId={deletingSessionId}
               deleteSessionError={deleteSessionError}
-              deleteWorkspaceErrors={deleteWorkspaceErrors}
-              chat={chatView}
+              onCreateSession={(event) => void onCreateSession(event)}
+              onDeleteSession={(sessionId) => void onDeleteSession(sessionId)}
+              onSelectChat={actions.selectChat}
             />
           }
           chat={chatView}

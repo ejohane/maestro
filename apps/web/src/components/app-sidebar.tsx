@@ -1,13 +1,10 @@
 import * as React from "react"
-import { LifeBuoy, Send, Settings, Workflow } from "lucide-react"
+import { Settings, Workflow } from "lucide-react"
 
 import { NavProjects } from "./nav-projects"
-import { NavSecondary } from "./nav-secondary"
-import { NavUser } from "./nav-user"
 import {
   Sidebar,
   SidebarContent,
-  SidebarFooter,
   SidebarHeader,
   SidebarGroup,
   SidebarGroupContent,
@@ -19,11 +16,15 @@ import {
 type ChatSession = {
   id: string
   name: string
+  createdAt?: string
+  updatedAt?: string
 }
 
 type Workspace = {
   id: string
   name: string
+  createdAt?: string
+  updatedAt?: string
   chats: ChatSession[]
 }
 
@@ -35,38 +36,19 @@ type Project = {
   workspaces: Workspace[]
 }
 
-const data = {
-  user: {
-    name: "shadcn",
-    email: "m@example.com",
-    avatar: "/avatars/shadcn.jpg",
-  },
-  navSecondary: [
-    {
-      title: "Support",
-      url: "#",
-      icon: LifeBuoy,
-    },
-    {
-      title: "Feedback",
-      url: "#",
-      icon: Send,
-    },
-  ],
-}
-
 export function AppSidebar({
   projects,
   isProjectsView,
   isSettingsView,
   selectedProjectId,
   selectedWorkspaceId,
-  selectedChatId,
   onSelectProjects,
   onSelectSettings,
   onSelectProject,
   onSelectWorkspace,
-  onSelectChat,
+  onCreateProject,
+  onCreateWorkspace,
+  activeWorkspaceIds = [],
   ...props
 }: React.ComponentProps<typeof Sidebar> & {
   projects: Project[]
@@ -74,12 +56,13 @@ export function AppSidebar({
   isSettingsView: boolean
   selectedProjectId: string | null
   selectedWorkspaceId: string | null
-  selectedChatId: string | null
   onSelectProjects: () => void
   onSelectSettings: () => void
   onSelectProject: (projectId: string) => void
   onSelectWorkspace: (projectId: string, workspaceId: string) => void
-  onSelectChat: (projectId: string, workspaceId: string, chatId: string) => void
+  onCreateProject: () => void
+  onCreateWorkspace: (projectId: string) => void
+  activeWorkspaceIds?: string[]
 }) {
   return (
     <Sidebar variant="inset" {...props}>
@@ -112,12 +95,13 @@ export function AppSidebar({
           isProjectsView={isProjectsView}
           selectedProjectId={selectedProjectId}
           selectedWorkspaceId={selectedWorkspaceId}
-          selectedChatId={selectedChatId}
           onSelectProject={onSelectProject}
           onSelectWorkspace={onSelectWorkspace}
-          onSelectChat={onSelectChat}
+          onCreateProject={onCreateProject}
+          onCreateWorkspace={onCreateWorkspace}
+          activeWorkspaceIds={activeWorkspaceIds}
         />
-        <SidebarGroup>
+        <SidebarGroup className="mt-auto">
           <SidebarGroupContent>
             <SidebarMenu>
               <SidebarMenuItem>
@@ -135,11 +119,7 @@ export function AppSidebar({
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
-        <NavSecondary items={data.navSecondary} className="mt-auto" />
       </SidebarContent>
-      <SidebarFooter>
-        <NavUser user={data.user} />
-      </SidebarFooter>
     </Sidebar>
   )
 }
