@@ -444,6 +444,7 @@ const WorkbenchShell = () => {
         onSelectProject={actions.selectProject}
         onSelectWorkspace={actions.selectWorkspace}
         onSelectChat={actions.selectChat}
+        onReloadProjects={actions.reloadProjects}
       />
     </>
   )

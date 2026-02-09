@@ -21,3 +21,21 @@ if (!window.matchMedia) {
     }),
   })
 }
+
+if (!window.ResizeObserver) {
+  class ResizeObserver {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  }
+
+  Object.defineProperty(window, "ResizeObserver", {
+    writable: true,
+    configurable: true,
+    value: ResizeObserver,
+  })
+}
+
+if (!window.HTMLElement.prototype.scrollIntoView) {
+  window.HTMLElement.prototype.scrollIntoView = () => {}
+}
